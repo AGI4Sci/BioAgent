@@ -16,8 +16,8 @@
 - 已有 4 个 Agent profile mock：文献 Agent、结构 Agent、组学 Agent、知识库 Agent。
 - 单 Agent 工作台已有真实对话入口：`ChatPanel` 可调用 AgentServer `POST /api/agent-server/runs`，支持 loading、取消、错误提示和清空会话。
 - 对话、run、claim、UIManifest、ExecutionUnit、artifact、notebook 已建立前端运行时模型，并按 Agent 独立持久化到 `localStorage`。
-- 右侧结果区已开始读取运行时 claim、ExecutionUnit、notebook 和 UIManifest 诊断；具体科学组件的数据级动态渲染仍待补齐。
-- ExecutionUnit 当前可从 agent 响应标准化生成 record-only/run 记录，尚未对接后端真实工具执行状态和 pipeline 导出。
+- 右侧结果区已接入 UIManifest component registry，可按 agent 返回的 slot 动态渲染 paper cards、结构查看器、组学图表、网络图、证据矩阵、ExecutionUnit 和 notebook timeline，并对 artifact 缺失 / 未注册组件提供 fallback 诊断。
+- ExecutionUnit 当前可从 agent 响应标准化生成 record-only/run 记录，支持当前会话 JSON bundle 导出；尚未对接后端真实工具执行状态和 pipeline 导出。
 
 ---
 
@@ -74,7 +74,7 @@
 - [x] 定义 `EvidenceClaim`：`text`、`type`、`confidence`、`evidenceLevel`、`supportingRefs`、`opposingRefs`。
 - [x] 定义 `ExecutionUnit`：`id`、`tool`、`params`、`status`、`environment`、`dataFingerprint`、`artifacts`。
 - [x] 写一个 `normalizeAgentResponse` adapter，兼容 AgentServer 当前响应和未来标准协议。
-- [ ] 给 adapter 补充基础单测或最小 fixture 验证。
+- [x] 给 adapter 补充基础单测或最小 fixture 验证。
 
 ### T003 对话驱动结果区动态更新
 
@@ -91,9 +91,9 @@
 
 #### TODO
 - [x] 将 `ResultsRenderer` 输入从 `agentId` 扩展为 `agentId + currentRunState`。
-- [ ] 将 `paperCards`、`executionUnits`、`timeline` 从纯 mock 数据迁移为可被运行时覆盖的数据源。
-- [ ] 建立 component registry：`paper-card-list`、`molecule-viewer`、`volcano-plot`、`heatmap-viewer`、`umap-viewer`、`network-graph`、`evidence-matrix`、`execution-unit-table`、`notebook-timeline`。
-- [ ] 对每个组件定义最小 props schema 和 fallback empty state。
+- [x] 将 `paperCards`、`executionUnits`、`timeline` 从纯 mock 数据迁移为可被运行时覆盖的数据源。
+- [x] 建立 component registry：`paper-card-list`、`molecule-viewer`、`volcano-plot`、`heatmap-viewer`、`umap-viewer`、`network-graph`、`evidence-matrix`、`execution-unit-table`、`notebook-timeline`。
+- [x] 对每个组件定义最小 props schema 和 fallback empty state。
 - [x] 当 agent 返回多个 manifest slot 时，按 priority 和当前 tab 渲染。
 - [x] 对 artifactRef 找不到、组件未注册、数据格式错误提供诊断 UI。
 
@@ -180,8 +180,8 @@
 #### TODO
 - [ ] 建立 ExecutionUnit schema：代码/工具、参数、环境、随机种子、输入数据指纹、数据库版本、输出 artifact。
 - [x] 前端 ExecutionPanel 渲染真实 ExecutionUnit 列表。
-- [ ] 支持导出当前会话 ExecutionUnit JSON bundle。
-- [ ] 标记状态：planned、running、done、failed、record-only。
+- [x] 支持导出当前会话 ExecutionUnit JSON bundle。
+- [x] 标记状态：planned、running、done、failed、record-only。
 - [ ] 后续对接 AgentServer 实际执行状态。
 
 ### T010 Evidence / Claim 统一模型
@@ -205,8 +205,9 @@
 #### TODO
 - [x] 发送按钮绑定 click 和 Enter，Shift+Enter 换行或改为 textarea。
 - [x] 消息列表自动滚到底部。
-- [ ] 用户手动上滚时不强制跳动。
-- [ ] 长推理链和长来源列表可折叠。
+- [x] 用户手动上滚时不强制跳动。
+- [x] 长推理链可折叠。
+- [ ] 长来源列表可折叠。
 - [ ] Agent 切换时保留各自滚动位置和输入草稿。
 - [ ] 顶部搜索框支持跳转到 gene / paper / ExecutionUnit 或先隐藏未实现能力。
 
@@ -226,7 +227,7 @@
 
 #### TODO
 - [ ] 将 demo seed 数据移动到 `ui/src/demoData.ts`。
-- [ ] UI 明确标记 demo / real / record-only 状态。
+- [x] UI 明确标记 demo / agent artifact / record-only 状态。
 - [ ] AgentServer 连接成功后默认隐藏 demo seed，或作为“加载示例”入口。
 - [ ] README 补充 demo 模式和真实 agent 模式的启动方式。
 

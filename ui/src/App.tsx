@@ -67,7 +67,9 @@ import {
   type BioAgentSession,
   type EvidenceClaim,
   type NotebookRecord,
+  type RuntimeArtifact,
   type RuntimeExecutionUnit,
+  type UIManifestSlot,
 } from './domain';
 import { loadSessions, resetSession, saveSessions } from './sessionStore';
 import { HeatmapViewer, MoleculeViewer, NetworkGraph, UmapViewer } from './visualizations';
@@ -227,6 +229,88 @@ function ConfidenceBar({ value }: { value: number }) {
       <span style={{ color }}>{pct}%</span>
     </div>
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function toRecordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function findArtifact(session: BioAgentSession, ref?: string): RuntimeArtifact | undefined {
+  if (!ref) return undefined;
+  return session.artifacts.find((artifact) => artifact.id === ref || artifact.dataRef === ref);
+}
+
+function exportJsonFile(name: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function artifactMeta(artifact?: RuntimeArtifact) {
+  if (!artifact) return 'demo fallback';
+  return `${artifact.type} · ${artifact.schemaVersion}`;
+}
+
+function slotPayload(slot: UIManifestSlot, artifact?: RuntimeArtifact): Record<string, unknown> {
+  if (isRecord(artifact?.data)) return artifact.data;
+  return slot.props ?? {};
+}
+
+function arrayPayload(slot: UIManifestSlot, key: string, artifact?: RuntimeArtifact): Record<string, unknown>[] {
+  const payload = artifact?.data ?? slot.props?.[key] ?? slot.props;
+  if (Array.isArray(payload)) return payload.filter(isRecord);
+  if (isRecord(payload) && Array.isArray(payload[key])) return payload[key].filter(isRecord);
+  return [];
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
+}
+
+function compactParams(params: string) {
+  return params.length > 128 ? `${params.slice(0, 125)}...` : params;
+}
+
+function exportExecutionBundle(session: BioAgentSession) {
+  exportJsonFile(`execution-units-${session.agentId}-${session.sessionId}.json`, {
+    schemaVersion: 1,
+    sessionId: session.sessionId,
+    agentId: session.agentId,
+    exportedAt: nowIso(),
+    executionUnits: session.executionUnits,
+    artifacts: session.artifacts.map((artifact) => ({
+      id: artifact.id,
+      type: artifact.type,
+      producerAgent: artifact.producerAgent,
+      schemaVersion: artifact.schemaVersion,
+      metadata: artifact.metadata,
+      dataRef: artifact.dataRef,
+    })),
+    runs: session.runs.map((run) => ({
+      id: run.id,
+      agentId: run.agentId,
+      status: run.status,
+      prompt: run.prompt,
+      createdAt: run.createdAt,
+      completedAt: run.completedAt,
+    })),
+  });
 }
 
 function Sidebar({
@@ -436,17 +520,21 @@ function ChatPanel({
   const [isSending, setIsSending] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const autoScrollRef = useRef(true);
   const messages = session.messages;
   const agent = agents.find((item) => item.id === agentId) ?? agents[0];
 
   useEffect(() => {
-    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' });
+    if (autoScrollRef.current) {
+      messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages.length, isSending]);
 
   useEffect(() => {
     setInput('');
     setErrorText('');
     setExpanded(0);
+    autoScrollRef.current = true;
   }, [agentId]);
 
   async function handleSend() {
@@ -535,13 +623,13 @@ function ChatPanel({
   }
 
   function handleExport() {
-    const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${agentId}-${session.sessionId}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    exportJsonFile(`${agentId}-${session.sessionId}.json`, session);
+  }
+
+  function handleMessagesScroll() {
+    const element = messagesRef.current;
+    if (!element) return;
+    autoScrollRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
   }
 
   return (
@@ -562,7 +650,7 @@ function ChatPanel({
         </div>
       </div>
 
-      <div className="messages" ref={messagesRef}>
+      <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.map((message, index) => (
           <div key={`${message.role}-${index}`} className={cx('message', message.role)}>
             <div className="message-body">
@@ -672,7 +760,7 @@ function ResultsRenderer({ agentId, session }: { agentId: AgentId; session: BioA
         ) : resultTab === 'evidence' ? (
           <EvidenceMatrix claims={session.claims} />
         ) : resultTab === 'execution' ? (
-          <ExecutionPanel executionUnits={session.executionUnits} />
+          <ExecutionPanel session={session} executionUnits={session.executionUnits} />
         ) : (
           <NotebookTimeline agentId={agent.id} notebook={session.notebook} />
         )}
@@ -681,69 +769,185 @@ function ResultsRenderer({ agentId, session }: { agentId: AgentId; session: BioA
   );
 }
 
+type RegistryRendererProps = {
+  agentId: AgentId;
+  session: BioAgentSession;
+  slot: UIManifestSlot;
+  artifact?: RuntimeArtifact;
+};
+
+type RegistryEntry = {
+  label: string;
+  render: (props: RegistryRendererProps) => ReactNode;
+};
+
+function defaultSlotsForAgent(agentId: AgentId): UIManifestSlot[] {
+  const fallback = {
+    literature: [
+      { componentId: 'paper-card-list', title: '文献卡片', priority: 1 },
+      { componentId: 'evidence-matrix', title: '证据矩阵', priority: 2 },
+      { componentId: 'network-graph', title: '证据网络', priority: 3 },
+    ],
+    structure: [
+      { componentId: 'molecule-viewer', title: '分子结构查看器', props: { pdbId: '7BZ5', ligand: '6SI', highlightResidues: ['Y96D'] }, priority: 1 },
+      { componentId: 'evidence-matrix', title: '结构证据', priority: 2 },
+      { componentId: 'execution-unit-table', title: '结构执行单元', priority: 3 },
+    ],
+    omics: [
+      { componentId: 'volcano-plot', title: '火山图', priority: 1 },
+      { componentId: 'heatmap-viewer', title: '热图', priority: 2 },
+      { componentId: 'umap-viewer', title: 'UMAP', priority: 3 },
+    ],
+    knowledge: [
+      { componentId: 'network-graph', title: '知识网络', priority: 1 },
+      { componentId: 'data-table', title: '知识卡片', priority: 2 },
+      { componentId: 'evidence-matrix', title: '证据矩阵', priority: 3 },
+    ],
+  } satisfies Record<AgentId, UIManifestSlot[]>;
+  return fallback[agentId];
+}
+
+function PaperCardList({ slot, artifact }: RegistryRendererProps) {
+  const records = arrayPayload(slot, 'papers', artifact);
+  const papers = records.length
+    ? records.map((record, index) => ({
+      title: asString(record.title) || asString(record.name) || `Agent paper ${index + 1}`,
+      source: asString(record.source) || asString(record.journal) || asString(record.venue) || 'agent artifact',
+      year: asString(record.year) || String(asNumber(record.year) ?? 'unknown'),
+      url: asString(record.url),
+      level: (['meta', 'rct', 'cohort', 'case', 'prediction'].includes(record.evidenceLevel as EvidenceLevel) ? record.evidenceLevel : 'prediction') as EvidenceLevel,
+    }))
+    : paperCards.map((paper) => ({ ...paper, url: undefined }));
+  return (
+    <div className="paper-list">
+      {papers.map((paper) => (
+        <Card key={`${paper.title}-${paper.source}`} className="paper-card">
+          <div>
+            <h3>{paper.url ? <a href={paper.url} target="_blank" rel="noreferrer">{paper.title}</a> : paper.title}</h3>
+            <p>{paper.source} · {paper.year}</p>
+          </div>
+          <EvidenceTag level={paper.level} />
+          <Badge variant={artifact ? 'success' : 'muted'}>{artifact ? 'agent' : 'demo'}</Badge>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function MoleculeSlot({ slot, artifact }: RegistryRendererProps) {
+  const payload = slotPayload(slot, artifact);
+  const pdbId = asString(payload.pdbId) || asString(payload.pdb) || '7BZ5';
+  const ligand = asString(payload.ligand) || '6SI';
+  const residues = asStringList(payload.highlightResidues ?? payload.residues);
+  return (
+    <div className="stack">
+      <div className="slot-meta">
+        <Badge variant={artifact ? 'success' : 'muted'}>{artifactMeta(artifact)}</Badge>
+        <code>PDB={pdbId}</code>
+        <code>ligand={ligand}</code>
+        {residues.length ? <code>residues={residues.join(',')}</code> : null}
+      </div>
+      <Card className="viz-card">
+        <MoleculeViewer />
+      </Card>
+      <MetricGrid />
+    </div>
+  );
+}
+
+function CanvasSlot({ slot, artifact, kind }: RegistryRendererProps & { kind: 'volcano' | 'heatmap' | 'umap' | 'network' }) {
+  const payload = slotPayload(slot, artifact);
+  const nodes = toRecordList(payload.nodes).length;
+  const edges = toRecordList(payload.edges).length;
+  const points = toRecordList(payload.points).length;
+  return (
+    <div className="stack">
+      <div className="slot-meta">
+        <Badge variant={artifact ? 'success' : 'muted'}>{artifactMeta(artifact)}</Badge>
+        {nodes ? <code>{nodes} nodes</code> : null}
+        {edges ? <code>{edges} edges</code> : null}
+        {points ? <code>{points} points</code> : null}
+      </div>
+      <Card className="viz-card">
+        {kind === 'volcano' ? <VolcanoChart /> : kind === 'heatmap' ? <HeatmapViewer /> : kind === 'umap' ? <UmapViewer /> : <NetworkGraph />}
+      </Card>
+    </div>
+  );
+}
+
+function DataTableSlot({ slot, artifact }: RegistryRendererProps) {
+  const records = arrayPayload(slot, 'rows', artifact);
+  const rows = records.length
+    ? records
+    : [
+      { key: 'target', value: 'KRAS', source: 'UniProt / ChEMBL' },
+      { key: 'approved_drugs', value: 'sotorasib, adagrasib', source: 'agent fallback' },
+      { key: 'clinical_status', value: 'approved + active trials', source: 'OpenTargets' },
+    ];
+  const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row)))).slice(0, 5);
+  return (
+    <div className="artifact-table">
+      <div className="artifact-table-head" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}>
+        {columns.map((column) => <span key={column}>{column}</span>)}
+      </div>
+      {rows.map((row, index) => (
+        <div className="artifact-table-row" key={index} style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}>
+          {columns.map((column) => <span key={column}>{String(row[column] ?? '-')}</span>)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const componentRegistry: Record<string, RegistryEntry> = {
+  'paper-card-list': { label: 'PaperCardList', render: (props) => <PaperCardList {...props} /> },
+  'molecule-viewer': { label: 'MoleculeViewer', render: (props) => <MoleculeSlot {...props} /> },
+  'volcano-plot': { label: 'VolcanoPlot', render: (props) => <CanvasSlot {...props} kind="volcano" /> },
+  'heatmap-viewer': { label: 'HeatmapViewer', render: (props) => <CanvasSlot {...props} kind="heatmap" /> },
+  'umap-viewer': { label: 'UmapViewer', render: (props) => <CanvasSlot {...props} kind="umap" /> },
+  'network-graph': { label: 'NetworkGraph', render: (props) => <CanvasSlot {...props} kind="network" /> },
+  'evidence-matrix': { label: 'EvidenceMatrix', render: ({ session }) => <EvidenceMatrix claims={session.claims} /> },
+  'execution-unit-table': { label: 'ExecutionUnitTable', render: ({ session }) => <ExecutionPanel session={session} executionUnits={session.executionUnits} embedded /> },
+  'notebook-timeline': { label: 'NotebookTimeline', render: ({ agentId, session }) => <NotebookTimeline agentId={agentId} notebook={session.notebook} /> },
+  'data-table': { label: 'DataTable', render: (props) => <DataTableSlot {...props} /> },
+};
+
 function PrimaryResult({ agentId, session }: { agentId: AgentId; session: BioAgentSession }) {
-  const latestManifest = session.uiManifest
+  const slots = (session.uiManifest.length ? session.uiManifest : defaultSlotsForAgent(agentId))
     .slice()
     .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
     .slice(0, 4);
-  if (agentId === 'structure') {
-    return (
-      <div className="stack">
-        <SectionHeader icon={Shield} title="分子结构查看器" subtitle="PDB:7BZ5 · Switch-II pocket highlighted" action={<ActionButton icon={Play}>模拟旋转</ActionButton>} />
-        {latestManifest.length ? <ManifestDiagnostics slots={latestManifest} /> : null}
-        <Card className="viz-card">
-          <MoleculeViewer />
-        </Card>
-        <MetricGrid />
+  return (
+    <div className="stack">
+      <SectionHeader icon={FileText} title="动态结果区" subtitle="UIManifest -> component registry -> artifact/runtime data" />
+      <ManifestDiagnostics slots={slots} />
+      <div className="registry-grid">
+        {slots.map((slot) => (
+          <RegistrySlot key={`${slot.componentId}-${slot.artifactRef ?? slot.title ?? slot.priority ?? ''}`} agentId={agentId} session={session} slot={slot} />
+        ))}
       </div>
-    );
-  }
-  if (agentId === 'omics') {
+    </div>
+  );
+}
+
+function RegistrySlot({ agentId, session, slot }: { agentId: AgentId; session: BioAgentSession; slot: UIManifestSlot }) {
+  const artifact = findArtifact(session, slot.artifactRef);
+  const entry = componentRegistry[slot.componentId];
+  if (!entry) {
     return (
-      <div className="stack">
-        <SectionHeader icon={Target} title="组学差异分析" subtitle="Volcano / Heatmap / UMAP 组件均来自 registry" />
-        {latestManifest.length ? <ManifestDiagnostics slots={latestManifest} /> : null}
-        <div className="split-grid">
-          <Card className="viz-card">
-            <VolcanoChart />
-          </Card>
-          <Card className="viz-card">
-            <HeatmapViewer />
-          </Card>
-        </div>
-      </div>
-    );
-  }
-  if (agentId === 'knowledge') {
-    return (
-      <div className="stack">
-        <SectionHeader icon={Target} title="靶点关联网络" subtitle="KRAS druggability knowledge graph" />
-        {latestManifest.length ? <ManifestDiagnostics slots={latestManifest} /> : null}
-        <Card className="viz-card">
-          <NetworkGraph />
-        </Card>
-      </div>
+      <Card className="registry-slot">
+        <SectionHeader icon={AlertTriangle} title={slot.title ?? '未注册组件'} subtitle={slot.componentId} />
+        <p className="empty-state">Agent 返回了未知 componentId。已保留原始 manifest，等待注册对应渲染器。</p>
+        {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到：{slot.artifactRef}</p> : null}
+      </Card>
     );
   }
   return (
-    <div className="stack">
-      <SectionHeader icon={FileText} title="文献卡片" subtitle="证据等级和 claim type 直接进入 UI" />
-      {latestManifest.length ? <ManifestDiagnostics slots={latestManifest} /> : null}
-      <div className="paper-list">
-        {paperCards.map((paper) => (
-          <Card key={paper.title} className="paper-card">
-            <div>
-              <h3>{paper.title}</h3>
-              <p>{paper.source} · {paper.year}</p>
-            </div>
-            <EvidenceTag level={paper.level} />
-          </Card>
-        ))}
-      </div>
-      <Card className="viz-card">
-        <NetworkGraph />
-      </Card>
-    </div>
+    <Card className="registry-slot">
+      <SectionHeader icon={Target} title={slot.title ?? entry.label} subtitle={`${slot.componentId}${slot.artifactRef ? ` -> ${slot.artifactRef}` : ''}`} />
+      {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到，已使用组件 fallback。</p> : null}
+      {entry.render({ agentId, session, slot, artifact })}
+    </Card>
   );
 }
 
@@ -808,11 +1012,24 @@ function EvidenceMatrix({ claims }: { claims: EvidenceClaim[] }) {
   );
 }
 
-function ExecutionPanel({ executionUnits }: { executionUnits: RuntimeExecutionUnit[] }) {
+function ExecutionPanel({
+  session,
+  executionUnits,
+  embedded = false,
+}: {
+  session: BioAgentSession;
+  executionUnits: RuntimeExecutionUnit[];
+  embedded?: boolean;
+}) {
   const rows = executionUnits.length ? executionUnits : executionUnitsFallback;
   return (
     <div className="stack">
-      <SectionHeader icon={Lock} title="可复现执行单元" subtitle="代码 + 参数 + 环境 + 数据指纹" action={<ActionButton icon={Download} variant="secondary">导出 JSON Bundle</ActionButton>} />
+      <SectionHeader
+        icon={Lock}
+        title="可复现执行单元"
+        subtitle={embedded ? '当前组件来自 UIManifest registry' : '代码 + 参数 + 环境 + 数据指纹'}
+        action={<ActionButton icon={Download} variant="secondary" onClick={() => exportExecutionBundle(session)}>导出 JSON Bundle</ActionButton>}
+      />
       <div className="eu-table">
         <div className="eu-head">
           <span>EU ID</span>
@@ -825,8 +1042,8 @@ function ExecutionPanel({ executionUnits }: { executionUnits: RuntimeExecutionUn
           <div className="eu-row" key={unit.id}>
             <code>{unit.id}</code>
             <span>{unit.tool}</span>
-            <code>{unit.params}</code>
-            <Badge variant={unit.status === 'done' ? 'success' : unit.status === 'planned' ? 'muted' : 'warning'}>{unit.status}</Badge>
+            <code title={unit.params}>{compactParams(unit.params)}</code>
+            <Badge variant={unit.status === 'done' ? 'success' : unit.status === 'planned' || unit.status === 'record-only' ? 'muted' : unit.status === 'failed' ? 'danger' : 'warning'}>{unit.status}</Badge>
             <code>{unit.hash}</code>
           </div>
         ))}

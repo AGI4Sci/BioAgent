@@ -961,10 +961,27 @@ code,
 }
 
 .composer-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 9px 12px 0;
   color: var(--coral);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.composer-error button {
+  min-height: 28px;
+  flex-shrink: 0;
+  padding: 0 9px;
+  color: var(--bio-50);
+  background: rgba(255, 112, 67, 0.1);
+  border: 1px solid rgba(255, 112, 67, 0.28);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .composer input {

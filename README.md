@@ -54,6 +54,7 @@ Current real-mode boundary:
 - Literature and structure profiles are marked `agent-server`.
 - Omics and knowledge profiles are `demo-ready` until their real tools are connected.
 - AgentServer must be running at `http://127.0.0.1:18080` for real chat responses.
+- `ui/src/api/localAdapters.ts` provides explicit `record-only` adapters for all 4 agents. Demo-ready agents use them directly; agent-server agents expose them as a visible fallback when AgentServer fails.
 
 ## Build
 

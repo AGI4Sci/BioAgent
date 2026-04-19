@@ -20,6 +20,7 @@
 - 右侧结果区已接入 UIManifest component registry，可按 agent 返回的 slot 动态渲染 paper cards、结构查看器、组学图表、网络图、证据矩阵、ExecutionUnit 和 notebook timeline；结构/组学/网络组件已能消费 artifact payload，并对 artifact 缺失 / 未注册组件提供 fallback 诊断。
 - ExecutionUnit 当前可从 agent 响应标准化生成 record-only/run 记录，支持当前会话 JSON bundle 导出，并已预留 code、seed、inputData、databaseVersions、outputArtifacts 等可复现字段；尚未对接后端真实工具执行状态和 pipeline 导出。
 - 已新增 `npm run smoke:fixtures`，用 4 个 Agent 的标准 artifact fixture 回归验证 profile -> adapter -> UIManifest/ExecutionUnit 协议链路。
+- 已新增显式 `record-only` local adapters：demo-ready Agent 可直接生成标准 artifact；agent-server Agent 在 AgentServer 失败时可手动生成本地草案，不伪装成真实工具结果。
 
 ---
 
@@ -128,7 +129,7 @@
 
 #### TODO
 - [x] 明确文献检索输入：query、时间范围、物种、疾病/靶点、最大结果数。
-- [ ] 接入 AgentServer 文献工具或临时 search adapter。
+- [x] 接入临时 record-only search adapter；真实 PubMed/Semantic Scholar AgentServer 工具仍待接入。
 - [x] 定义 paper-list artifact schema：title、authors、journal/source、year、url、abstract、evidenceLevel。
 - [x] 生成 claim-evidence matrix，区分 supporting / opposing evidence。
 - [x] 协议要求每个事实性陈述尽量带 source refs。
@@ -144,7 +145,7 @@
 - [x] 将 MoleculeViewer 从纯示意升级为可接收结构参数。
 - [x] 定义 structure-summary artifact schema：pLDDT、resolution、pocket volume、mutation risk 等 metrics。
 - [x] 生成结构分析 ExecutionUnit 草案。
-- [ ] 对无结构、低置信度结构、无法加载结构提供 fallback。
+- [x] 对无结构、低置信度结构、无法加载结构提供 record-only fallback。
 
 ### T007 组学 Agent MVP
 
@@ -165,8 +166,8 @@
 
 #### TODO
 - [x] 定义查询输入：gene / protein / disease / compound。
-- [ ] 接入 UniProt、PDB、ChEMBL、OpenTargets 等可用工具或 AgentServer proxy。
-- [ ] 返回知识卡片：功能、别名、疾病关联、药物、临床试验。
+- [ ] 接入 UniProt、PDB、ChEMBL、OpenTargets 等真实工具或 AgentServer proxy。
+- [x] 返回 record-only 知识卡片：功能、别名、疾病关联、药物、临床试验字段入口。
 - [x] NetworkGraph 支持动态节点、边；证据来源和置信度等待真实 knowledge backend artifact。
 - [x] 将知识库结果转换为可被其他 Agent 复用的标准 artifact schema。
 
@@ -230,7 +231,7 @@
 #### TODO
 - [x] 将 demo seed 数据移动到 `ui/src/demoData.ts`。
 - [x] UI 明确标记 demo / agent artifact / record-only 状态。
-- [ ] AgentServer 连接成功后默认隐藏 demo seed，或作为“加载示例”入口。
+- [x] Demo-ready Agent 默认使用显式 record-only adapter；AgentServer profile 失败时通过按钮触发本地草案，不静默混入 mock。
 - [x] README 补充 demo 模式和真实 agent 模式的启动方式。
 
 ---

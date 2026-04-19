@@ -61,6 +61,7 @@ import {
   timeline,
 } from './demoData';
 import { sendAgentMessage } from './api/agentClient';
+import { runLocalBioAgentAdapter } from './api/localAdapters';
 import {
   makeId,
   nowIso,
@@ -553,6 +554,7 @@ function ChatPanel({
 }) {
   const [expanded, setExpanded] = useState<number | null>(0);
   const [errorText, setErrorText] = useState('');
+  const [fallbackPrompt, setFallbackPrompt] = useState('');
   const [isSending, setIsSending] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -594,32 +596,26 @@ function ChatPanel({
     onSessionChange(optimisticSession);
     onInputChange('');
     setErrorText('');
+    setFallbackPrompt('');
     setIsSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const response = await sendAgentMessage({
-        agentId,
-        agentName: agent.name,
-        agentDomain: agent.domain,
-        prompt,
-        roleView: role,
-        messages: optimisticSession.messages,
-      }, controller.signal);
-      onSessionChange({
-        ...optimisticSession,
-        messages: [...optimisticSession.messages, response.message],
-        runs: [...optimisticSession.runs, response.run],
-        uiManifest: response.uiManifest.length ? response.uiManifest : optimisticSession.uiManifest,
-        claims: [...response.claims, ...optimisticSession.claims].slice(0, 24),
-        executionUnits: [...response.executionUnits, ...optimisticSession.executionUnits].slice(0, 24),
-        artifacts: [...response.artifacts, ...optimisticSession.artifacts].slice(0, 24),
-        notebook: [...response.notebook, ...optimisticSession.notebook].slice(0, 24),
-        updatedAt: nowIso(),
-      });
+      const response = BIOAGENT_PROFILES[agentId].mode === 'demo'
+        ? runLocalBioAgentAdapter(agentId, prompt)
+        : await sendAgentMessage({
+          agentId,
+          agentName: agent.name,
+          agentDomain: agent.domain,
+          prompt,
+          roleView: role,
+          messages: optimisticSession.messages,
+        }, controller.signal);
+      onSessionChange(mergeAgentResponse(optimisticSession, response));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setErrorText(message);
+      setFallbackPrompt(prompt);
       onSessionChange({
         ...optimisticSession,
         messages: [
@@ -654,6 +650,28 @@ function ChatPanel({
 
   function handleAbort() {
     abortRef.current?.abort();
+  }
+
+  function mergeAgentResponse(baseSession: BioAgentSession, response: ReturnType<typeof runLocalBioAgentAdapter>): BioAgentSession {
+    return {
+      ...baseSession,
+      messages: [...baseSession.messages, response.message],
+      runs: [...baseSession.runs, response.run],
+      uiManifest: response.uiManifest.length ? response.uiManifest : baseSession.uiManifest,
+      claims: [...response.claims, ...baseSession.claims].slice(0, 24),
+      executionUnits: [...response.executionUnits, ...baseSession.executionUnits].slice(0, 24),
+      artifacts: [...response.artifacts, ...baseSession.artifacts].slice(0, 24),
+      notebook: [...response.notebook, ...baseSession.notebook].slice(0, 24),
+      updatedAt: nowIso(),
+    };
+  }
+
+  function handleLocalFallback() {
+    const prompt = fallbackPrompt.trim();
+    if (!prompt || isSending) return;
+    setErrorText('');
+    setFallbackPrompt('');
+    onSessionChange(mergeAgentResponse(session, runLocalBioAgentAdapter(agentId, prompt)));
   }
 
   function handleClear() {
@@ -727,7 +745,12 @@ function ChatPanel({
         ) : null}
       </div>
 
-      {errorText ? <div className="composer-error">{errorText}</div> : null}
+      {errorText ? (
+        <div className="composer-error">
+          <span>{errorText}</span>
+          {fallbackPrompt ? <button onClick={handleLocalFallback}>生成 record-only 草案</button> : null}
+        </div>
+      ) : null}
       <div className="composer">
         <input
           value={input}

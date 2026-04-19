@@ -3,6 +3,7 @@ import {
   makeId,
   nowIso,
   type AgentServerRunPayload,
+  type AgentStreamEvent,
   type BioAgentMessage,
   type NormalizedAgentResponse,
   type RuntimeExecutionUnit,
@@ -106,6 +107,33 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
       agentId: input.agentId,
     },
   };
+}
+
+function normalizeStreamEvent(raw: unknown): AgentStreamEvent {
+  const record = isRecord(raw) ? raw : {};
+  const type = asString(record.type) || asString(record.kind) || 'event';
+  const detail = asString(record.message)
+    || asString(record.detail)
+    || asString(record.status)
+    || asString(record.error)
+    || (Object.keys(record).length ? JSON.stringify(record) : undefined);
+  return {
+    id: makeId('evt'),
+    type,
+    label: streamEventLabel(type),
+    detail,
+    createdAt: nowIso(),
+    raw,
+  };
+}
+
+function streamEventLabel(type: string) {
+  if (type.includes('start')) return '开始';
+  if (type.includes('delta') || type.includes('token')) return '生成中';
+  if (type.includes('tool')) return '工具事件';
+  if (type.includes('error')) return '错误';
+  if (type.includes('complete') || type.includes('done')) return '完成';
+  return type;
 }
 
 function extractJsonObject(text: string): Record<string, unknown> | undefined {
@@ -298,6 +326,87 @@ export async function sendAgentMessage(input: SendAgentMessageInput, signal?: Ab
     }
     if (err instanceof TypeError) {
       throw new Error('无法连接 AgentServer，请确认 http://127.0.0.1:18080 正在运行。');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+    signal?.removeEventListener('abort', linkedAbort);
+  }
+}
+
+export async function sendAgentMessageStream(
+  input: SendAgentMessageInput,
+  callbacks: {
+    onEvent?: (event: AgentStreamEvent) => void;
+  } = {},
+  signal?: AbortSignal,
+): Promise<NormalizedAgentResponse> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const linkedAbort = () => controller.abort();
+  signal?.addEventListener('abort', linkedAbort, { once: true });
+  try {
+    const response = await fetch(`${DEFAULT_AGENT_SERVER_URL}/api/agent-server/runs/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildRunPayload(input)),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let json: unknown = text;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // Keep raw text.
+      }
+      const detail = isRecord(json) ? asString(json.error) || asString(json.message) : undefined;
+      throw new Error(detail || `AgentServer 流式请求失败：HTTP ${response.status}`);
+    }
+    if (!response.body) {
+      throw new Error('AgentServer 未返回可读取的流式响应。');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult: unknown;
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const envelope = JSON.parse(trimmed) as unknown;
+        if (!isRecord(envelope)) continue;
+        if ('event' in envelope) callbacks.onEvent?.(normalizeStreamEvent(envelope.event));
+        if ('result' in envelope) finalResult = envelope.result;
+        if ('error' in envelope) {
+          callbacks.onEvent?.(normalizeStreamEvent({ type: 'error', error: envelope.error }));
+        }
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) {
+      const envelope = JSON.parse(buffer.trim()) as unknown;
+      if (isRecord(envelope)) {
+        if ('event' in envelope) callbacks.onEvent?.(normalizeStreamEvent(envelope.event));
+        if ('result' in envelope) finalResult = envelope.result;
+        if ('error' in envelope) callbacks.onEvent?.(normalizeStreamEvent({ type: 'error', error: envelope.error }));
+      }
+    }
+    if (!finalResult) {
+      throw new Error('AgentServer 流式响应结束，但没有返回最终 run result。');
+    }
+    return normalizeAgentResponse(input.agentId, input.prompt, { ok: true, data: finalResult });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('AgentServer 流式请求已取消或超时。');
+    }
+    if (err instanceof TypeError) {
+      throw new Error('无法连接 AgentServer stream，请确认 http://127.0.0.1:18080 正在运行。');
     }
     throw err;
   } finally {

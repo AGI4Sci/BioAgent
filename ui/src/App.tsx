@@ -60,13 +60,14 @@ import {
   paperCards,
   timeline,
 } from './demoData';
-import { sendAgentMessage } from './api/agentClient';
+import { sendAgentMessageStream } from './api/agentClient';
 import { runLocalBioAgentAdapter } from './api/localAdapters';
 import {
   makeId,
   nowIso,
   type BioAgentMessage,
   type BioAgentSession,
+  type AgentStreamEvent,
   type EvidenceClaim,
   type NotebookRecord,
   type RuntimeArtifact,
@@ -556,11 +557,23 @@ function ChatPanel({
   const [errorText, setErrorText] = useState('');
   const [fallbackPrompt, setFallbackPrompt] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
+  const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
+  const activeSessionRef = useRef(session);
+  const guidanceQueueRef = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const messages = session.messages;
   const agent = agents.find((item) => item.id === agentId) ?? agents[0];
+
+  useEffect(() => {
+    activeSessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    guidanceQueueRef.current = guidanceQueue;
+  }, [guidanceQueue]);
 
   useEffect(() => {
     if (autoScrollRef.current) {
@@ -580,7 +593,15 @@ function ChatPanel({
 
   async function handleSend() {
     const prompt = input.trim();
-    if (!prompt || isSending) return;
+    if (!prompt) return;
+    if (isSending) {
+      handleRunningGuidance(prompt);
+      return;
+    }
+    await runPrompt(prompt, session);
+  }
+
+  async function runPrompt(prompt: string, baseSession: BioAgentSession) {
     const userMessage: BioAgentMessage = {
       id: makeId('msg'),
       role: 'user',
@@ -589,29 +610,42 @@ function ChatPanel({
       status: 'completed',
     };
     const optimisticSession: BioAgentSession = {
-      ...session,
-      messages: [...session.messages, userMessage],
+      ...baseSession,
+      messages: [...baseSession.messages, userMessage],
       updatedAt: nowIso(),
     };
     onSessionChange(optimisticSession);
     onInputChange('');
     setErrorText('');
     setFallbackPrompt('');
+    setStreamEvents([{
+      id: makeId('evt'),
+      type: 'queued',
+      label: '已提交',
+      detail: prompt,
+      createdAt: nowIso(),
+    }]);
     setIsSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
       const response = BIOAGENT_PROFILES[agentId].mode === 'demo'
         ? runLocalBioAgentAdapter(agentId, prompt)
-        : await sendAgentMessage({
+        : await sendAgentMessageStream({
           agentId,
           agentName: agent.name,
           agentDomain: agent.domain,
           prompt,
           roleView: role,
           messages: optimisticSession.messages,
+        }, {
+          onEvent(event) {
+            setStreamEvents((current) => [...current.slice(-32), event]);
+          },
         }, controller.signal);
-      onSessionChange(mergeAgentResponse(optimisticSession, response));
+      const mergedSession = mergeAgentResponse(activeSessionRef.current, response);
+      onSessionChange(mergedSession);
+      activeSessionRef.current = mergedSession;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setErrorText(message);
@@ -645,7 +679,41 @@ function ChatPanel({
     } finally {
       setIsSending(false);
       abortRef.current = null;
+      const [nextGuidance, ...rest] = guidanceQueueRef.current;
+      if (nextGuidance) {
+        setGuidanceQueue(rest);
+        window.setTimeout(() => {
+          void runPrompt(nextGuidance, activeSessionRef.current);
+        }, 80);
+      }
     }
+  }
+
+  function handleRunningGuidance(prompt: string) {
+    const now = nowIso();
+    const guidanceMessage: BioAgentMessage = {
+      id: makeId('msg'),
+      role: 'user',
+      content: `运行中引导：${prompt}`,
+      createdAt: now,
+      status: 'running',
+    };
+    const nextSession: BioAgentSession = {
+      ...activeSessionRef.current,
+      messages: [...activeSessionRef.current.messages, guidanceMessage],
+      updatedAt: now,
+    };
+    activeSessionRef.current = nextSession;
+    onSessionChange(nextSession);
+    onInputChange('');
+    setGuidanceQueue((current) => [...current, prompt]);
+    setStreamEvents((current) => [...current.slice(-32), {
+      id: makeId('evt'),
+      type: 'guidance-queued',
+      label: '引导已排队',
+      detail: prompt,
+      createdAt: now,
+    }]);
   }
 
   function handleAbort() {
@@ -745,6 +813,23 @@ function ChatPanel({
         ) : null}
       </div>
 
+      {isSending || streamEvents.length ? (
+        <div className="stream-events">
+          <div className="stream-events-head">
+            <span>流式事件</span>
+            {guidanceQueue.length ? <Badge variant="warning">{guidanceQueue.length} 条引导排队</Badge> : null}
+          </div>
+          <div className="stream-events-list">
+            {streamEvents.slice(-8).map((event) => (
+              <div className="stream-event" key={event.id}>
+                <Badge variant={event.type.includes('error') ? 'danger' : event.type.includes('guidance') ? 'warning' : 'info'}>{event.label}</Badge>
+                {event.detail ? <span>{event.detail}</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {errorText ? (
         <div className="composer-error">
           <span>{errorText}</span>
@@ -758,11 +843,10 @@ function ChatPanel({
           onKeyDown={(event) => {
             if (event.key === 'Enter') handleSend();
           }}
-          placeholder="输入研究问题..."
-          disabled={isSending}
+          placeholder={isSending ? '继续输入引导，Enter 后排队到当前推理之后...' : '输入研究问题...'}
         />
-        <ActionButton icon={Sparkles} onClick={handleSend} disabled={!input.trim() || isSending}>
-          {isSending ? '发送中' : '发送'}
+        <ActionButton icon={Sparkles} onClick={handleSend} disabled={!input.trim()}>
+          {isSending ? '引导' : '发送'}
         </ActionButton>
       </div>
     </div>

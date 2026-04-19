@@ -45,6 +45,14 @@ BioAgent keeps the frontend protocol in `ui/src/agentProfiles.ts`:
 
 Agent replies should return natural language plus optional structured JSON with `claims`, `uiManifest`, `executionUnits`, and `artifacts`. The UI never executes generated UI code; it renders only registered components.
 
+The chat panel prefers AgentServer streaming via:
+
+```text
+POST http://127.0.0.1:18080/api/agent-server/runs/stream
+```
+
+Streaming envelopes are rendered in the event panel while the run is active. The composer stays editable during a run; extra user guidance is queued visibly and automatically sent as follow-up turns after the active run completes. This keeps the UI responsive today and leaves room for true backend mid-run message injection later.
+
 ## Demo vs Real Mode
 
 Demo seed data lives in `ui/src/demoData.ts` and is labeled in the UI as demo/fallback data. Runtime agent artifacts are labeled separately and take priority whenever an AgentServer response provides matching `artifactRef`, `dataRef`, or artifact `type`.

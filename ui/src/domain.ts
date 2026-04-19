@@ -116,6 +116,15 @@ export interface NormalizedAgentResponse {
   notebook: NotebookRecord[];
 }
 
+export interface AgentStreamEvent {
+  id: string;
+  type: string;
+  label: string;
+  detail?: string;
+  createdAt: string;
+  raw?: unknown;
+}
+
 export interface AgentServerRunPayload {
   agent: {
     id: string;

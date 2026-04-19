@@ -15,6 +15,7 @@
 - 已有 React + Vite Web UI，包含研究概览、单 Agent 工作台、对齐工作台、研究时间线。
 - 已有 4 个 Agent profile mock：文献 Agent、结构 Agent、组学 Agent、知识库 Agent。
 - 单 Agent 工作台已有真实对话入口：`ChatPanel` 可调用 AgentServer `POST /api/agent-server/runs`，支持 loading、取消、错误提示和清空会话。
+- AgentServer 对话入口已优先使用 `POST /api/agent-server/runs/stream`，ChatPanel 会展示 NDJSON 流式事件；运行中输入不会被锁死，用户引导会进入可见队列并在当前 run 完成后自动继续发送。
 - 对话、run、claim、UIManifest、ExecutionUnit、artifact、notebook 已建立前端运行时模型，并按 Agent 独立持久化到 `localStorage`。
 - Agent profile 契约已集中到 `ui/src/agentProfiles.ts`：AgentServer id、native tools、fallback tools、输入契约、artifact schema、默认 UIManifest slots 和 ExecutionUnit defaults 统一从这里生成。
 - 右侧结果区已接入 UIManifest component registry，可按 agent 返回的 slot 动态渲染 paper cards、结构查看器、组学图表、网络图、证据矩阵、ExecutionUnit 和 notebook timeline；结构/组学/网络组件已能消费 artifact payload，并对 artifact 缺失 / 未注册组件提供 fallback 诊断。
@@ -46,8 +47,9 @@
 - [x] 定义 `AgentMessage`、`AgentRequest`、`AgentResponse`、`AgentRunState` 类型，避免继续把 mock 数据当运行时状态。
 - [x] 将 `messagesByAgent` 改为初始示例数据或 demo seed，真实会话状态放到 `ChatPanel` / 上层 store。
 - [x] 发送请求时携带 `agentId`、用户输入、历史消息、当前 role view、当前结果 tab 和必要 project context。
-- [x] 支持 non-streaming 版本先跑通；如 AgentServer 支持 SSE / chunk，再追加流式渲染。
+- [x] 支持 streaming 版本：读取 `/api/agent-server/runs/stream` NDJSON 事件并实时渲染。
 - [x] 增加 loading、disabled、retry、abort 和空输入校验。
+- [x] 运行中 composer 保持可输入；新消息作为引导进入队列，当前 run 结束后自动继续发送。
 - [x] 为请求失败、超时、服务未启动分别展示明确错误。
 - [x] 本地验证：`npm run typecheck`、`npm run build`。
 - [x] 直接调用 `/api/agent-server/runs` 完成一次文献 Agent smoke，并记录 AgentServer backend 实际响应质量。
@@ -213,6 +215,7 @@
 - [x] 长来源列表可折叠。
 - [x] Agent 切换时保留各自滚动位置和输入草稿。
 - [x] 顶部搜索框支持跳转到 Agent / timeline / alignment / workbench。
+- [x] 推理过程中允许继续输入引导，并显示 queued guidance 状态。
 
 ### T012 响应式与可访问性
 
@@ -290,3 +293,4 @@
 - 2026-04-19：`npm run build` 通过；Vite 提示主 chunk 超过 500 kB，暂不影响运行。
 - 2026-04-19：`npm run dev` 可访问 `http://127.0.0.1:5173/`。
 - 2026-04-19：AgentServer `GET http://127.0.0.1:18080/health` 连通。
+- 2026-04-19：前端已接入 AgentServer `/api/agent-server/runs/stream` NDJSON 流式事件；mid-run 用户输入当前为 queued follow-up，不伪装成真正 backend mid-run injection。

@@ -446,7 +446,7 @@ function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; s
         <Card>
           <SectionHeader icon={Target} title="最近活跃度" subtitle="mock runtime events" />
           <div className="chart-220">
-            <ResponsiveContainer>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <AreaChart data={activityData}>
                 <defs>
                   <linearGradient id="bioArea" x1="0" x2="0" y1="0" y2="1">
@@ -722,7 +722,7 @@ function VolcanoChart() {
   );
   return (
     <div className="chart-300">
-      <ResponsiveContainer>
+        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
         <ScatterChart margin={{ top: 10, right: 14, bottom: 24, left: 8 }}>
           <CartesianGrid stroke="#243044" strokeDasharray="3 3" />
           <XAxis dataKey="logFC" type="number" tick={{ fill: '#7B93B0', fontSize: 10 }} label={{ value: 'log2FC', position: 'bottom', fill: '#7B93B0' }} />
@@ -1216,7 +1216,7 @@ function Feasibility() {
       <Card>
         <SectionHeader title="双视角能力雷达" subtitle="AI vs Bio assessment" />
         <div className="chart-300">
-          <ResponsiveContainer>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <RadarChart data={radarData}>
               <PolarGrid stroke="#243044" />
               <PolarAngleAxis dataKey="subject" tick={{ fill: '#7B93B0', fontSize: 10 }} />

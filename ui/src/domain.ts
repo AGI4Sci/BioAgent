@@ -13,7 +13,19 @@ export interface BioAgentMessage {
   claimType?: ClaimType;
   expandable?: string;
   createdAt: string;
+  updatedAt?: string;
   status?: RunStatus;
+}
+
+export interface SessionVersionRecord {
+  id: string;
+  reason: string;
+  createdAt: string;
+  messageCount: number;
+  runCount: number;
+  artifactCount: number;
+  checksum: string;
+  snapshot: Omit<BioAgentSession, 'versions'>;
 }
 
 export interface EvidenceClaim {
@@ -84,9 +96,11 @@ export interface BioAgentRun {
 }
 
 export interface BioAgentSession {
-  schemaVersion: 1;
+  schemaVersion: 2;
   sessionId: string;
   agentId: AgentId;
+  title: string;
+  createdAt: string;
   messages: BioAgentMessage[];
   runs: BioAgentRun[];
   uiManifest: UIManifestSlot[];
@@ -94,6 +108,15 @@ export interface BioAgentSession {
   executionUnits: RuntimeExecutionUnit[];
   artifacts: RuntimeArtifact[];
   notebook: NotebookRecord[];
+  versions: SessionVersionRecord[];
+  updatedAt: string;
+}
+
+export interface BioAgentWorkspaceState {
+  schemaVersion: 2;
+  workspacePath: string;
+  sessionsByAgent: Record<AgentId, BioAgentSession>;
+  archivedSessions: BioAgentSession[];
   updatedAt: string;
 }
 

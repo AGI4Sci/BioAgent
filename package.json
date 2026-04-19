@@ -9,6 +9,7 @@
     "build": "vite build",
     "test": "node --import tsx --test \"ui/src/**/*.test.ts\"",
     "smoke:fixtures": "tsx scripts/smoke-bioagent-fixtures.ts",
+    "workspace:server": "tsx scripts/workspace-server.ts",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit"
   },

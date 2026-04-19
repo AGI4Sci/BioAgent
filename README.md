@@ -24,6 +24,18 @@ Open:
 http://localhost:5173/
 ```
 
+For workspace-backed chat records, also start the local writer:
+
+```bash
+npm run workspace:server
+```
+
+Then set a workspace path in the top bar. BioAgent writes structured state under:
+
+```text
+<workspace>/.bioagent/
+```
+
 ## AgentServer Mode
 
 The workbench chat panel calls AgentServer directly:
@@ -52,6 +64,26 @@ POST http://127.0.0.1:18080/api/agent-server/runs/stream
 ```
 
 Streaming envelopes are rendered in the event panel while the run is active. The composer stays editable during a run; extra user guidance is queued visibly and automatically sent as follow-up turns after the active run completes. This keeps the UI responsive today and leaves room for true backend mid-run message injection later.
+
+## Chat Records
+
+Chat state is stored as `bioagent.workspace.v2` in localStorage and can also be mirrored into the selected workspace directory. The active workspace state includes:
+
+- active sessions per Agent
+- archived sessions created by new-chat and delete-chat actions
+- per-session version snapshots with reason, timestamp, counts, checksum, and snapshot payload
+- artifacts and execution records generated from Agent responses
+
+The workspace writer splits those records into:
+
+```text
+.bioagent/workspace-state.json
+.bioagent/sessions/*.json
+.bioagent/artifacts/*.json
+.bioagent/versions/*.json
+```
+
+This keeps BioAgent aligned with AgentServer-style session and artifact bookkeeping while MCP and skills resources remain user-configured later.
 
 ## Demo vs Real Mode
 

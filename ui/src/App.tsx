@@ -3,16 +3,17 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Clock,
-  Copy,
   Download,
   FileCode,
   FileText,
   Lock,
   MessageSquare,
+  Plus,
   Play,
   RefreshCw,
   Search,
@@ -67,6 +68,7 @@ import {
   nowIso,
   type BioAgentMessage,
   type BioAgentSession,
+  type BioAgentWorkspaceState,
   type AgentStreamEvent,
   type EvidenceClaim,
   type NotebookRecord,
@@ -74,7 +76,8 @@ import {
   type RuntimeExecutionUnit,
   type UIManifestSlot,
 } from './domain';
-import { loadSessions, resetSession, saveSessions } from './sessionStore';
+import { createSession, loadWorkspaceState, resetSession, saveWorkspaceState, versionSession } from './sessionStore';
+import { persistWorkspaceState } from './api/workspaceClient';
 import { HeatmapViewer, MoleculeViewer, NetworkGraph, UmapViewer } from './visualizations';
 
 const chartTheme = {
@@ -120,6 +123,11 @@ function IconButton({ icon: Icon, label, onClick }: { icon: LucideIcon; label: s
       <Icon size={17} />
     </button>
   );
+}
+
+function titleFromPrompt(prompt: string) {
+  const title = prompt.trim().replace(/\s+/g, ' ').slice(0, 36);
+  return title || '新聊天';
 }
 
 function ActionButton({
@@ -351,55 +359,159 @@ function Sidebar({
   setAgentId: (id: AgentId) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [activePanel, setActivePanel] = useState<'navigation' | 'workspace' | 'extensions'>('navigation');
+  const [sidebarWidth, setSidebarWidth] = useState(284);
+  const resizingRef = useRef(false);
+
+  useEffect(() => {
+    if (collapsed) return;
+    function handleMouseMove(event: MouseEvent) {
+      if (!resizingRef.current) return;
+      const nextWidth = Math.min(420, Math.max(220, event.clientX));
+      setSidebarWidth(nextWidth);
+    }
+    function handleMouseUp() {
+      resizingRef.current = false;
+    }
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [collapsed]);
+
+  function handlePanelSwitch(panel: 'navigation' | 'workspace' | 'extensions') {
+    setActivePanel(panel);
+    setCollapsed(false);
+  }
+
+  const workspaceFolders = ['projects', 'proj-1', 'proj-e2e-artifacts', 'proj-e2e-dag', 'proj-bioagent'];
+  const extensions = ['Python', 'Jupyter', 'Docker', 'GitLens', 'Error Lens'];
+
   return (
-    <aside className={cx('sidebar', collapsed && 'collapsed')}>
-      <div className="brand">
-        <div className="brand-mark">BA</div>
-        {!collapsed ? (
-          <div>
-            <h1>BioAgent</h1>
-            <p>AI4Science Workbench</p>
-          </div>
+    <aside className={cx('sidebar', collapsed && 'collapsed')} style={{ width: collapsed ? 46 : sidebarWidth }}>
+      <div className="sidebar-activitybar">
+        <div className="brand">
+          <div className="brand-mark">BA</div>
+        </div>
+        <button
+          className={cx('activity-item', activePanel === 'navigation' && !collapsed && 'active')}
+          onClick={() => handlePanelSwitch('navigation')}
+          title="导航"
+          aria-label="导航"
+        >
+          <Target size={18} />
+        </button>
+        <button
+          className={cx('activity-item', activePanel === 'workspace' && !collapsed && 'active')}
+          onClick={() => handlePanelSwitch('workspace')}
+          title="工作目录"
+          aria-label="工作目录"
+        >
+          <FileText size={18} />
+        </button>
+        <button
+          className={cx('activity-item', activePanel === 'extensions' && !collapsed && 'active')}
+          onClick={() => handlePanelSwitch('extensions')}
+          title="拓展"
+          aria-label="拓展"
+        >
+          <Sparkles size={18} />
+        </button>
+        {collapsed ? (
+          <button className="collapse-button top-toggle" onClick={() => setCollapsed(false)} title="展开侧栏" aria-label="展开侧栏">
+            <ChevronRight size={16} />
+          </button>
         ) : null}
       </div>
 
-      <nav className="nav-section">
-        {navItems.map((item) => (
-          <button key={item.id} className={cx('nav-item', page === item.id && 'active')} onClick={() => setPage(item.id)}>
-            <item.icon size={18} />
-            {!collapsed ? <span>{item.label}</span> : null}
-          </button>
-        ))}
-      </nav>
-
       {!collapsed ? (
-        <div className="agent-list">
-          <div className="sidebar-label">Agent Profiles</div>
-          {agents.map((agent) => (
-            <button
-              key={agent.id}
-              className={cx('agent-nav', agentId === agent.id && page === 'workbench' && 'active')}
-              onClick={() => {
-                setAgentId(agent.id);
-                setPage('workbench');
-              }}
-            >
-              <agent.icon size={15} style={{ color: agent.color }} />
-              <span>{agent.name}</span>
-              <i className={cx('status-dot', agent.status === 'active' && 'online')} />
+        <div className="sidebar-panel">
+          <div className="sidebar-panel-header">
+            <span>
+              {activePanel === 'navigation' ? '导航' : activePanel === 'workspace' ? '资源管理器' : '拓展'}
+            </span>
+            <button className="panel-collapse-button" onClick={() => setCollapsed(true)} title="收起侧栏" aria-label="收起侧栏">
+              <ChevronLeft size={16} />
             </button>
-          ))}
+          </div>
+          <div className="sidebar-panel-body">
+            {activePanel === 'navigation' ? (
+              <>
+                <nav className="nav-section">
+                  {navItems.map((item) => (
+                    <button key={item.id} className={cx('nav-item', page === item.id && 'active')} onClick={() => setPage(item.id)}>
+                      <item.icon size={18} />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </nav>
+                <div className="agent-list">
+                  <div className="sidebar-label">Agent Profiles</div>
+                  {agents.map((agent) => (
+                    <button
+                      key={agent.id}
+                      className={cx('agent-nav', agentId === agent.id && page === 'workbench' && 'active')}
+                      onClick={() => {
+                        setAgentId(agent.id);
+                        setPage('workbench');
+                      }}
+                    >
+                      <agent.icon size={15} style={{ color: agent.color }} />
+                      <span>{agent.name}</span>
+                      <i className={cx('status-dot', agent.status === 'active' && 'online')} />
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            {activePanel === 'workspace' ? (
+              <div className="sidebar-tree">
+                <div className="sidebar-label">当前工作目录</div>
+                <code>/Applications/workspace/ailab/research/app/BioAgent</code>
+                {workspaceFolders.map((folder) => (
+                  <div key={folder} className="tree-item">📁 {folder}</div>
+                ))}
+              </div>
+            ) : null}
+            {activePanel === 'extensions' ? (
+              <div className="sidebar-tree">
+                <div className="sidebar-label">已安装拓展</div>
+                {extensions.map((ext) => (
+                  <div key={ext} className="tree-item">◫ {ext}</div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
-
-      <button className="collapse-button" onClick={() => setCollapsed(!collapsed)} title="折叠侧边栏">
-        {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-      </button>
+      {!collapsed ? (
+        <div
+          className="resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖拽调整左侧栏宽度"
+          onMouseDown={() => {
+            resizingRef.current = true;
+          }}
+        />
+      ) : null}
     </aside>
   );
 }
 
-function TopBar({ onSearch }: { onSearch: (query: string) => void }) {
+function TopBar({
+  onSearch,
+  workspacePath,
+  onWorkspacePathChange,
+  workspaceStatus,
+}: {
+  onSearch: (query: string) => void;
+  workspacePath: string;
+  onWorkspacePathChange: (value: string) => void;
+  workspaceStatus: string;
+}) {
   const [query, setQuery] = useState('');
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -412,6 +524,14 @@ function TopBar({ onSearch }: { onSearch: (query: string) => void }) {
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索基因、通路、文献、Execution Unit..." />
       </form>
       <div className="topbar-actions">
+        <div className="workspace-input" title={workspaceStatus || '设置 BioAgent workspace 目录'}>
+          <span>Workspace</span>
+          <input
+            value={workspacePath}
+            onChange={(event) => onWorkspacePathChange(event.target.value)}
+            placeholder="/path/to/workspace"
+          />
+        </div>
         <Badge variant="info" glow>
           Phase 1 - 单 Agent 独立运行
         </Badge>
@@ -543,6 +663,11 @@ function ChatPanel({
   onInputChange,
   onScrollTopChange,
   onSessionChange,
+  onNewChat,
+  onDeleteChat,
+  onEditMessage,
+  onDeleteMessage,
+  archivedCount,
 }: {
   agentId: AgentId;
   role: string;
@@ -552,8 +677,15 @@ function ChatPanel({
   onInputChange: (value: string) => void;
   onScrollTopChange: (value: number) => void;
   onSessionChange: (session: BioAgentSession) => void;
+  onNewChat: () => void;
+  onDeleteChat: () => void;
+  onEditMessage: (messageId: string, content: string) => void;
+  onDeleteMessage: (messageId: string) => void;
+  archivedCount: number;
 }) {
   const [expanded, setExpanded] = useState<number | null>(0);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState('');
   const [errorText, setErrorText] = useState('');
   const [fallbackPrompt, setFallbackPrompt] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -611,6 +743,9 @@ function ChatPanel({
     };
     const optimisticSession: BioAgentSession = {
       ...baseSession,
+      title: baseSession.runs.length || baseSession.messages.some((message) => message.id.startsWith('msg'))
+        ? baseSession.title
+        : titleFromPrompt(prompt),
       messages: [...baseSession.messages, userMessage],
       updatedAt: nowIso(),
     };
@@ -751,6 +886,19 @@ function ChatPanel({
     exportJsonFile(`${agentId}-${session.sessionId}.json`, session);
   }
 
+  function beginEditMessage(message: BioAgentMessage) {
+    setEditingMessageId(message.id);
+    setEditingContent(message.content);
+  }
+
+  function saveEditMessage() {
+    const content = editingContent.trim();
+    if (!editingMessageId || !content) return;
+    onEditMessage(editingMessageId, content);
+    setEditingMessageId(null);
+    setEditingContent('');
+  }
+
   function handleMessagesScroll() {
     const element = messagesRef.current;
     if (!element) return;
@@ -766,19 +914,22 @@ function ChatPanel({
         </div>
         <div>
           <strong>{agent.name}</strong>
-          <span>{agent.tools.join(' / ')}</span>
+          <span>{session.title} · {agent.tools.join(' / ')}</span>
         </div>
         <Badge variant="success" glow>在线</Badge>
+        <Badge variant="muted">{session.versions.length} versions</Badge>
+        {archivedCount ? <Badge variant="muted">{archivedCount} archived</Badge> : null}
         <div className="panel-actions">
+          <IconButton icon={Plus} label="开启新聊天" onClick={onNewChat} />
           {isSending ? <IconButton icon={RefreshCw} label="取消请求" onClick={handleAbort} /> : null}
           <IconButton icon={Download} label="导出当前 Agent 会话" onClick={handleExport} />
-          <IconButton icon={Trash2} label="清空当前 Agent 会话" onClick={handleClear} />
+          <IconButton icon={Trash2} label="删除当前聊天" onClick={onDeleteChat} />
         </div>
       </div>
 
       <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {messages.map((message, index) => (
-          <div key={`${message.role}-${index}`} className={cx('message', message.role)}>
+          <div key={message.id} className={cx('message', message.role)}>
             <div className="message-body">
               <div className="message-meta">
                 <strong>{message.role === 'user' ? '你' : message.role === 'system' ? '系统' : agent.name}</strong>
@@ -787,7 +938,21 @@ function ChatPanel({
                 {message.claimType ? <ClaimTag type={message.claimType} /> : null}
                 {message.status === 'failed' ? <Badge variant="danger">failed</Badge> : null}
               </div>
-              <p>{message.content}</p>
+              {editingMessageId === message.id ? (
+                <div className="message-editor">
+                  <textarea value={editingContent} onChange={(event) => setEditingContent(event.target.value)} />
+                  <div>
+                    <button onClick={saveEditMessage}>保存</button>
+                    <button onClick={() => setEditingMessageId(null)}>取消</button>
+                  </div>
+                </div>
+              ) : (
+                <p>{message.content}</p>
+              )}
+              <div className="message-actions">
+                <button onClick={() => beginEditMessage(message)}>编辑</button>
+                <button onClick={() => onDeleteMessage(message.id)}>删除</button>
+              </div>
               {message.expandable ? (
                 <>
                   <button className="expand-link" onClick={() => setExpanded(expanded === index ? null : index)}>
@@ -1380,6 +1545,11 @@ function Workbench({
   onDraftChange,
   onScrollTopChange,
   onSessionChange,
+  onNewChat,
+  onDeleteChat,
+  onEditMessage,
+  onDeleteMessage,
+  archivedCount,
   onArtifactHandoff,
 }: {
   agentId: AgentId;
@@ -1389,6 +1559,11 @@ function Workbench({
   onDraftChange: (agentId: AgentId, value: string) => void;
   onScrollTopChange: (agentId: AgentId, value: number) => void;
   onSessionChange: (session: BioAgentSession) => void;
+  onNewChat: (agentId: AgentId) => void;
+  onDeleteChat: (agentId: AgentId) => void;
+  onEditMessage: (agentId: AgentId, messageId: string, content: string) => void;
+  onDeleteMessage: (agentId: AgentId, messageId: string) => void;
+  archivedCount: number;
   onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
 }) {
   const agent = agents.find((item) => item.id === agentId) ?? agents[0];
@@ -1427,6 +1602,11 @@ function Workbench({
           onInputChange={(value) => onDraftChange(agentId, value)}
           onScrollTopChange={(value) => onScrollTopChange(agentId, value)}
           onSessionChange={onSessionChange}
+          onNewChat={() => onNewChat(agentId)}
+          onDeleteChat={() => onDeleteChat(agentId)}
+          onEditMessage={(messageId, content) => onEditMessage(agentId, messageId, content)}
+          onDeleteMessage={(messageId) => onDeleteMessage(agentId, messageId)}
+          archivedCount={archivedCount}
         />
         <ResultsRenderer agentId={agentId} session={session} onArtifactHandoff={onArtifactHandoff} />
       </div>
@@ -1598,7 +1778,8 @@ function TimelinePage() {
 export function BioAgentApp() {
   const [page, setPage] = useState<PageId>('dashboard');
   const [agentId, setAgentId] = useState<AgentId>('literature');
-  const [sessions, setSessions] = useState<Record<AgentId, BioAgentSession>>(() => loadSessions());
+  const [workspaceState, setWorkspaceState] = useState<BioAgentWorkspaceState>(() => loadWorkspaceState());
+  const [workspaceStatus, setWorkspaceStatus] = useState('');
   const [drafts, setDrafts] = useState<Record<AgentId, string>>({
     literature: '',
     structure: '',
@@ -1612,15 +1793,40 @@ export function BioAgentApp() {
     knowledge: 0,
   });
 
-  useEffect(() => {
-    saveSessions(sessions);
-  }, [sessions]);
+  const sessions = workspaceState.sessionsByAgent;
+  const archivedCountByAgent = useMemo(() => agents.reduce((acc, agent) => {
+    acc[agent.id] = workspaceState.archivedSessions.filter((session) => session.agentId === agent.id).length;
+    return acc;
+  }, {} as Record<AgentId, number>), [workspaceState.archivedSessions]);
 
-  function updateSession(nextSession: BioAgentSession) {
-    setSessions((current) => ({
-      ...current,
-      [nextSession.agentId]: nextSession,
+  useEffect(() => {
+    saveWorkspaceState(workspaceState);
+    if (workspaceState.workspacePath.trim()) {
+      persistWorkspaceState(workspaceState)
+        .then(() => setWorkspaceStatus(`已同步到 ${workspaceState.workspacePath}/.bioagent`))
+        .catch((err) => setWorkspaceStatus(`Workspace writer 未连接：${err instanceof Error ? err.message : String(err)}`));
+    }
+  }, [workspaceState]);
+
+  function updateWorkspace(mutator: (state: BioAgentWorkspaceState) => BioAgentWorkspaceState) {
+    setWorkspaceState((current) => ({
+      ...mutator(current),
+      updatedAt: nowIso(),
     }));
+  }
+
+  function updateSession(nextSession: BioAgentSession, reason = 'session update') {
+    updateWorkspace((current) => ({
+      ...current,
+      sessionsByAgent: {
+        ...current.sessionsByAgent,
+        [nextSession.agentId]: versionSession(nextSession, reason),
+      },
+    }));
+  }
+
+  function setWorkspacePath(value: string) {
+    updateWorkspace((current) => ({ ...current, workspacePath: value }));
   }
 
   function updateDraft(nextAgentId: AgentId, value: string) {
@@ -1629,6 +1835,54 @@ export function BioAgentApp() {
 
   function updateMessageScrollTop(nextAgentId: AgentId, value: number) {
     setMessageScrollTops((current) => ({ ...current, [nextAgentId]: value }));
+  }
+
+  function newChat(nextAgentId: AgentId) {
+    updateWorkspace((current) => {
+      const currentSession = versionSession(current.sessionsByAgent[nextAgentId], 'new chat archived previous session');
+      return {
+        ...current,
+        archivedSessions: [currentSession, ...current.archivedSessions].slice(0, 80),
+        sessionsByAgent: {
+          ...current.sessionsByAgent,
+          [nextAgentId]: createSession(nextAgentId, `${agents.find((item) => item.id === nextAgentId)?.name ?? nextAgentId} 新聊天`),
+        },
+      };
+    });
+  }
+
+  function deleteChat(nextAgentId: AgentId) {
+    updateWorkspace((current) => {
+      const deleted = versionSession(current.sessionsByAgent[nextAgentId], 'deleted current chat');
+      return {
+        ...current,
+        archivedSessions: [{ ...deleted, title: `${deleted.title}（已删除）` }, ...current.archivedSessions].slice(0, 80),
+        sessionsByAgent: {
+          ...current.sessionsByAgent,
+          [nextAgentId]: resetSession(nextAgentId),
+        },
+      };
+    });
+  }
+
+  function editMessage(nextAgentId: AgentId, messageId: string, content: string) {
+    const session = workspaceState.sessionsByAgent[nextAgentId];
+    const nextSession: BioAgentSession = {
+      ...session,
+      messages: session.messages.map((message) => message.id === messageId ? { ...message, content, updatedAt: nowIso() } as BioAgentMessage : message),
+      updatedAt: nowIso(),
+    };
+    updateSession(nextSession, `edit message ${messageId}`);
+  }
+
+  function deleteMessage(nextAgentId: AgentId, messageId: string) {
+    const session = workspaceState.sessionsByAgent[nextAgentId];
+    const nextSession: BioAgentSession = {
+      ...session,
+      messages: session.messages.filter((message) => message.id !== messageId),
+      updatedAt: nowIso(),
+    };
+    updateSession(nextSession, `delete message ${messageId}`);
   }
 
   function handleSearch(query: string) {
@@ -1672,28 +1926,33 @@ export function BioAgentApp() {
       createdAt: now,
       status: 'completed',
     };
-    setSessions((current) => {
-      const targetSession = current[targetAgent];
+    setWorkspaceState((current) => {
+      const targetSession = current.sessionsByAgent[targetAgent];
       const artifacts = targetSession.artifacts.some((item) => item.id === artifact.id)
         ? targetSession.artifacts
         : [artifact, ...targetSession.artifacts].slice(0, 24);
+      const nextTargetSession = versionSession({
+        ...targetSession,
+        messages: [...targetSession.messages, handoffMessage],
+        artifacts,
+        notebook: [{
+          id: makeId('note'),
+          time: new Date(now).toLocaleString('zh-CN', { hour12: false }),
+          agent: targetAgent,
+          title: `接收 ${artifact.type}`,
+          desc: `来自 ${sourceAgent?.name ?? artifact.producerAgent} 的 ${artifact.id} 已进入当前 Agent 上下文。`,
+          claimType: 'fact' as const,
+          confidence: 1,
+        }, ...targetSession.notebook].slice(0, 24),
+        updatedAt: now,
+      }, `handoff artifact ${artifact.id}`);
       return {
         ...current,
-        [targetAgent]: {
-          ...targetSession,
-          messages: [...targetSession.messages, handoffMessage],
-          artifacts,
-          notebook: [{
-            id: makeId('note'),
-            time: new Date(now).toLocaleString('zh-CN', { hour12: false }),
-            agent: targetAgent,
-            title: `接收 ${artifact.type}`,
-            desc: `来自 ${sourceAgent?.name ?? artifact.producerAgent} 的 ${artifact.id} 已进入当前 Agent 上下文。`,
-            claimType: 'fact',
-            confidence: 1,
-          }, ...targetSession.notebook].slice(0, 24),
-          updatedAt: now,
+        sessionsByAgent: {
+          ...current.sessionsByAgent,
+          [targetAgent]: nextTargetSession,
         },
+        updatedAt: now,
       };
     });
     setAgentId(targetAgent);
@@ -1706,7 +1965,7 @@ export function BioAgentApp() {
       <div className="ambient ambient-b" />
       <Sidebar page={page} setPage={setPage} agentId={agentId} setAgentId={setAgentId} />
       <div className="main-shell">
-        <TopBar onSearch={handleSearch} />
+        <TopBar onSearch={handleSearch} workspacePath={workspaceState.workspacePath} onWorkspacePathChange={setWorkspacePath} workspaceStatus={workspaceStatus} />
         <div className="content-shell">
           {page === 'dashboard' ? (
             <Dashboard setPage={setPage} setAgentId={setAgentId} />
@@ -1719,6 +1978,11 @@ export function BioAgentApp() {
               onDraftChange={updateDraft}
               onScrollTopChange={updateMessageScrollTop}
               onSessionChange={updateSession}
+              onNewChat={newChat}
+              onDeleteChat={deleteChat}
+              onEditMessage={editMessage}
+              onDeleteMessage={deleteMessage}
+              archivedCount={archivedCountByAgent[agentId]}
               onArtifactHandoff={handleArtifactHandoff}
             />
           ) : page === 'alignment' ? (

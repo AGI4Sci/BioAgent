@@ -5,7 +5,7 @@
 ## 使用约定
 - 本文档作为 BioAgent 工程任务板使用，只保留正在推进或待推进的任务。
 - 产品与架构基准见 `docs/BioAgent_Project_Document.md`。
-- 当前 Web UI 位于 `ui/`，本项目服务运行在 `http://localhost:5173/`。
+- 当前 Web UI 位于 `ui/`，本项目服务运行在 `http://localhost:5173/`；本地 workspace writer 运行在 `http://127.0.0.1:5174/`。
 - 优先复用 `/Applications/workspace/ailab/research/app/AgentServer` 快速开发 agent；当前 AgentServer 运行在 `http://127.0.0.1:18080`。
 - Phase 1 优先目标：先做好单 Agent 独立运行，再做 Agent 间数据打通，最后再做多 Agent 编排。
 - 代码路径必须尽量保持唯一真相源：引入新链路或发现冗余时必须删除、合并或明确降级旧链路，避免两个并行逻辑长期共存。
@@ -14,9 +14,11 @@
 ## 当前状态
 - 已有 React + Vite Web UI，包含研究概览、单 Agent 工作台、对齐工作台、研究时间线。
 - 已有 4 个 Agent profile mock：文献 Agent、结构 Agent、组学 Agent、知识库 Agent。
-- 单 Agent 工作台已有真实对话入口：`ChatPanel` 可调用 AgentServer `POST /api/agent-server/runs`，支持 loading、取消、错误提示和清空会话。
+- 单 Agent 工作台已有真实对话入口：`ChatPanel` 可调用 AgentServer `POST /api/agent-server/runs`，支持 loading、取消、错误提示、新建聊天、删除聊天、编辑消息和删除消息。
 - AgentServer 对话入口已优先使用 `POST /api/agent-server/runs/stream`，ChatPanel 会展示 NDJSON 流式事件；运行中输入不会被锁死，用户引导会进入可见队列并在当前 run 完成后自动继续发送。
 - 对话、run、claim、UIManifest、ExecutionUnit、artifact、notebook 已建立前端运行时模型，并按 Agent 独立持久化到 `localStorage`。
+- 会话管理已升级为 workspace state v2：支持新建聊天、删除当前聊天、编辑/删除历史消息、按操作生成版本快照；用户设置 workspace 目录后会同步写入 `<workspace>/.bioagent/`。
+- 本地 workspace writer 会把结构化状态拆分为 `workspace-state.json`、`sessions/*.json`、`artifacts/*.json`、`versions/*.json`，对齐 AgentServer 的 session / artifact / run audit 思路，同时不要求现在配置 MCP/skills 资源。
 - Agent profile 契约已集中到 `ui/src/agentProfiles.ts`：AgentServer id、native tools、fallback tools、输入契约、artifact schema、默认 UIManifest slots 和 ExecutionUnit defaults 统一从这里生成。
 - 右侧结果区已接入 UIManifest component registry，可按 agent 返回的 slot 动态渲染 paper cards、结构查看器、组学图表、网络图、证据矩阵、ExecutionUnit 和 notebook timeline；结构/组学/网络组件已能消费 artifact payload，并对 artifact 缺失 / 未注册组件提供 fallback 诊断。
 - ExecutionUnit 当前可从 agent 响应标准化生成 record-only/run 记录，支持当前会话 JSON bundle 导出，并已预留 code、seed、inputData、databaseVersions、outputArtifacts 等可复现字段；尚未对接后端真实工具执行状态和 pipeline 导出。
@@ -110,8 +112,9 @@
 #### 成功标准
 - 刷新页面后可以恢复最近的会话。
 - 每个 Agent 的会话、结果和 timeline 独立保存。
-- 用户可以清空当前 Agent 会话，不影响其他 Agent。
-- 后续可平滑替换为后端项目存储。
+- 用户可以新建 / 删除当前 Agent 聊天，不影响其他 Agent。
+- 历史消息可编辑和删除，每次结构化变更生成版本记录。
+- 用户设置 workspace 目录后，结构化状态落在 workspace 内的 `.bioagent/` 目录，后续可平滑替换为后端项目存储。
 
 #### TODO
 - [x] 先用 localStorage 实现 `bioagent.sessions.v1`。
@@ -119,6 +122,13 @@
 - [x] 增加 schema version，未来迁移时不破坏旧数据。
 - [x] 在 UI 增加清空会话、导出 JSON 的入口。
 - [x] 避免保存超大 artifact；大对象只保存 metadata 或 artifactRef。
+- [x] 迁移到 `bioagent.workspace.v2`，集中管理 active sessions、archived sessions、workspacePath 和版本记录。
+- [x] 参考 AgentServer session / artifact 管理规则，为每个会话维护 version snapshot、checksum、reason 和时间戳。
+- [x] 增加“开启新聊天”和“删除当前聊天”入口；删除不会直接丢弃结构化信息，而是归档到 workspace state。
+- [x] 支持编辑/删除历史消息，并将操作记录为新版本。
+- [x] 新增 `npm run workspace:server`，把 workspace state、session、artifact、version 写入用户设置的 workspace 目录。
+- [ ] 增加可视化版本浏览 / 恢复入口。
+- [ ] 将 workspace writer 替换或升级为 AgentServer 原生项目存储 API。
 
 ---
 
@@ -216,6 +226,8 @@
 - [x] Agent 切换时保留各自滚动位置和输入草稿。
 - [x] 顶部搜索框支持跳转到 Agent / timeline / alignment / workbench。
 - [x] 推理过程中允许继续输入引导，并显示 queued guidance 状态。
+- [x] 支持开启新聊天、删除当前聊天、编辑消息、删除消息。
+- [x] 聊天面板展示当前会话版本数和归档数量，降低版本化管理的不可见感。
 
 ### T012 响应式与可访问性
 
@@ -280,11 +292,11 @@
 ---
 
 ## 近期推荐开发顺序
-1. T001：先跑通真实 AgentServer 对话请求。
-2. T002：固定响应协议和 adapter，避免 UI 直接耦合后端临时格式。
-3. T003：让对话驱动右侧结果区，形成 BioAgent 区别于普通聊天的核心体验。
-4. T004：持久化会话和研究记录，防止刷新丢失上下文。
-5. T005：以文献 Agent 作为第一个完整单 Agent MVP。
+1. T004：补版本浏览 / 恢复入口，把当前只落盘的版本记录变成可操作历史。
+2. T012：补桌面 / 平板 / 手机视口回归，确保聊天面板、结果区和 workspace 输入不挤压。
+3. T008：接入真实知识库工具或 AgentServer proxy，减少 record-only 覆盖面。
+4. T009：对接 AgentServer 实际执行状态，让 ExecutionUnit 从 record-only 进入真实 run 状态。
+5. T014：把对齐工作台从静态说明推进到可编辑项目契约。
 
 ## 最新验证记录
 - 2026-04-19：`npm run test` 通过。
@@ -294,3 +306,4 @@
 - 2026-04-19：`npm run dev` 可访问 `http://127.0.0.1:5173/`。
 - 2026-04-19：AgentServer `GET http://127.0.0.1:18080/health` 连通。
 - 2026-04-19：前端已接入 AgentServer `/api/agent-server/runs/stream` NDJSON 流式事件；mid-run 用户输入当前为 queued follow-up，不伪装成真正 backend mid-run injection。
+- 2026-04-19：`npm run workspace:server` 已启动 `http://127.0.0.1:5174/`，workspace 写入 smoke 通过，验证生成 `.bioagent/workspace-state.json`、`sessions/session-smoke.json`、`artifacts/session-smoke-artifact-smoke.json`、`versions/session-smoke-version-smoke.json`。

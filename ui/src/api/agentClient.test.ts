@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { BIOAGENT_PROFILES } from '../agentProfiles';
+import type { AgentId } from '../data';
 import { normalizeAgentResponse } from './agentClient';
 
 describe('normalizeAgentResponse', () => {
@@ -85,4 +87,72 @@ describe('normalizeAgentResponse', () => {
     assert.equal(response.executionUnits[0].status, 'done');
     assert.equal(response.uiManifest.length, 0);
   });
+
+  it('preserves every profile default artifact contract through normalization', () => {
+    (Object.keys(BIOAGENT_PROFILES) as AgentId[]).forEach((agentId) => {
+      const profile = BIOAGENT_PROFILES[agentId];
+      const artifact = profile.outputArtifacts[0];
+      const slot = profile.defaultSlots.find((item) => item.artifactRef === artifact.type) ?? profile.defaultSlots[0];
+      const response = normalizeAgentResponse(agentId, `fixture ${agentId}`, {
+        run: {
+          id: `run-${agentId}`,
+          status: 'completed',
+          output: {
+            text: [
+              'fixture',
+              '```json',
+              JSON.stringify({
+                message: `${agentId} fixture`,
+                uiManifest: [slot],
+                artifacts: [{
+                  type: artifact.type,
+                  schemaVersion: '1',
+                  data: fixtureDataForArtifact(artifact.type),
+                }],
+                executionUnits: [{
+                  id: `EU-${agentId}`,
+                  tool: `${agentId}.fixture`,
+                  params: { prompt: agentId },
+                  status: profile.executionDefaults.status,
+                  hash: `hash-${agentId}`,
+                  environment: profile.executionDefaults.environment,
+                  databaseVersions: profile.executionDefaults.databaseVersions,
+                  outputArtifacts: [artifact.type],
+                }],
+              }),
+              '```',
+            ].join('\n'),
+          },
+        },
+      });
+
+      assert.equal(response.uiManifest[0].artifactRef, artifact.type);
+      assert.equal(response.artifacts[0].id, artifact.type);
+      assert.equal(response.artifacts[0].type, artifact.type);
+      assert.equal(response.executionUnits[0].environment, profile.executionDefaults.environment);
+      assert.deepEqual(response.executionUnits[0].databaseVersions, profile.executionDefaults.databaseVersions);
+      assert.deepEqual(response.executionUnits[0].outputArtifacts, [artifact.type]);
+    });
+  });
 });
+
+function fixtureDataForArtifact(type: string) {
+  if (type === 'paper-list') {
+    return { papers: [{ title: 'Fixture paper', source: 'PubMed', year: '2026', evidenceLevel: 'cohort' }] };
+  }
+  if (type === 'structure-summary') {
+    return { pdbId: '7BZ5', ligand: '6SI', highlightResidues: ['Y96D'], metrics: { pLDDT: 94.2, resolution: 1.79, pocketVolume: 628 } };
+  }
+  if (type === 'omics-differential-expression') {
+    return {
+      points: [{ gene: 'TP53', logFC: -1.8, pValue: 0.00001, significant: true }],
+      heatmap: { matrix: [[1, -1], [0.5, -0.25]] },
+      umap: [{ x: 0, y: 1, cluster: 'case' }],
+    };
+  }
+  return {
+    nodes: [{ id: 'KRAS', label: 'KRAS', type: 'gene' }, { id: 'SOTORASIB', label: 'Sotorasib', type: 'drug' }],
+    edges: [{ source: 'KRAS', target: 'SOTORASIB', relation: 'targeted_by' }],
+    rows: [{ key: 'approved_drugs', value: 'sotorasib' }],
+  };
+}

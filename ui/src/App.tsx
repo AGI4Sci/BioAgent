@@ -284,6 +284,16 @@ function asStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
 }
 
+function asNumberList(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry)) : [];
+}
+
+function asNumberMatrix(value: unknown): number[][] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const matrix = value.map(asNumberList).filter((row) => row.length > 0);
+  return matrix.length ? matrix : undefined;
+}
+
 function compactParams(params: string) {
   return params.length > 128 ? `${params.slice(0, 125)}...` : params;
 }
@@ -707,10 +717,33 @@ function ChatPanel({
   );
 }
 
-function VolcanoChart() {
+type VolcanoPoint = {
+  gene: string;
+  logFC: number;
+  negLogP: number;
+  sig: boolean;
+};
+
+function volcanoPointsFromPayload(payload: Record<string, unknown>): VolcanoPoint[] | undefined {
+  const records = toRecordList(payload.points);
+  const points = records.flatMap((record, index) => {
+    const logFC = asNumber(record.logFC) ?? asNumber(record.log2FC);
+    const negLogP = asNumber(record.negLogP) ?? (asNumber(record.pValue) ? -Math.log10(Math.max(1e-300, asNumber(record.pValue) ?? 1)) : undefined);
+    if (logFC === undefined || negLogP === undefined) return [];
+    return [{
+      gene: asString(record.gene) || asString(record.label) || `Gene${index + 1}`,
+      logFC,
+      negLogP,
+      sig: typeof record.significant === 'boolean' ? record.significant : Math.abs(logFC) > 1.4 && negLogP > 3,
+    }];
+  });
+  return points.length ? points : undefined;
+}
+
+function VolcanoChart({ points }: { points?: VolcanoPoint[] }) {
   const data = useMemo(
     () =>
-      Array.from({ length: 160 }, (_, i) => {
+      points?.length ? points : Array.from({ length: 160 }, (_, i) => {
         const logFC = Math.sin(i * 1.73) * 3.8 + Math.cos(i * 0.29);
         const negLogP = Math.abs(Math.cos(i * 0.41) * 9 + Math.sin(i * 0.13) * 4);
         return { gene: `Gene${i}`, logFC, negLogP, sig: Math.abs(logFC) > 1.4 && negLogP > 3 };
@@ -719,7 +752,7 @@ function VolcanoChart() {
         { gene: 'MYC', logFC: 3.2, negLogP: 7.9, sig: true },
         { gene: 'TP53', logFC: -1.82, negLogP: 5.3, sig: true },
       ]),
-    [],
+    [points],
   );
   return (
     <div className="chart-300">
@@ -740,7 +773,15 @@ function VolcanoChart() {
   );
 }
 
-function ResultsRenderer({ agentId, session }: { agentId: AgentId; session: BioAgentSession }) {
+function ResultsRenderer({
+  agentId,
+  session,
+  onArtifactHandoff,
+}: {
+  agentId: AgentId;
+  session: BioAgentSession;
+  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
+}) {
   const [resultTab, setResultTab] = useState('primary');
   const agent = agents.find((item) => item.id === agentId) ?? agents[0];
   const tabs = [
@@ -757,7 +798,7 @@ function ResultsRenderer({ agentId, session }: { agentId: AgentId; session: BioA
       </div>
       <div className="result-content">
         {resultTab === 'primary' ? (
-          <PrimaryResult agentId={agentId} session={session} />
+          <PrimaryResult agentId={agentId} session={session} onArtifactHandoff={onArtifactHandoff} />
         ) : resultTab === 'evidence' ? (
           <EvidenceMatrix claims={session.claims} />
         ) : resultTab === 'execution' ? (
@@ -818,6 +859,7 @@ function MoleculeSlot({ slot, artifact }: RegistryRendererProps) {
   const pdbId = asString(payload.pdbId) || asString(payload.pdb) || '7BZ5';
   const ligand = asString(payload.ligand) || '6SI';
   const residues = asStringList(payload.highlightResidues ?? payload.residues);
+  const metrics = isRecord(payload.metrics) ? payload.metrics : payload;
   return (
     <div className="stack">
       <div className="slot-meta">
@@ -827,28 +869,53 @@ function MoleculeSlot({ slot, artifact }: RegistryRendererProps) {
         {residues.length ? <code>residues={residues.join(',')}</code> : null}
       </div>
       <Card className="viz-card">
-        <MoleculeViewer />
+        <MoleculeViewer pdbId={pdbId} ligand={ligand} highlightResidues={residues} pocketLabel={asString(payload.pocketLabel) || asString(payload.pocket) || 'Switch-II pocket'} />
       </Card>
-      <MetricGrid />
+      <MetricGrid metrics={metrics} />
     </div>
   );
 }
 
 function CanvasSlot({ slot, artifact, kind }: RegistryRendererProps & { kind: 'volcano' | 'heatmap' | 'umap' | 'network' }) {
   const payload = slotPayload(slot, artifact);
-  const nodes = toRecordList(payload.nodes).length;
-  const edges = toRecordList(payload.edges).length;
-  const points = toRecordList(payload.points).length;
+  const networkNodes = toRecordList(payload.nodes).map((node) => ({
+    id: asString(node.id),
+    label: asString(node.label) || asString(node.name),
+    type: asString(node.type),
+  }));
+  const networkEdges = toRecordList(payload.edges).map((edge) => ({
+    source: asString(edge.source) || asString(edge.from),
+    target: asString(edge.target) || asString(edge.to),
+  }));
+  const volcanoPoints = volcanoPointsFromPayload(payload);
+  const heatmap = isRecord(payload.heatmap)
+    ? asNumberMatrix(payload.heatmap.matrix ?? payload.heatmap.values)
+    : asNumberMatrix(payload.matrix ?? payload.values);
+  const umapPoints = toRecordList(payload.umap ?? payload.points).flatMap((point) => {
+    const x = asNumber(point.x) ?? asNumber(point.umap1);
+    const y = asNumber(point.y) ?? asNumber(point.umap2);
+    return x === undefined || y === undefined ? [] : [{ x, y, cluster: asString(point.cluster) || asString(point.group), label: asString(point.label) }];
+  });
   return (
     <div className="stack">
       <div className="slot-meta">
         <Badge variant={artifact ? 'success' : 'muted'}>{artifactMeta(artifact)}</Badge>
-        {nodes ? <code>{nodes} nodes</code> : null}
-        {edges ? <code>{edges} edges</code> : null}
-        {points ? <code>{points} points</code> : null}
+        {networkNodes.length ? <code>{networkNodes.length} nodes</code> : null}
+        {networkEdges.length ? <code>{networkEdges.length} edges</code> : null}
+        {volcanoPoints?.length ? <code>{volcanoPoints.length} volcano points</code> : null}
+        {umapPoints.length ? <code>{umapPoints.length} UMAP points</code> : null}
+        {heatmap ? <code>{heatmap.length}x{heatmap[0]?.length ?? 0} heatmap</code> : null}
       </div>
       <Card className="viz-card">
-        {kind === 'volcano' ? <VolcanoChart /> : kind === 'heatmap' ? <HeatmapViewer /> : kind === 'umap' ? <UmapViewer /> : <NetworkGraph />}
+        {kind === 'volcano' ? (
+          <VolcanoChart points={volcanoPoints} />
+        ) : kind === 'heatmap' ? (
+          <HeatmapViewer matrix={heatmap} label={asString(payload.label) || asString(isRecord(payload.heatmap) ? payload.heatmap.label : undefined)} />
+        ) : kind === 'umap' ? (
+          <UmapViewer points={umapPoints.length ? umapPoints : undefined} />
+        ) : (
+          <NetworkGraph nodes={networkNodes.length ? networkNodes : undefined} edges={networkEdges.length ? networkEdges : undefined} />
+        )}
       </Card>
     </div>
   );
@@ -891,7 +958,15 @@ const componentRegistry: Record<string, RegistryEntry> = {
   'data-table': { label: 'DataTable', render: (props) => <DataTableSlot {...props} /> },
 };
 
-function PrimaryResult({ agentId, session }: { agentId: AgentId; session: BioAgentSession }) {
+function PrimaryResult({
+  agentId,
+  session,
+  onArtifactHandoff,
+}: {
+  agentId: AgentId;
+  session: BioAgentSession;
+  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
+}) {
   const slots = (session.uiManifest.length ? session.uiManifest : defaultSlotsForAgent(agentId))
     .slice()
     .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
@@ -902,16 +977,38 @@ function PrimaryResult({ agentId, session }: { agentId: AgentId; session: BioAge
       <ManifestDiagnostics slots={slots} />
       <div className="registry-grid">
         {slots.map((slot) => (
-          <RegistrySlot key={`${slot.componentId}-${slot.artifactRef ?? slot.title ?? slot.priority ?? ''}`} agentId={agentId} session={session} slot={slot} />
+          <RegistrySlot
+            key={`${slot.componentId}-${slot.artifactRef ?? slot.title ?? slot.priority ?? ''}`}
+            agentId={agentId}
+            session={session}
+            slot={slot}
+            onArtifactHandoff={onArtifactHandoff}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function RegistrySlot({ agentId, session, slot }: { agentId: AgentId; session: BioAgentSession; slot: UIManifestSlot }) {
+function RegistrySlot({
+  agentId,
+  session,
+  slot,
+  onArtifactHandoff,
+}: {
+  agentId: AgentId;
+  session: BioAgentSession;
+  slot: UIManifestSlot;
+  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
+}) {
   const artifact = findArtifact(session, slot.artifactRef);
   const entry = componentRegistry[slot.componentId];
+  const artifactSchema = artifact
+    ? BIOAGENT_PROFILES[artifact.producerAgent].outputArtifacts.find((schema) => schema.type === artifact.type)
+    : undefined;
+  const handoffTargets = artifact && artifactSchema
+    ? artifactSchema.consumers.filter((consumer) => consumer !== agentId)
+    : [];
   if (!entry) {
     return (
       <Card className="registry-slot">
@@ -926,6 +1023,19 @@ function RegistrySlot({ agentId, session, slot }: { agentId: AgentId; session: B
       <SectionHeader icon={Target} title={slot.title ?? entry.label} subtitle={`${slot.componentId}${slot.artifactRef ? ` -> ${slot.artifactRef}` : ''}`} />
       {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到，已使用组件 fallback。</p> : null}
       {entry.render({ agentId, session, slot, artifact })}
+      {artifact && handoffTargets.length ? (
+        <div className="handoff-actions">
+          <span>发送 artifact 到</span>
+          {handoffTargets.map((target) => {
+            const targetAgent = agents.find((item) => item.id === target);
+            return (
+              <button key={target} onClick={() => onArtifactHandoff(target, artifact)}>
+                {targetAgent?.name ?? target}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -942,15 +1052,16 @@ function ManifestDiagnostics({ slots }: { slots: Array<{ componentId: string; ti
   );
 }
 
-function MetricGrid() {
+function MetricGrid({ metrics = {} }: { metrics?: Record<string, unknown> }) {
+  const rows = [
+    ['Pocket volume', asString(metrics.pocketVolume) || (asNumber(metrics.pocketVolume) ? `${asNumber(metrics.pocketVolume)} A3` : '628 A3'), '#00E5A0'],
+    ['pLDDT mean', asString(metrics.pLDDT) || asString(metrics.plddt) || String(asNumber(metrics.pLDDT) ?? asNumber(metrics.plddt) ?? '94.2'), '#4ECDC4'],
+    ['Resolution', asString(metrics.resolution) || (asNumber(metrics.resolution) ? `${asNumber(metrics.resolution)} A` : '1.79 A'), '#FFD54F'],
+    ['Mutation risk', asString(metrics.mutationRisk) || 'Y96D', '#FF7043'],
+  ];
   return (
     <div className="metric-grid">
-      {[
-        ['Pocket volume', '628 A3', '#00E5A0'],
-        ['pLDDT mean', '94.2', '#4ECDC4'],
-        ['DrugScore', '0.73', '#FFD54F'],
-        ['Mutation risk', 'Y96D', '#FF7043'],
-      ].map(([label, value, color]) => (
+      {rows.map(([label, value, color]) => (
         <Card className="metric" key={label}>
           <span>{label}</span>
           <strong style={{ color }}>{value}</strong>
@@ -1129,10 +1240,12 @@ function Workbench({
   agentId,
   session,
   onSessionChange,
+  onArtifactHandoff,
 }: {
   agentId: AgentId;
   session: BioAgentSession;
   onSessionChange: (session: BioAgentSession) => void;
+  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
 }) {
   const agent = agents.find((item) => item.id === agentId) ?? agents[0];
   const [role, setRole] = useState('biologist');
@@ -1162,7 +1275,7 @@ function Workbench({
       <AgentContractPanel agentId={agentId} />
       <div className="workbench-grid">
         <ChatPanel agentId={agentId} role={role} session={session} onSessionChange={onSessionChange} />
-        <ResultsRenderer agentId={agentId} session={session} />
+        <ResultsRenderer agentId={agentId} session={session} onArtifactHandoff={onArtifactHandoff} />
       </div>
     </main>
   );
@@ -1345,6 +1458,50 @@ export function BioAgentApp() {
     }));
   }
 
+  function handleArtifactHandoff(targetAgent: AgentId, artifact: RuntimeArtifact) {
+    const sourceAgent = agents.find((item) => item.id === artifact.producerAgent);
+    const target = agents.find((item) => item.id === targetAgent);
+    const now = nowIso();
+    const handoffMessage: BioAgentMessage = {
+      id: makeId('handoff'),
+      role: 'user',
+      content: [
+        `请基于来自${sourceAgent?.name ?? artifact.producerAgent}的 artifact 继续分析。`,
+        `artifact id: ${artifact.id}`,
+        `artifact type: ${artifact.type}`,
+        `目标：按${target?.name ?? targetAgent}的 input contract 生成下一步 claims、ExecutionUnit 和 UIManifest。`,
+      ].join('\n'),
+      createdAt: now,
+      status: 'completed',
+    };
+    setSessions((current) => {
+      const targetSession = current[targetAgent];
+      const artifacts = targetSession.artifacts.some((item) => item.id === artifact.id)
+        ? targetSession.artifacts
+        : [artifact, ...targetSession.artifacts].slice(0, 24);
+      return {
+        ...current,
+        [targetAgent]: {
+          ...targetSession,
+          messages: [...targetSession.messages, handoffMessage],
+          artifacts,
+          notebook: [{
+            id: makeId('note'),
+            time: new Date(now).toLocaleString('zh-CN', { hour12: false }),
+            agent: targetAgent,
+            title: `接收 ${artifact.type}`,
+            desc: `来自 ${sourceAgent?.name ?? artifact.producerAgent} 的 ${artifact.id} 已进入当前 Agent 上下文。`,
+            claimType: 'fact',
+            confidence: 1,
+          }, ...targetSession.notebook].slice(0, 24),
+          updatedAt: now,
+        },
+      };
+    });
+    setAgentId(targetAgent);
+    setPage('workbench');
+  }
+
   return (
     <div className="app-shell">
       <div className="ambient ambient-a" />
@@ -1356,7 +1513,7 @@ export function BioAgentApp() {
           {page === 'dashboard' ? (
             <Dashboard setPage={setPage} setAgentId={setAgentId} />
           ) : page === 'workbench' ? (
-            <Workbench agentId={agentId} session={sessions[agentId]} onSessionChange={updateSession} />
+            <Workbench agentId={agentId} session={sessions[agentId]} onSessionChange={updateSession} onArtifactHandoff={handleArtifactHandoff} />
           ) : page === 'alignment' ? (
             <AlignmentPage />
           ) : (

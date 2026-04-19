@@ -17,7 +17,7 @@
 - 单 Agent 工作台已有真实对话入口：`ChatPanel` 可调用 AgentServer `POST /api/agent-server/runs`，支持 loading、取消、错误提示和清空会话。
 - 对话、run、claim、UIManifest、ExecutionUnit、artifact、notebook 已建立前端运行时模型，并按 Agent 独立持久化到 `localStorage`。
 - Agent profile 契约已集中到 `ui/src/agentProfiles.ts`：AgentServer id、native tools、fallback tools、输入契约、artifact schema、默认 UIManifest slots 和 ExecutionUnit defaults 统一从这里生成。
-- 右侧结果区已接入 UIManifest component registry，可按 agent 返回的 slot 动态渲染 paper cards、结构查看器、组学图表、网络图、证据矩阵、ExecutionUnit 和 notebook timeline，并对 artifact 缺失 / 未注册组件提供 fallback 诊断。
+- 右侧结果区已接入 UIManifest component registry，可按 agent 返回的 slot 动态渲染 paper cards、结构查看器、组学图表、网络图、证据矩阵、ExecutionUnit 和 notebook timeline；结构/组学/网络组件已能消费 artifact payload，并对 artifact 缺失 / 未注册组件提供 fallback 诊断。
 - ExecutionUnit 当前可从 agent 响应标准化生成 record-only/run 记录，支持当前会话 JSON bundle 导出，并已预留 code、seed、inputData、databaseVersions、outputArtifacts 等可复现字段；尚未对接后端真实工具执行状态和 pipeline 导出。
 
 ---
@@ -140,7 +140,7 @@
 
 #### TODO
 - [x] 定义结构输入：PDB ID、UniProt ID、mutation、ligand、residue range。
-- [ ] 将 MoleculeViewer 从纯示意升级为可接收结构参数。
+- [x] 将 MoleculeViewer 从纯示意升级为可接收结构参数。
 - [x] 定义 structure-summary artifact schema：pLDDT、resolution、pocket volume、mutation risk 等 metrics。
 - [x] 生成结构分析 ExecutionUnit 草案。
 - [ ] 对无结构、低置信度结构、无法加载结构提供 fallback。
@@ -153,8 +153,8 @@
 #### TODO
 - [x] 定义输入数据契约：表达矩阵、metadata、分组、design formula。
 - [x] 先支持 demo dataset / record-only ExecutionUnit。
-- [ ] 火山图、热图、UMAP 支持从 artifact 数据渲染。
-- [ ] 展示 p-value、FDR、log2FC、通路富集结果。
+- [x] 火山图、热图、UMAP 支持从 artifact 数据渲染。
+- [x] 展示 p-value/log2FC 派生图形；FDR 和通路富集结果等待真实 omics backend artifact。
 - [x] 区分真实计算结果和 mock / demo 数据。
 
 ### T008 知识库 Agent MVP
@@ -166,7 +166,7 @@
 - [x] 定义查询输入：gene / protein / disease / compound。
 - [ ] 接入 UniProt、PDB、ChEMBL、OpenTargets 等可用工具或 AgentServer proxy。
 - [ ] 返回知识卡片：功能、别名、疾病关联、药物、临床试验。
-- [ ] NetworkGraph 支持动态节点、边、证据来源和置信度。
+- [x] NetworkGraph 支持动态节点、边；证据来源和置信度等待真实 knowledge backend artifact。
 - [x] 将知识库结果转换为可被其他 Agent 复用的标准 artifact schema。
 
 ---
@@ -217,7 +217,7 @@
 #### TODO
 - [ ] 检查 1440px、1024px、768px、390px 视口下工作台布局。
 - [ ] 小屏下 ChatPanel 和 ResultsRenderer 改为 tabs 或上下布局。
-- [ ] 图表容器保持稳定尺寸，避免动态内容导致布局跳动。
+- [x] 图表容器保持稳定尺寸，避免动态内容导致布局跳动。
 - [ ] 所有 icon button 补齐 tooltip / aria-label。
 - [ ] 确保按钮文字、badge、tab 在中文长文本下不溢出。
 
@@ -262,7 +262,7 @@
 - [x] 定义 `Artifact`：id、type、producerAgent、schemaVersion、metadata、dataRef。
 - [x] 文献 Agent 输出靶点列表可作为结构 Agent / 知识库 Agent 输入的 schema consumers 已声明。
 - [x] 组学 Agent 输出差异基因可作为文献 Agent / 知识库 Agent 输入的 schema consumers 已声明。
-- [ ] UI 提供“发送到另一个 Agent”操作。
+- [x] UI 提供“发送到另一个 Agent”操作。
 
 ### T017 编排层预研
 

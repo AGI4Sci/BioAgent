@@ -1,5 +1,44 @@
 import { useEffect, useRef } from 'react';
 
+export interface NetworkNodeInput {
+  id?: string;
+  label?: string;
+  type?: string;
+}
+
+export interface NetworkEdgeInput {
+  source?: string;
+  target?: string;
+}
+
+export interface UmapPointInput {
+  x: number;
+  y: number;
+  cluster?: string;
+  label?: string;
+}
+
+export interface MoleculeViewerProps {
+  pdbId?: string;
+  ligand?: string;
+  pocketLabel?: string;
+  highlightResidues?: string[];
+}
+
+export interface HeatmapViewerProps {
+  matrix?: number[][];
+  label?: string;
+}
+
+export interface NetworkGraphProps {
+  nodes?: NetworkNodeInput[];
+  edges?: NetworkEdgeInput[];
+}
+
+export interface UmapViewerProps {
+  points?: UmapPointInput[];
+}
+
 function fitCanvas(canvas: HTMLCanvasElement) {
   const ratio = window.devicePixelRatio || 1;
   const width = Math.max(320, canvas.clientWidth);
@@ -12,7 +51,12 @@ function fitCanvas(canvas: HTMLCanvasElement) {
   return { ctx, width, height };
 }
 
-export function MoleculeViewer() {
+export function MoleculeViewer({
+  pdbId = '7BZ5',
+  ligand = '6SI',
+  pocketLabel = 'Switch-II pocket',
+  highlightResidues = [],
+}: MoleculeViewerProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -88,17 +132,23 @@ export function MoleculeViewer() {
       ctx.stroke();
       ctx.fillStyle = '#00E5A0';
       ctx.font = '12px JetBrains Mono, monospace';
-      ctx.fillText('Switch-II pocket', width / 2 + 22, height / 2 + 62);
+      ctx.fillText(pocketLabel, width / 2 + 22, height / 2 + 62);
+      ctx.fillStyle = '#B0C4D8';
+      ctx.fillText(`PDB:${pdbId} ligand:${ligand}`, 22, 24);
+      if (highlightResidues.length) {
+        ctx.fillStyle = '#FFD54F';
+        ctx.fillText(`residues: ${highlightResidues.slice(0, 4).join(',')}`, 22, 44);
+      }
       raf = requestAnimationFrame(draw);
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [highlightResidues, ligand, pdbId, pocketLabel]);
 
-  return <canvas ref={ref} className="viz-canvas" aria-label="Molecule viewer mock" />;
+  return <canvas ref={ref} className="viz-canvas" aria-label="Molecule viewer" />;
 }
 
-export function HeatmapViewer() {
+export function HeatmapViewer({ matrix, label = 'Top variable genes x samples' }: HeatmapViewerProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -109,13 +159,13 @@ export function HeatmapViewer() {
     const { ctx, width, height } = fit;
     ctx.fillStyle = '#0A0F1A';
     ctx.fillRect(0, 0, width, height);
-    const rows = 22;
-    const cols = 18;
+    const rows = matrix?.length || 22;
+    const cols = matrix?.[0]?.length || 18;
     const margin = 34;
     const cell = Math.min((width - margin * 2) / cols, (height - margin * 2) / rows);
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        const v = Math.sin(r * 0.75) + Math.cos(c * 0.6) + Math.sin((r + c) * 0.18);
+        const v = matrix?.[r]?.[c] ?? Math.sin(r * 0.75) + Math.cos(c * 0.6) + Math.sin((r + c) * 0.18);
         const color = v > 0 ? `rgba(255,112,67,${Math.min(0.95, 0.25 + v * 0.28)})` : `rgba(78,205,196,${Math.min(0.95, 0.25 - v * 0.28)})`;
         ctx.fillStyle = color;
         ctx.fillRect(margin + c * cell, margin + r * cell, cell - 2, cell - 2);
@@ -123,13 +173,13 @@ export function HeatmapViewer() {
     }
     ctx.fillStyle = '#B0C4D8';
     ctx.font = '12px JetBrains Mono, monospace';
-    ctx.fillText('Top variable genes x samples', margin, 20);
-  }, []);
+    ctx.fillText(label, margin, 20);
+  }, [label, matrix]);
 
-  return <canvas ref={ref} className="viz-canvas" aria-label="Heatmap mock" />;
+  return <canvas ref={ref} className="viz-canvas" aria-label="Heatmap" />;
 }
 
-export function NetworkGraph() {
+export function NetworkGraph({ nodes: inputNodes, edges: inputEdges }: NetworkGraphProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -137,8 +187,21 @@ export function NetworkGraph() {
     if (!canvas) return undefined;
     let raf = 0;
     let tick = 0;
-    const nodes = ['KRAS', 'EGFR', 'MET', 'MAPK1', 'PIK3CA', 'SOS1', 'RAF1', 'ERK'];
-    const edges = [[0, 1], [0, 2], [0, 5], [0, 6], [6, 7], [1, 4], [2, 4], [5, 6]];
+    const nodes: Array<{ id: string; label: string; type?: string }> = inputNodes?.length
+      ? inputNodes.map((node, index) => ({
+        id: node.id || node.label || `node-${index}`,
+        label: node.label || node.id || `Node ${index + 1}`,
+        type: node.type,
+      }))
+      : ['KRAS', 'EGFR', 'MET', 'MAPK1', 'PIK3CA', 'SOS1', 'RAF1', 'ERK'].map((label) => ({ id: label, label }));
+    const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+    const edges = inputEdges?.length
+      ? inputEdges.flatMap((edge) => {
+        const source = edge.source ? indexById.get(edge.source) : undefined;
+        const target = edge.target ? indexById.get(edge.target) : undefined;
+        return source === undefined || target === undefined ? [] : [[source, target] as [number, number]];
+      })
+      : [[0, 1], [0, 2], [0, 5], [0, 6], [6, 7], [1, 4], [2, 4], [5, 6]] as [number, number][];
     const draw = () => {
       const fit = fitCanvas(canvas);
       if (!fit) return;
@@ -162,7 +225,7 @@ export function NetworkGraph() {
         ctx.stroke();
       });
       positions.forEach((pos, i) => {
-        const color = i === 0 ? '#00E5A0' : i < 3 ? '#FF7043' : '#4ECDC4';
+        const color = i === 0 ? '#00E5A0' : nodes[i].type === 'drug' || i < 3 ? '#FF7043' : '#4ECDC4';
         ctx.fillStyle = `${color}33`;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, i === 0 ? 34 : 24, 0, Math.PI * 2);
@@ -172,18 +235,18 @@ export function NetworkGraph() {
         ctx.fillStyle = '#E8EDF5';
         ctx.font = i === 0 ? '700 13px DM Sans' : '11px DM Sans';
         ctx.textAlign = 'center';
-        ctx.fillText(nodes[i], pos.x, pos.y + 4);
+        ctx.fillText(nodes[i].label.slice(0, 14), pos.x, pos.y + 4);
       });
       raf = requestAnimationFrame(draw);
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [inputEdges, inputNodes]);
 
-  return <canvas ref={ref} className="viz-canvas" aria-label="Network graph mock" />;
+  return <canvas ref={ref} className="viz-canvas" aria-label="Network graph" />;
 }
 
-export function UmapViewer() {
+export function UmapViewer({ points }: UmapViewerProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -194,6 +257,31 @@ export function UmapViewer() {
     const { ctx, width, height } = fit;
     ctx.fillStyle = '#0A0F1A';
     ctx.fillRect(0, 0, width, height);
+    if (points?.length) {
+      const colors = ['#00E5A0', '#FF7043', '#4ECDC4', '#FFD54F', '#3D7AED'];
+      const clusters = Array.from(new Set(points.map((point) => point.cluster || 'cluster')));
+      const xs = points.map((point) => point.x);
+      const ys = points.map((point) => point.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      points.forEach((point) => {
+        const color = colors[Math.max(0, clusters.indexOf(point.cluster || 'cluster')) % colors.length];
+        const x = 32 + ((point.x - minX) / Math.max(1e-6, maxX - minX)) * (width - 64);
+        const y = 32 + ((point.y - minY) / Math.max(1e-6, maxY - minY)) * (height - 64);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.74;
+        ctx.beginPath();
+        ctx.arc(x, y, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#B0C4D8';
+      ctx.font = '12px JetBrains Mono, monospace';
+      ctx.fillText(`UMAP ${points.length} samples`, 24, 24);
+      return;
+    }
     const clusters = [
       { x: 0.3, y: 0.35, color: '#00E5A0' },
       { x: 0.65, y: 0.42, color: '#FF7043' },
@@ -217,7 +305,7 @@ export function UmapViewer() {
     ctx.fillStyle = '#B0C4D8';
     ctx.font = '12px JetBrains Mono, monospace';
     ctx.fillText('UMAP clusters', 24, 24);
-  }, []);
+  }, [points]);
 
-  return <canvas ref={ref} className="viz-canvas" aria-label="UMAP mock" />;
+  return <canvas ref={ref} className="viz-canvas" aria-label="UMAP" />;
 }

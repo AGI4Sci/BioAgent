@@ -1780,6 +1780,7 @@ function ExecutionPanel({
             <span>EU ID</span>
             <span>Tool</span>
             <span>Params</span>
+            <span>Code Artifact</span>
             <span>Status</span>
             <span>Hash</span>
           </div>
@@ -1788,6 +1789,9 @@ function ExecutionPanel({
               <code>{unit.id}</code>
               <span>{unit.tool}</span>
               <code title={unit.params}>{compactParams(unit.params)}</code>
+              <code title={[unit.codeRef, unit.stdoutRef, unit.stderrRef].filter(Boolean).join('\n') || unit.code || ''}>
+                {unit.codeRef || unit.language || unit.code || 'n/a'}
+              </code>
               <Badge variant={unit.status === 'done' ? 'success' : unit.status === 'planned' || unit.status === 'record-only' ? 'muted' : unit.status === 'failed' ? 'danger' : 'warning'}>{unit.status}</Badge>
               <code>{unit.hash}</code>
             </div>
@@ -1796,19 +1800,26 @@ function ExecutionPanel({
       ) : <EmptyArtifactState title="等待真实 ExecutionUnit" detail="执行面板只展示当前会话的 runtime executionUnits，不再填充 demo 执行记录。" />}
       <Card className="code-card">
         <SectionHeader icon={FileCode} title="环境定义" />
-        <pre>{`name: bioagent-phase1
-runtime: record-only
-dependencies:
-  - node=20
-  - python=3.11
-  - bioconductor-deseq2=1.42
-input_sha256: a3f2c9b7d1e4...
-database_versions:
-  UniProt: 2026.03
-  PDB: 2026-04 snapshot`}</pre>
+        <pre>{executionEnvironmentText(rows)}</pre>
       </Card>
     </div>
   );
+}
+
+function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
+  if (!rows.length) return 'No runtime execution units yet.';
+  return rows.map((unit) => [
+    `id: ${unit.id}`,
+    `tool: ${unit.tool}`,
+    `language: ${unit.language || 'unspecified'}`,
+    `codeRef: ${unit.codeRef || unit.code || 'n/a'}`,
+    `entrypoint: ${unit.entrypoint || 'n/a'}`,
+    `environment: ${unit.environment || 'n/a'}`,
+    `stdoutRef: ${unit.stdoutRef || 'n/a'}`,
+    `stderrRef: ${unit.stderrRef || 'n/a'}`,
+    `outputRef: ${unit.outputRef || 'n/a'}`,
+    `databases: ${(unit.databaseVersions ?? []).join(', ') || 'n/a'}`,
+  ].join('\n')).join('\n\n');
 }
 
 function NotebookTimeline({ agentId, notebook = [] }: { agentId: AgentId; notebook?: NotebookRecord[] }) {

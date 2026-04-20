@@ -64,6 +64,15 @@ export interface RuntimeExecutionUnit {
   status: ExecutionUnitStatus;
   hash: string;
   code?: string;
+  language?: string;
+  codeRef?: string;
+  entrypoint?: string;
+  stdoutRef?: string;
+  stderrRef?: string;
+  outputRef?: string;
+  attempt?: number;
+  parentAttempt?: number;
+  selfHealReason?: string;
   seed?: number;
   time?: string;
   environment?: string;

@@ -25,25 +25,6 @@ interface ToolPayload {
   artifacts: Array<Record<string, unknown>>;
 }
 
-interface StructureAtomPreview {
-  atomName: string;
-  residueName: string;
-  chain: string;
-  residueNumber: string;
-  element: string;
-  x: number;
-  y: number;
-  z: number;
-  hetatm: boolean;
-}
-
-interface StructureCoordinateDownload {
-  url: string;
-  format: 'pdb' | 'cif';
-  text: string;
-  atoms: StructureAtomPreview[];
-}
-
 const PROFILE_SET = new Set<Profile>(['literature', 'structure', 'omics', 'knowledge']);
 const execFileAsync = promisify(execFile);
 
@@ -155,201 +136,120 @@ async function pubmedSummaries(ids: string[]) {
 }
 
 async function runStructure(request: ToolRequest): Promise<ToolPayload> {
-  const accession = request.prompt.match(/\b[A-Z][A-Z0-9]{5,9}\b/)?.[0];
-  const pdbId = request.prompt.match(/\b[0-9][A-Za-z0-9]{3}\b/)?.[0]?.toUpperCase();
-  if (accession && !pdbId) return runAlphaFoldStructure(request, accession);
-  const latestRequested = /最新|latest|newest|recent|release|released/i.test(request.prompt);
-  const searched = !pdbId ? await searchPdbEntry(request.prompt, { latest: latestRequested }) : undefined;
-  if (!pdbId && !searched) return structureNoResult(request.prompt);
-  const id = pdbId || searched?.pdbId;
-  if (!id) return structureNoResult(request.prompt);
-  const url = `https://data.rcsb.org/rest/v1/core/entry/${encodeURIComponent(id)}`;
-  const record = await fetchJson(url) as Record<string, unknown>;
-  const info = isRecord(record.struct) ? record.struct : {};
-  const exptl = Array.isArray(record.exptl) && isRecord(record.exptl[0]) ? record.exptl[0] : {};
-  const refine = Array.isArray(record.refine) && isRecord(record.refine[0]) ? record.refine[0] : {};
-  const accessionInfo = isRecord(record.rcsb_accession_info) ? record.rcsb_accession_info : {};
-  const resolution = numberValue(refine.ls_d_res_high);
-  const residues = residueRanges(request.prompt);
-  let coordinate: StructureCoordinateDownload;
-  try {
-    coordinate = await downloadRcsbCoordinates(id);
-  } catch (error) {
-    return structureDownloadFailure(id, `https://files.rcsb.org/download/${id}.cif`, errorMessage(error));
-  }
   const workspace = resolve(request.workspacePath || process.cwd());
-  const coordinateRel = `.bioagent/structures/${id}.${coordinate.format}`;
-  const taskRel = `.bioagent/tasks/structure-${id}-${createHash('sha1').update(`${request.prompt}:${Date.now()}`).digest('hex').slice(0, 10)}.mjs`;
+  const runId = createHash('sha1').update(`structure:${request.prompt}:${Date.now()}`).digest('hex').slice(0, 12);
+  const taskRel = `.bioagent/tasks/structure-${runId}.py`;
+  const inputRel = `.bioagent/task-inputs/structure-${runId}.json`;
+  const outputRel = `.bioagent/task-results/structure-${runId}.json`;
+  const stdoutRel = `.bioagent/logs/structure-${runId}.stdout.log`;
+  const stderrRel = `.bioagent/logs/structure-${runId}.stderr.log`;
   await mkdir(join(workspace, '.bioagent', 'structures'), { recursive: true });
   await mkdir(join(workspace, '.bioagent', 'tasks'), { recursive: true });
-  await writeFile(join(workspace, coordinateRel), coordinate.text);
-  await writeFile(join(workspace, taskRel), structureTaskCode({
+  await mkdir(join(workspace, '.bioagent', 'task-inputs'), { recursive: true });
+  await mkdir(join(workspace, '.bioagent', 'task-results'), { recursive: true });
+  await mkdir(join(workspace, '.bioagent', 'logs'), { recursive: true });
+  const taskTemplate = await readFile(resolve(process.cwd(), 'scripts', 'python_tasks', 'structure_task.py'), 'utf8');
+  const pythonCommand = await pythonCommandForWorkspace(workspace);
+  await writeFile(join(workspace, taskRel), taskTemplate);
+  await writeFile(join(workspace, inputRel), JSON.stringify({
     prompt: request.prompt,
-    pdbId: id,
-    latestRequested,
-    searchQuery: searched?.query,
-    entryUrl: url,
-    coordinateUrl: coordinate.url,
-    coordinateRef: coordinateRel,
-    coordinateFormat: coordinate.format,
-  }));
-  const atomCoordinates = coordinate.atoms;
-  const releaseDate = stringValue(accessionInfo.initial_release_date);
-  const structureSummary = latestRequested
-    ? `latest released PDB entry ${id}${releaseDate ? ` (${releaseDate.slice(0, 10)})` : ''}`
-    : `PDB ${id}`;
+    workspacePath: workspace,
+    runId,
+    attempt: 1,
+    taskCodeRef: taskRel,
+    inputRef: inputRel,
+    outputRef: outputRel,
+    stdoutRef: stdoutRel,
+    stderrRef: stderrRel,
+    pythonCommand,
+  }, null, 2));
+  try {
+    const result = await execFileAsync(pythonCommand, [join(workspace, taskRel), join(workspace, inputRel), join(workspace, outputRel)], {
+      cwd: workspace,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    await writeFile(join(workspace, stdoutRel), result.stdout || '');
+    await writeFile(join(workspace, stderrRel), result.stderr || '');
+    return await readPythonTaskPayload(workspace, outputRel, taskRel, stdoutRel, stderrRel);
+  } catch (error) {
+    const maybe = isRecord(error) ? error : {};
+    await writeFile(join(workspace, stdoutRel), typeof maybe.stdout === 'string' ? maybe.stdout : '');
+    await writeFile(join(workspace, stderrRel), typeof maybe.stderr === 'string' ? maybe.stderr : errorMessage(error));
+    if (await fileExists(join(workspace, outputRel))) {
+      return readPythonTaskPayload(workspace, outputRel, taskRel, stdoutRel, stderrRel);
+    }
+    return pythonTaskFailurePayload(request.prompt, taskRel, stdoutRel, stderrRel, outputRel, errorMessage(error));
+  }
+}
+
+async function readPythonTaskPayload(
+  workspace: string,
+  outputRel: string,
+  taskRel: string,
+  stdoutRel: string,
+  stderrRel: string,
+): Promise<ToolPayload> {
+  const text = await readFile(join(workspace, outputRel), 'utf8');
+  const parsed = JSON.parse(text) as ToolPayload;
+  const executionUnits = Array.isArray(parsed.executionUnits) ? parsed.executionUnits : [];
   return {
-    message: `RCSB returned structure metadata and downloaded coordinates for ${structureSummary}.`,
-    confidence: 0.84,
+    message: String(parsed.message || 'Python structure task completed.'),
+    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+    claimType: String(parsed.claimType || 'fact'),
+    evidenceLevel: String(parsed.evidenceLevel || 'runtime'),
+    reasoningTrace: String(parsed.reasoningTrace || ''),
+    claims: Array.isArray(parsed.claims) ? parsed.claims : [],
+    uiManifest: Array.isArray(parsed.uiManifest) ? parsed.uiManifest : [],
+    executionUnits: executionUnits.map((unit) => isRecord(unit) ? {
+      language: 'python',
+      codeRef: taskRel,
+      stdoutRef: stdoutRel,
+      stderrRef: stderrRel,
+      outputRef: outputRel,
+      ...unit,
+    } : unit),
+    artifacts: Array.isArray(parsed.artifacts) ? parsed.artifacts : [],
+  };
+}
+
+async function pythonCommandForWorkspace(workspace: string) {
+  const candidates = [
+    join(workspace, '.venv-bioagent', 'bin', 'python'),
+    join(workspace, '.venv-bioagent-omics', 'bin', 'python'),
+    join(workspace, '.venv', 'bin', 'python'),
+  ];
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) return candidate;
+  }
+  return 'python3';
+}
+
+function pythonTaskFailurePayload(
+  prompt: string,
+  taskRel: string,
+  stdoutRel: string,
+  stderrRel: string,
+  outputRel: string,
+  reason: string,
+): ToolPayload {
+  return {
+    message: `Python structure task failed: ${reason}`,
+    confidence: 0.2,
     claimType: 'fact',
-    evidenceLevel: 'database',
+    evidenceLevel: 'runtime',
     reasoningTrace: [
-      searched ? `BioAgent project tool queried RCSB Search API with query="${searched.query}"${searched.latest ? ' sorted by rcsb_accession_info.initial_release_date desc' : ''}.` : '',
-      `BioAgent project tool queried RCSB core entry API for ${id}.`,
-      `Downloaded ${coordinate.url} to ${coordinateRel} and parsed ${atomCoordinates.length} preview atoms for the runtime viewer.`,
-    ].filter(Boolean).join('\n'),
+      'BioAgent launched a workspace-local Python task, but it failed before producing a valid structure artifact.',
+      `taskCodeRef=${taskRel}`,
+      `stdoutRef=${stdoutRel}`,
+      `stderrRef=${stderrRel}`,
+      `outputRef=${outputRel}`,
+      'No demo, default PDB entry, or record-only result was substituted.',
+    ].join('\n'),
     claims: [{
-      text: `${structureSummary} metadata and coordinates were retrieved from RCSB; method=${stringValue(exptl.method) || 'unknown'}.`,
+      text: 'The structure task failed before producing real coordinates.',
       type: 'fact',
-      confidence: 0.84,
-      evidenceLevel: 'database',
-      supportingRefs: [`RCSB:${id}`],
-      opposingRefs: [],
-    }],
-    uiManifest: [
-      { componentId: 'molecule-viewer', title: 'Structure', artifactRef: 'structure-summary', priority: 1 },
-      { componentId: 'evidence-matrix', title: 'Structure evidence', artifactRef: 'structure-summary', priority: 2 },
-      { componentId: 'execution-unit-table', title: 'Execution units', artifactRef: 'structure-summary', priority: 3 },
-    ],
-    executionUnits: [
-      ...(latestRequested && !pdbId ? [executionUnit('structure', 'RCSB.search.latest', { sortBy: 'rcsb_accession_info.initial_release_date', direction: 'desc' }, 'done', ['RCSB PDB current'], ['structure-summary'])] : []),
-      ...(!latestRequested && searched ? [executionUnit('structure', 'RCSB.search.text', { query: searched.query }, 'done', ['RCSB PDB current'], ['structure-summary'])] : []),
-      executionUnit('structure', 'RCSB.core.entry', { pdbId: id, url }, 'done', ['RCSB PDB current'], ['structure-summary']),
-      executionUnit('structure', 'RCSB.files.download', { pdbId: id, url: coordinate.url, outputRef: coordinateRel, format: coordinate.format, codeRef: taskRel }, 'done', ['RCSB PDB current'], ['structure-summary']),
-    ],
-    artifacts: [{
-      id: 'structure-summary',
-      type: 'structure-summary',
-      producerAgent: 'structure',
-      schemaVersion: '1',
-      dataRef: coordinate.url,
-      metadata: { source: 'RCSB', pdbId: id, releaseDate, accessedAt: new Date().toISOString(), coordinateRef: coordinateRel, taskCodeRef: taskRel },
-      data: {
-        pdbId: id,
-        ligand: 'unknown',
-        title: stringValue(info.title),
-        releaseDate,
-        sourceUrl: coordinate.url,
-        coordinateRef: coordinateRel,
-        taskCodeRef: taskRel,
-        coordinateFormat: coordinate.format,
-        atomCoordinates,
-        highlightResidues: residues,
-        metrics: {
-          resolution,
-          method: stringValue(exptl.method),
-          pLDDT: undefined,
-          mutationRisk: residues.length ? 'review-needed' : undefined,
-        },
-      },
-    }],
-  };
-}
-
-async function runAlphaFoldStructure(_request: ToolRequest, accession: string): Promise<ToolPayload> {
-  const url = `https://alphafold.ebi.ac.uk/api/prediction/${encodeURIComponent(accession)}`;
-  const records = await fetchJson(url, { headers: { 'User-Agent': 'BioAgent/0.1 project-workspace-tool' } }) as Array<Record<string, unknown>>;
-  const first = records.find(isRecord) ?? {};
-  const modelUrl = stringValue(first.cifUrl) || stringValue(first.pdbUrl);
-  return {
-    message: `AlphaFold DB returned prediction metadata for UniProt ${accession}.`,
-    confidence: 0.82,
-    claimType: 'fact',
-    evidenceLevel: 'database',
-    reasoningTrace: `BioAgent project tool queried AlphaFold DB prediction API for ${accession}.`,
-    claims: [{
-      text: `UniProt ${accession} has an AlphaFold prediction record.`,
-      type: 'fact',
-      confidence: 0.82,
-      evidenceLevel: 'database',
-      supportingRefs: [`AlphaFold:${accession}`],
-      opposingRefs: [],
-    }],
-    uiManifest: [
-      { componentId: 'molecule-viewer', title: 'AlphaFold structure', artifactRef: 'structure-summary', priority: 1 },
-      { componentId: 'execution-unit-table', title: 'Execution units', artifactRef: 'structure-summary', priority: 2 },
-    ],
-    executionUnits: [executionUnit('structure', 'AlphaFoldDB.prediction', { accession, url }, 'done', ['AlphaFold DB current'], ['structure-summary'])],
-    artifacts: [{
-      id: 'structure-summary',
-      type: 'structure-summary',
-      producerAgent: 'structure',
-      schemaVersion: '1',
-      dataRef: modelUrl,
-      metadata: { source: 'AlphaFold DB', accession, accessedAt: new Date().toISOString() },
-      data: {
-        uniprotId: accession,
-        pdbId: stringValue(first.entryId) || `AF-${accession}-F1`,
-        ligand: 'none',
-        highlightResidues: [],
-        metrics: {
-          pLDDT: numberValue(first.confidenceAvgLocalDistanceTest) || numberValue(first.plddt),
-          resolution: undefined,
-          method: 'AlphaFold prediction',
-        },
-      },
-    }],
-  };
-}
-
-async function searchPdbEntry(prompt: string, options: { latest: boolean }) {
-  const queryText = options.latest ? 'latest PDB release' : structureSearchQuery(prompt);
-  const query = {
-    query: {
-      type: 'terminal',
-      service: 'text',
-      parameters: {
-        attribute: options.latest ? 'rcsb_accession_info.initial_release_date' : 'struct.title',
-        operator: options.latest ? 'exists' : 'contains_words',
-        ...(!options.latest ? { value: queryText } : {}),
-      },
-    },
-    return_type: 'entry',
-    request_options: {
-      paginate: { start: 0, rows: 1 },
-      ...(options.latest ? { sort: [{ sort_by: 'rcsb_accession_info.initial_release_date', direction: 'desc' }] } : {}),
-    },
-  };
-  const result = await fetchJson('https://search.rcsb.org/rcsbsearch/v2/query', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': 'BioAgent/0.1 project-workspace-tool' },
-    body: JSON.stringify(query),
-  }) as { result_set?: Array<{ identifier?: string }> };
-  const pdbId = result.result_set?.find((item) => item.identifier)?.identifier?.toUpperCase();
-  return pdbId ? { pdbId, query: queryText, latest: options.latest } : undefined;
-}
-
-function structureSearchQuery(prompt: string) {
-  const cleaned = prompt
-    .replace(/\b(pdb|rcsb|database|db|protein|structure|download|display|show|viewer|3d|latest|newest|recent)\b/gi, ' ')
-    .replace(/[数据库蛋白质结构下载展示显示最新一下帮我搜索右侧栏]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned || 'protein structure';
-}
-
-function structureNoResult(prompt: string): ToolPayload {
-  return {
-    message: `RCSB search returned no structure entries for: ${prompt}`,
-    confidence: 0.4,
-    claimType: 'fact',
-    evidenceLevel: 'database',
-    reasoningTrace: 'BioAgent structure project tool searched RCSB but did not receive a PDB identifier. No demo or default PDB entry was substituted.',
-    claims: [{
-      text: 'No PDB entry was selected because RCSB search returned no result for the prompt.',
-      type: 'fact',
-      confidence: 0.4,
-      evidenceLevel: 'database',
+      confidence: 0.2,
+      evidenceLevel: 'runtime',
       supportingRefs: [],
       opposingRefs: [],
     }],
@@ -357,65 +257,28 @@ function structureNoResult(prompt: string): ToolPayload {
       { componentId: 'molecule-viewer', title: 'Structure', artifactRef: 'structure-summary', priority: 1 },
       { componentId: 'execution-unit-table', title: 'Execution units', artifactRef: 'structure-summary', priority: 2 },
     ],
-    executionUnits: [executionUnit('structure', 'RCSB.search.text', { prompt }, 'failed', ['RCSB PDB current'], [])],
-    artifacts: [],
-  };
-}
-
-function structureDownloadFailure(pdbId: string, url: string, reason: string): ToolPayload {
-  return {
-    message: `RCSB found PDB ${pdbId}, but coordinate download failed: ${reason}`,
-    confidence: 0.45,
-    claimType: 'fact',
-    evidenceLevel: 'database',
-    reasoningTrace: `BioAgent structure project tool selected PDB ${pdbId}, then failed to download coordinates from ${url}. No synthetic structure was rendered.`,
-    claims: [{
-      text: `PDB ${pdbId} was selected, but coordinates could not be downloaded from RCSB.`,
-      type: 'fact',
-      confidence: 0.45,
-      evidenceLevel: 'database',
-      supportingRefs: [`RCSB:${pdbId}`],
-      opposingRefs: [],
+    executionUnits: [{
+      id: `EU-${sha1(`python-structure:${prompt}:${reason}`).slice(0, 8)}`,
+      tool: 'bioagent.python.structure_task',
+      params: JSON.stringify({ prompt, reason }),
+      status: 'failed',
+      hash: sha1(`${taskRel}:${stderrRel}`).slice(0, 12),
+      code: `python ${taskRel}`,
+      language: 'python',
+      codeRef: taskRel,
+      entrypoint: 'main',
+      stdoutRef: stdoutRel,
+      stderrRef: stderrRel,
+      outputRef: outputRel,
+      attempt: 1,
+      time: 'runtime',
+      environment: 'python3',
+      inputData: [prompt],
+      artifacts: [],
+      outputArtifacts: [],
     }],
-    uiManifest: [
-      { componentId: 'molecule-viewer', title: 'Structure', artifactRef: 'structure-summary', priority: 1 },
-      { componentId: 'execution-unit-table', title: 'Execution units', artifactRef: 'structure-summary', priority: 2 },
-    ],
-    executionUnits: [executionUnit('structure', 'RCSB.files.download', { pdbId, url, reason }, 'failed', ['RCSB PDB current'], [])],
     artifacts: [],
   };
-}
-
-function structureTaskCode(input: {
-  prompt: string;
-  pdbId: string;
-  latestRequested: boolean;
-  searchQuery?: string;
-  entryUrl: string;
-  coordinateUrl: string;
-  coordinateRef: string;
-  coordinateFormat: string;
-}) {
-  return `// BioAgent structure task artifact.
-// This file records the concrete workspace task used for this run. It is meant to be
-// inspectable and repeatable; future self-healing runs can edit this file instead of
-// silently substituting a default structure.
-export const task = ${JSON.stringify(input, null, 2)};
-
-export async function run() {
-  const entry = await fetch(task.entryUrl, { headers: { 'User-Agent': 'BioAgent/0.1 project-workspace-tool' } });
-  if (!entry.ok) throw new Error(\`RCSB entry fetch failed: \${entry.status}\`);
-  const coordinates = await fetch(task.coordinateUrl, { headers: { 'User-Agent': 'BioAgent/0.1 project-workspace-tool' } });
-  if (!coordinates.ok) throw new Error(\`RCSB coordinate download failed: \${coordinates.status}\`);
-  return {
-    pdbId: task.pdbId,
-    entry: await entry.json(),
-    coordinateText: await coordinates.text(),
-    coordinateRef: task.coordinateRef,
-    coordinateFormat: task.coordinateFormat,
-  };
-}
-`;
 }
 
 async function runKnowledge(request: ToolRequest): Promise<ToolPayload> {
@@ -1235,109 +1098,6 @@ async function fetchJson(input: string | URL, init?: RequestInit): Promise<unkno
   const response = await fetch(input, init);
   if (!response.ok) throw new Error(`HTTP ${response.status} from ${String(input)}`);
   return response.json();
-}
-
-async function fetchText(input: string | URL, init?: RequestInit): Promise<string> {
-  const response = await fetch(input, init);
-  if (!response.ok) throw new Error(`HTTP ${response.status} from ${String(input)}`);
-  return response.text();
-}
-
-async function downloadRcsbCoordinates(pdbId: string): Promise<StructureCoordinateDownload> {
-  const headers = { 'User-Agent': 'BioAgent/0.1 project-workspace-tool' };
-  const attempts: Array<{ format: 'pdb' | 'cif'; url: string; parser: (text: string) => StructureAtomPreview[] }> = [
-    { format: 'pdb', url: `https://files.rcsb.org/download/${pdbId}.pdb`, parser: pdbAtomPreview },
-    { format: 'cif', url: `https://files.rcsb.org/download/${pdbId}.cif`, parser: cifAtomPreview },
-  ];
-  const failures: string[] = [];
-  for (const attempt of attempts) {
-    try {
-      const text = await fetchText(attempt.url, { headers });
-      const atoms = attempt.parser(text);
-      if (!atoms.length) throw new Error(`No atom coordinates parsed from ${attempt.format}`);
-      return { ...attempt, text, atoms };
-    } catch (error) {
-      failures.push(`${attempt.format}: ${errorMessage(error)}`);
-    }
-  }
-  throw new Error(failures.join('; '));
-}
-
-function pdbAtomPreview(pdbText: string): StructureAtomPreview[] {
-  const atoms = pdbText.split(/\r?\n/).flatMap((line) => {
-    const record = line.slice(0, 6).trim();
-    if (record !== 'ATOM' && record !== 'HETATM') return [];
-    const atomName = line.slice(12, 16).trim();
-    const residueName = line.slice(17, 20).trim();
-    const chain = line.slice(21, 22).trim();
-    const residueNumber = line.slice(22, 26).trim();
-    const x = Number(line.slice(30, 38).trim());
-    const y = Number(line.slice(38, 46).trim());
-    const z = Number(line.slice(46, 54).trim());
-    const element = line.slice(76, 78).trim() || atomName.replace(/[0-9]/g, '').slice(0, 2).trim();
-    if (![x, y, z].every(Number.isFinite)) return [];
-    return [{ atomName, residueName, chain, residueNumber, element, x, y, z, hetatm: record === 'HETATM' }];
-  });
-  return downsampleStructureAtoms(atoms);
-}
-
-function cifAtomPreview(cifText: string): StructureAtomPreview[] {
-  const lines = cifText.split(/\r?\n/);
-  const atoms: StructureAtomPreview[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    if (lines[index]?.trim() !== 'loop_') continue;
-    const headers: string[] = [];
-    let cursor = index + 1;
-    while (cursor < lines.length && lines[cursor]?.trim().startsWith('_atom_site.')) {
-      headers.push(lines[cursor].trim());
-      cursor += 1;
-    }
-    if (!headers.length) continue;
-    const headerIndex = (name: string) => headers.findIndex((header) => header === `_atom_site.${name}`);
-    const groupIndex = headerIndex('group_PDB');
-    const xIndex = headerIndex('Cartn_x');
-    const yIndex = headerIndex('Cartn_y');
-    const zIndex = headerIndex('Cartn_z');
-    if (groupIndex < 0 || xIndex < 0 || yIndex < 0 || zIndex < 0) continue;
-    for (; cursor < lines.length; cursor += 1) {
-      const line = lines[cursor]?.trim() || '';
-      if (!line || line === '#' || line === 'loop_' || line.startsWith('_')) break;
-      const values = cifTokens(line);
-      const group = values[groupIndex];
-      if (group !== 'ATOM' && group !== 'HETATM') continue;
-      const x = Number(values[xIndex]);
-      const y = Number(values[yIndex]);
-      const z = Number(values[zIndex]);
-      if (![x, y, z].every(Number.isFinite)) continue;
-      atoms.push({
-        atomName: values[headerIndex('label_atom_id')] || values[headerIndex('auth_atom_id')] || '',
-        residueName: values[headerIndex('label_comp_id')] || values[headerIndex('auth_comp_id')] || '',
-        chain: values[headerIndex('auth_asym_id')] || values[headerIndex('label_asym_id')] || '',
-        residueNumber: values[headerIndex('auth_seq_id')] || values[headerIndex('label_seq_id')] || '',
-        element: values[headerIndex('type_symbol')] || '',
-        x,
-        y,
-        z,
-        hetatm: group === 'HETATM',
-      });
-    }
-  }
-  return downsampleStructureAtoms(atoms);
-}
-
-function cifTokens(line: string) {
-  return Array.from(line.matchAll(/'(?:[^']*)'|"(?:[^"]*)"|\S+/g)).map((match) => match[0].replace(/^['"]|['"]$/g, ''));
-}
-
-function downsampleStructureAtoms(atoms: StructureAtomPreview[]) {
-  const preferred = atoms.filter((atom) => ['CA', 'P', 'C4\''].includes(atom.atomName) || atom.hetatm);
-  const source = preferred.length >= 24 ? preferred : atoms;
-  const step = Math.max(1, Math.ceil(source.length / 220));
-  return source.filter((_, index) => index % step === 0).slice(0, 220);
-}
-
-function residueRanges(prompt: string) {
-  return Array.from(prompt.matchAll(/\b(\d{1,4}\s*-\s*\d{1,4}|[A-Z]\d{1,4}[A-Z]?)\b/g)).map((match) => match[1].replace(/\s+/g, ''));
 }
 
 function rowValue(value: unknown, key: string) {

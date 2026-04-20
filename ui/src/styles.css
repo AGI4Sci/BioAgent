@@ -1689,10 +1689,10 @@ code,
 .eu-head,
 .eu-row {
   display: grid;
-  grid-template-columns: 90px 150px minmax(220px, 1fr) 92px 110px;
+  grid-template-columns: 90px 150px minmax(220px, 1fr) minmax(160px, 0.8fr) 92px 110px;
   gap: 12px;
   align-items: center;
-  min-width: 760px;
+  min-width: 940px;
   padding: 11px 13px;
 }
 

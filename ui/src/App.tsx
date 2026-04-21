@@ -48,18 +48,18 @@ import {
   YAxis,
 } from 'recharts';
 import {
-  agents,
+  scenarios,
   feasibilityRows,
   navItems,
   radarData,
   roleTabs,
   stats,
-  type AgentId,
+  type ScenarioId,
   type ClaimType,
   type EvidenceLevel,
   type PageId,
 } from './data';
-import { BIOAGENT_PROFILES, componentManifest } from './agentProfiles';
+import { SCENARIO_SPECS, SCENARIO_PRESETS, componentManifest } from './scenarioSpecs';
 import { timeline } from './demoData';
 import { sendAgentMessageStream } from './api/agentClient';
 import { sendBioAgentToolMessage } from './api/bioagentToolsClient';
@@ -78,6 +78,7 @@ import {
   type NormalizedAgentResponse,
   type RuntimeArtifact,
   type RuntimeExecutionUnit,
+  type ScenarioRuntimeOverride,
   type UIManifestSlot,
 } from './domain';
 import { createSession, loadWorkspaceState, resetSession, saveWorkspaceState, versionSession } from './sessionStore';
@@ -162,6 +163,61 @@ function ActionButton({
       {children}
     </button>
   );
+}
+
+type ScenarioBuilderDraft = ScenarioRuntimeOverride & {
+  baseScenarioId: ScenarioId;
+  confidence: number;
+  summary: string;
+};
+
+const scenarioIdBySkillDomain: Record<ScenarioRuntimeOverride['skillDomain'], ScenarioId> = {
+  literature: 'literature-evidence-review',
+  structure: 'structure-exploration',
+  omics: 'omics-differential-exploration',
+  knowledge: 'biomedical-knowledge-graph',
+};
+
+function inferScenarioDraft(description: string): ScenarioBuilderDraft {
+  const text = description.trim();
+  const normalized = text.toLowerCase();
+  const skillDomain: ScenarioRuntimeOverride['skillDomain'] = /chembl|opentargets|drug|compound|disease|pathway|target priorit|target network|knowledge graph|知识图谱|疾病|化合物|药物|靶点|优先级/.test(normalized)
+    ? 'knowledge'
+    : /rna|scrna|omics|matrix|deseq|scanpy|umap|表达|差异|组学|单细胞/.test(normalized)
+      ? 'omics'
+      : /pdb|protein structure|structure|alphafold|ligand|residue|pocket|蛋白结构|结构|口袋|配体|残基/.test(normalized)
+        ? 'structure'
+        : /pubmed|paper|literature|review|evidence|文献|论文|综述|证据/.test(normalized)
+          ? 'literature'
+          : 'literature';
+  const baseScenarioId = scenarioIdBySkillDomain[skillDomain];
+  const base = SCENARIO_SPECS[baseScenarioId];
+  const titleSeed = text.replace(/[。.!?？\n].*$/s, '').trim().slice(0, 24);
+  const defaultComponents = base.componentPolicy.defaultComponents;
+  return {
+    baseScenarioId,
+    confidence: text.length > 18 ? 0.82 : 0.62,
+    summary: `${base.title} · ${defaultComponents.join(' / ')}`,
+    title: titleSeed ? `${titleSeed}场景` : base.title,
+    description: text || base.description,
+    skillDomain,
+    defaultComponents,
+    allowedComponents: base.componentPolicy.allowedComponents,
+    fallbackComponent: base.componentPolicy.fallbackComponent,
+    scenarioMarkdown: [
+      `# ${titleSeed || base.title}`,
+      '',
+      `用户目标：${text || base.description}`,
+      '',
+      `默认展示：${defaultComponents.join('、')}。`,
+      '',
+      `输入线索：${base.inputContract.map((item) => item.key).join('、')}。`,
+      '',
+      `输出 artifact：${base.outputArtifacts.map((item) => item.type).join('、')}。`,
+      '',
+      `边界：${base.scopeDeclaration.unsupportedTasks.slice(0, 3).join('；')}。`,
+    ].join('\n'),
+  };
 }
 
 function SectionHeader({
@@ -404,22 +460,22 @@ function exportExecutionBundle(session: BioAgentSession) {
     window.alert(`导出被 artifact policy 阻止：${decision.blockedArtifactIds.join(', ')}`);
     return;
   }
-  exportJsonFile(`execution-units-${session.agentId}-${session.sessionId}.json`, buildExecutionBundle(session, decision));
+  exportJsonFile(`execution-units-${session.scenarioId}-${session.sessionId}.json`, buildExecutionBundle(session, decision));
 }
 
 function Sidebar({
   page,
   setPage,
-  agentId,
-  setAgentId,
+  scenarioId,
+  setScenarioId,
   config,
   workspaceStatus,
   onWorkspacePathChange,
 }: {
   page: PageId;
   setPage: (page: PageId) => void;
-  agentId: AgentId;
-  setAgentId: (id: AgentId) => void;
+  scenarioId: ScenarioId;
+  setScenarioId: (id: ScenarioId) => void;
   config: BioAgentConfig;
   workspaceStatus: string;
   onWorkspacePathChange: (value: string) => void;
@@ -570,20 +626,24 @@ function Sidebar({
                     </button>
                   ))}
                 </nav>
-                <div className="agent-list">
-                  <div className="sidebar-label">Agent Profiles</div>
-                  {agents.map((agent) => (
+                <div className="scenario-list">
+                  <div className="sidebar-label">场景模板</div>
+                  {scenarios.map((scenario) => (
                     <button
-                      key={agent.id}
-                      className={cx('agent-nav', agentId === agent.id && page === 'workbench' && 'active')}
+                      key={scenario.id}
+                      className={cx('scenario-nav', scenarioId === scenario.id && page === 'workbench' && 'active')}
                       onClick={() => {
-                        setAgentId(agent.id);
+                        setScenarioId(scenario.id);
                         setPage('workbench');
                       }}
                     >
-                      <agent.icon size={15} style={{ color: agent.color }} />
-                      <span>{agent.name}</span>
-                      <i className={cx('status-dot', agent.status === 'active' && 'online')} />
+                      <span className="scenario-nav-icon" style={{ color: scenario.color, background: `${scenario.color}16` }}>
+                        <scenario.icon size={15} />
+                      </span>
+                      <span className="scenario-nav-copy">
+                        <strong>{scenario.name}</strong>
+                        <small>{SCENARIO_PRESETS[scenario.id].skillDomain} · {scenario.defaultResult}</small>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -682,7 +742,7 @@ function TopBar({
       </form>
       <div className="topbar-actions">
         <Badge variant="info" glow>
-          Phase 1 - 单 Agent 独立运行
+          Scenario Runtime
         </Badge>
         <IconButton icon={Settings} label="设置" onClick={onSettingsOpen} />
       </div>
@@ -770,7 +830,17 @@ function SettingsDialog({
   );
 }
 
-function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; setAgentId: (id: AgentId) => void }) {
+function Dashboard({
+  setPage,
+  setScenarioId,
+  onApplyScenarioDraft,
+}: {
+  setPage: (page: PageId) => void;
+  setScenarioId: (id: ScenarioId) => void;
+  onApplyScenarioDraft: (scenarioId: ScenarioId, draft: ScenarioRuntimeOverride) => void;
+}) {
+  const [scenarioPrompt, setScenarioPrompt] = useState('我想比较KRAS G12D突变相关文献证据，并在需要时联动蛋白结构和知识图谱。');
+  const [scenarioDraft, setScenarioDraft] = useState<ScenarioBuilderDraft>(() => inferScenarioDraft('我想比较KRAS G12D突变相关文献证据，并在需要时联动蛋白结构和知识图谱。'));
   const activityData = [
     { day: 'Mon', papers: 28, eus: 4 },
     { day: 'Tue', papers: 36, eus: 7 },
@@ -783,7 +853,7 @@ function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; s
     <main className="page dashboard">
       <div className="page-heading">
         <h1>研究概览</h1>
-        <p>固定科学组件 + 运行时 manifest 配置，让单 Agent 像专业研究工具一样工作。</p>
+        <p>场景 markdown 编译为 ScenarioSpec，LLM 只生成结构化 artifact 和 UIManifest，组件库负责专业展示。</p>
       </div>
 
       <div className="stats-grid">
@@ -802,15 +872,55 @@ function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; s
         ))}
       </div>
 
+      <section className="scenario-builder">
+        <div className="scenario-builder-copy">
+          <Badge variant="info">AI Scenario Builder</Badge>
+          <h2>描述你的研究场景，生成可编辑设置</h2>
+          <p>从一句自然语言开始，系统会选择 skill domain、推荐组件集合，并生成 Scenario markdown 草案。</p>
+        </div>
+        <div className="scenario-builder-box">
+          <textarea
+            value={scenarioPrompt}
+            onChange={(event) => setScenarioPrompt(event.target.value)}
+            placeholder="例如：帮我构建一个场景，读取单细胞表达矩阵，比较处理组和对照组，并展示火山图、热图和UMAP。"
+          />
+          <div className="scenario-builder-actions">
+            <ActionButton icon={Sparkles} onClick={() => setScenarioDraft(inferScenarioDraft(scenarioPrompt))}>生成场景设置</ActionButton>
+            <ActionButton
+              icon={Play}
+              variant="secondary"
+              onClick={() => {
+                onApplyScenarioDraft(scenarioDraft.baseScenarioId, scenarioDraft);
+                setScenarioId(scenarioDraft.baseScenarioId);
+                setPage('workbench');
+              }}
+            >
+              进入场景工作台
+            </ActionButton>
+          </div>
+        </div>
+        <div className="scenario-draft-preview">
+          <div>
+            <span>推荐场景</span>
+            <strong>{scenarioDraft.title}</strong>
+            <em>{scenarioDraft.summary} · confidence {Math.round(scenarioDraft.confidence * 100)}%</em>
+          </div>
+          <div className="component-pills">
+            {scenarioDraft.defaultComponents.map((component) => <code key={component}>{component}</code>)}
+          </div>
+          <pre>{scenarioDraft.scenarioMarkdown}</pre>
+        </div>
+      </section>
+
       <div className="dashboard-grid">
         <Card className="wide">
-          <SectionHeader icon={Shield} title="Phase 1 架构状态" subtitle="所有 profile 共享同一套 runtime / evidence / UI shell" />
+          <SectionHeader icon={Shield} title="Scenario-first 架构状态" subtitle="所有场景共享同一套 chat / runtime / evidence / component registry" />
           <div className="principles">
             {[
-              ['单 Agent 自治', '每个 Agent 独立可用，自带工具、组件 slots 和证据策略。'],
-              ['配置驱动 UI', 'Agent 差异通过 AgentProfile + UIManifest + registry 表达。'],
+              ['场景即契约', '用户可以用 markdown 描述目标、输入输出、组件集合和诚实边界。'],
+              ['配置驱动 UI', '场景差异通过 ScenarioSpec + UIManifest + registry 表达。'],
               ['可复现执行', 'ExecutionUnit 记录代码、参数、环境、数据指纹和产物。'],
-              ['证据优先', 'Claim、Evidence、Confidence 和矛盾证据并排呈现。'],
+              ['组件库优先', 'LLM 选择已注册组件和 View Composition；动态 plugin 默认关闭。'],
             ].map(([title, text]) => (
               <div className="principle" key={title}>
                 <Check size={16} />
@@ -846,32 +956,36 @@ function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; s
       </div>
 
       <section>
-        <SectionHeader title="单 Agent Profiles" subtitle="点击进入工作台；UI 由 profile 默认组件和 manifest 驱动" />
-        <div className="agent-grid">
-          {agents.map((agent) => (
+        <SectionHeader title="模板库" subtitle="从稳定模板开始，也可以进入后继续编辑 Scenario 设置" />
+        <div className="scenario-grid">
+          {scenarios.map((scenario) => (
             <Card
-              key={agent.id}
-              className="agent-card"
+              key={scenario.id}
+              className="scenario-card"
               onClick={() => {
-                setAgentId(agent.id);
+                setScenarioId(scenario.id);
                 setPage('workbench');
               }}
             >
-              <div className="agent-card-top">
-                <div className="agent-card-icon" style={{ color: agent.color, background: `${agent.color}18` }}>
-                  <agent.icon size={23} />
+              <div className="scenario-card-top">
+                <div className="scenario-card-icon" style={{ color: scenario.color, background: `${scenario.color}18` }}>
+                  <scenario.icon size={23} />
                 </div>
-                <Badge variant={agent.status === 'active' ? 'success' : 'muted'}>{agent.status}</Badge>
+                <Badge variant="muted">{SCENARIO_PRESETS[scenario.id].skillDomain}</Badge>
               </div>
-              <h3 style={{ color: agent.color }}>{agent.name}</h3>
-              <p>{agent.desc}</p>
+              <h3 style={{ color: scenario.color }}>{SCENARIO_PRESETS[scenario.id].title}</h3>
+              <p>{SCENARIO_PRESETS[scenario.id].description}</p>
               <div className="tool-chips">
-                {agent.tools.map((tool) => (
+                {scenario.tools.map((tool) => (
                   <span key={tool}>{tool}</span>
                 ))}
               </div>
+              <div className="scenario-note">
+                <code>{SCENARIO_PRESETS[scenario.id].id}</code>
+                <span>{componentManifest[scenario.id].length} UI modules</span>
+              </div>
               <div className="manifest-strip">
-                {componentManifest[agent.id].map((component) => (
+                {componentManifest[scenario.id].map((component) => (
                   <i key={component} title={component} />
                 ))}
               </div>
@@ -884,7 +998,7 @@ function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; s
 }
 
 function ChatPanel({
-  agentId,
+  scenarioId,
   role,
   config,
   session,
@@ -900,8 +1014,9 @@ function ChatPanel({
   archivedCount,
   autoRunRequest,
   onAutoRunConsumed,
+  scenarioOverride,
 }: {
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   role: string;
   config: BioAgentConfig;
   session: BioAgentSession;
@@ -917,6 +1032,7 @@ function ChatPanel({
   archivedCount: number;
   autoRunRequest?: HandoffAutoRunRequest;
   onAutoRunConsumed: (requestId: string) => void;
+  scenarioOverride?: ScenarioRuntimeOverride;
 }) {
   const [expanded, setExpanded] = useState<number | null>(0);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -931,7 +1047,7 @@ function ChatPanel({
   const messagesRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const messages = session.messages;
-  const agent = agents.find((item) => item.id === agentId) ?? agents[0];
+  const scenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
 
   useEffect(() => {
     activeSessionRef.current = session;
@@ -945,7 +1061,7 @@ function ChatPanel({
     setStreamEvents([]);
     setGuidanceQueue([]);
     setErrorText('');
-  }, [agentId, session.sessionId]);
+  }, [scenarioId, session.sessionId]);
 
   useEffect(() => {
     if (autoScrollRef.current) {
@@ -954,12 +1070,12 @@ function ChatPanel({
   }, [messages.length, isSending]);
 
   useEffect(() => {
-    if (!autoRunRequest || autoRunRequest.targetAgent !== agentId || isSending) return;
+    if (!autoRunRequest || autoRunRequest.targetScenario !== scenarioId || isSending) return;
     onAutoRunConsumed(autoRunRequest.id);
     window.setTimeout(() => {
       void runPrompt(autoRunRequest.prompt, activeSessionRef.current);
     }, 120);
-  }, [agentId, autoRunRequest, isSending, onAutoRunConsumed]);
+  }, [scenarioId, autoRunRequest, isSending, onAutoRunConsumed]);
 
   useEffect(() => {
     setErrorText('');
@@ -969,7 +1085,7 @@ function ChatPanel({
       element.scrollTo({ top: savedScrollTop, behavior: 'auto' });
       autoScrollRef.current = savedScrollTop <= 0;
     }
-  }, [agentId, savedScrollTop]);
+  }, [scenarioId, savedScrollTop]);
 
   async function handleSend() {
     const prompt = input.trim();
@@ -1012,14 +1128,15 @@ function ChatPanel({
     abortRef.current = controller;
     try {
       const request = {
-        agentId,
-        agentName: agent.name,
-        agentDomain: agent.domain,
+        scenarioId,
+        agentName: scenario.name,
+        agentDomain: scenario.domain,
         prompt,
         roleView: role,
         messages: optimisticSession.messages,
         artifacts: optimisticSession.artifacts,
         config,
+        scenarioOverride,
       };
       let response: NormalizedAgentResponse;
       try {
@@ -1066,7 +1183,7 @@ function ChatPanel({
           ...optimisticSession.runs,
           {
             id: makeId('run'),
-            agentId,
+            scenarioId,
             status: 'failed',
             prompt,
             response: message,
@@ -1136,11 +1253,11 @@ function ChatPanel({
 
   function handleClear() {
     if (isSending) abortRef.current?.abort();
-    onSessionChange(resetSession(agentId));
+    onSessionChange(resetSession(scenarioId));
   }
 
   function handleExport() {
-    exportJsonFile(`${agentId}-${session.sessionId}.json`, session);
+    exportJsonFile(`${scenarioId}-${session.sessionId}.json`, session);
   }
 
   function beginEditMessage(message: BioAgentMessage) {
@@ -1166,12 +1283,12 @@ function ChatPanel({
   return (
     <div className="chat-panel">
       <div className="panel-title compact">
-        <div className="agent-mini" style={{ background: `${agent.color}18`, color: agent.color }}>
-          <agent.icon size={18} />
+        <div className="scenario-mini" style={{ background: `${scenario.color}18`, color: scenario.color }}>
+          <scenario.icon size={18} />
         </div>
         <div>
-          <strong>{agent.name}</strong>
-          <span>{session.title} · {agent.tools.join(' / ')}</span>
+          <strong>{scenario.name}</strong>
+          <span>{session.title} · {scenario.tools.join(' / ')}</span>
         </div>
         <Badge variant="success" glow>在线</Badge>
         <Badge variant="muted">{session.versions.length} versions</Badge>
@@ -1179,7 +1296,7 @@ function ChatPanel({
         <div className="panel-actions">
           <IconButton icon={Plus} label="开启新聊天" onClick={onNewChat} />
           {isSending ? <IconButton icon={RefreshCw} label="取消请求" onClick={handleAbort} /> : null}
-          <IconButton icon={Download} label="导出当前 Agent 会话" onClick={handleExport} />
+          <IconButton icon={Download} label="导出当前 Scenario 会话" onClick={handleExport} />
           <IconButton icon={Trash2} label="删除当前聊天" onClick={onDeleteChat} />
         </div>
       </div>
@@ -1189,14 +1306,14 @@ function ChatPanel({
           <div className="chat-empty">
             <MessageSquare size={18} />
             <strong>新聊天已就绪</strong>
-            <span>输入研究问题后，当前 Agent 会从一个干净上下文开始工作。</span>
+            <span>输入研究问题后，当前 Scenario 会从一个干净上下文开始工作。</span>
           </div>
         ) : null}
         {messages.map((message, index) => (
           <div key={message.id} className={cx('message', message.role)}>
             <div className="message-body">
               <div className="message-meta">
-                <strong>{message.role === 'user' ? '你' : message.role === 'system' ? '系统' : agent.name}</strong>
+                <strong>{message.role === 'user' ? '你' : message.role === 'system' ? '系统' : scenario.name}</strong>
                 {message.confidence ? <ConfidenceBar value={message.confidence} /> : null}
                 {message.evidence ? <EvidenceTag level={message.evidence} /> : null}
                 {message.claimType ? <ClaimTag type={message.claimType} /> : null}
@@ -1230,10 +1347,10 @@ function ChatPanel({
           </div>
         ))}
         {isSending ? (
-          <div className="message agent">
+          <div className="message scenario">
             <div className="message-body">
               <div className="message-meta">
-                <strong>{agent.name}</strong>
+                <strong>{scenario.name}</strong>
                 <Badge variant="info">running</Badge>
               </div>
               <p>正在调用 AgentServer...</p>
@@ -1331,16 +1448,20 @@ function VolcanoChart({ points }: { points?: VolcanoPoint[] }) {
 }
 
 function ResultsRenderer({
-  agentId,
+  scenarioId,
   session,
   onArtifactHandoff,
+  collapsed,
+  onToggleCollapse,
 }: {
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   session: BioAgentSession;
-  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
+  onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const [resultTab, setResultTab] = useState('primary');
-  const agent = agents.find((item) => item.id === agentId) ?? agents[0];
+  const scenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
   const tabs = [
     { id: 'primary', label: '结果视图' },
     { id: 'evidence', label: '证据矩阵' },
@@ -1349,27 +1470,233 @@ function ResultsRenderer({
   ];
 
   return (
-    <div className="results-panel">
-      <div className="result-tabs">
-        <TabBar tabs={tabs} active={resultTab} onChange={setResultTab} />
-      </div>
-      <div className="result-content">
-        {resultTab === 'primary' ? (
-          <PrimaryResult agentId={agentId} session={session} onArtifactHandoff={onArtifactHandoff} />
-        ) : resultTab === 'evidence' ? (
-          <EvidenceMatrix claims={session.claims} />
-        ) : resultTab === 'execution' ? (
-          <ExecutionPanel session={session} executionUnits={session.executionUnits} />
-        ) : (
-          <NotebookTimeline agentId={agent.id} notebook={session.notebook} />
-        )}
-      </div>
+    <div className={cx('results-panel', collapsed && 'collapsed')}>
+      <button
+        className="results-collapse-button"
+        type="button"
+        onClick={onToggleCollapse}
+        title={collapsed ? '展开结果面板' : '向右收缩结果面板'}
+      >
+        {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+      </button>
+      {!collapsed ? (
+        <>
+          <div className="result-tabs">
+            <TabBar tabs={tabs} active={resultTab} onChange={setResultTab} />
+          </div>
+          <div className="result-content">
+            {resultTab === 'primary' ? (
+              <PrimaryResult scenarioId={scenarioId} session={session} onArtifactHandoff={onArtifactHandoff} />
+            ) : resultTab === 'evidence' ? (
+              <EvidenceMatrix claims={session.claims} />
+            ) : resultTab === 'execution' ? (
+              <ExecutionPanel session={session} executionUnits={session.executionUnits} />
+            ) : (
+              <NotebookTimeline scenarioId={scenario.id} notebook={session.notebook} />
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="results-collapsed-hint">结果</div>
+      )}
     </div>
   );
 }
 
+function Workbench({
+  scenarioId,
+  config,
+  session,
+  draft,
+  savedScrollTop,
+  onDraftChange,
+  onScrollTopChange,
+  onSessionChange,
+  onNewChat,
+  onDeleteChat,
+  onEditMessage,
+  onDeleteMessage,
+  archivedCount,
+  onArtifactHandoff,
+  autoRunRequest,
+  onAutoRunConsumed,
+  scenarioOverride,
+  onScenarioOverrideChange,
+}: {
+  scenarioId: ScenarioId;
+  config: BioAgentConfig;
+  session: BioAgentSession;
+  draft: string;
+  savedScrollTop: number;
+  onDraftChange: (scenarioId: ScenarioId, value: string) => void;
+  onScrollTopChange: (scenarioId: ScenarioId, value: number) => void;
+  onSessionChange: (session: BioAgentSession) => void;
+  onNewChat: (scenarioId: ScenarioId) => void;
+  onDeleteChat: (scenarioId: ScenarioId) => void;
+  onEditMessage: (scenarioId: ScenarioId, messageId: string, content: string) => void;
+  onDeleteMessage: (scenarioId: ScenarioId, messageId: string) => void;
+  archivedCount: number;
+  onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
+  autoRunRequest?: HandoffAutoRunRequest;
+  onAutoRunConsumed: (requestId: string) => void;
+  scenarioOverride?: ScenarioRuntimeOverride;
+  onScenarioOverrideChange: (scenarioId: ScenarioId, override: ScenarioRuntimeOverride) => void;
+}) {
+  const scenarioView = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
+  const scenarioSpec = SCENARIO_PRESETS[scenarioId];
+  const runtimeScenario = scenarioOverride ?? {
+    title: scenarioSpec.title,
+    description: scenarioSpec.description,
+    skillDomain: scenarioSpec.skillDomain,
+    scenarioMarkdown: scenarioSpec.scenarioMarkdown,
+    defaultComponents: scenarioSpec.componentPolicy.defaultComponents,
+    allowedComponents: scenarioSpec.componentPolicy.allowedComponents,
+    fallbackComponent: scenarioSpec.componentPolicy.fallbackComponent,
+  };
+  const [role, setRole] = useState('biologist');
+  const [resultsCollapsed, setResultsCollapsed] = useState(false);
+  const [settingsExpanded, setSettingsExpanded] = useState(true);
+  return (
+    <main className="workbench">
+      <div className="workbench-header">
+        <div className="scenario-title">
+          <div className="scenario-large-icon" style={{ color: scenarioView.color, background: `${scenarioView.color}18` }}>
+            <scenarioView.icon size={24} />
+          </div>
+          <div>
+            <h1 style={{ color: scenarioView.color }}>{runtimeScenario.title}</h1>
+            <p>{runtimeScenario.description}</p>
+          </div>
+        </div>
+        <div className="role-tabs">
+          <span>角色视图</span>
+          <TabBar tabs={roleTabs} active={role} onChange={setRole} />
+        </div>
+      </div>
+      <ScenarioSettingsPanel
+        scenarioId={scenarioId}
+        scenario={runtimeScenario}
+        expanded={settingsExpanded}
+        onToggle={() => setSettingsExpanded((value) => !value)}
+        onChange={(override) => onScenarioOverrideChange(scenarioId, override)}
+      />
+      <div className="manifest-banner">
+        <span>UIManifest</span>
+        {runtimeScenario.defaultComponents.map((component) => (
+          <code key={component}>{component}</code>
+        ))}
+        <code>fallback={runtimeScenario.fallbackComponent}</code>
+      </div>
+      <div className={cx('workbench-grid', resultsCollapsed && 'results-collapsed')}>
+        <ChatPanel
+          scenarioId={scenarioId}
+          role={role}
+          config={config}
+          session={session}
+          input={draft}
+          savedScrollTop={savedScrollTop}
+          onInputChange={(value) => onDraftChange(scenarioId, value)}
+          onScrollTopChange={(value) => onScrollTopChange(scenarioId, value)}
+          onSessionChange={onSessionChange}
+          onNewChat={() => onNewChat(scenarioId)}
+          onDeleteChat={() => onDeleteChat(scenarioId)}
+          onEditMessage={(messageId, content) => onEditMessage(scenarioId, messageId, content)}
+          onDeleteMessage={(messageId) => onDeleteMessage(scenarioId, messageId)}
+          archivedCount={archivedCount}
+          autoRunRequest={autoRunRequest}
+          onAutoRunConsumed={onAutoRunConsumed}
+          scenarioOverride={scenarioOverride}
+        />
+        <ResultsRenderer
+          scenarioId={scenarioId}
+          session={session}
+          onArtifactHandoff={onArtifactHandoff}
+          collapsed={resultsCollapsed}
+          onToggleCollapse={() => setResultsCollapsed((value) => !value)}
+        />
+      </div>
+    </main>
+  );
+}
+
+function ScenarioSettingsPanel({
+  scenarioId,
+  scenario,
+  expanded,
+  onToggle,
+  onChange,
+}: {
+  scenarioId: ScenarioId;
+  scenario: ScenarioRuntimeOverride;
+  expanded: boolean;
+  onToggle: () => void;
+  onChange: (override: ScenarioRuntimeOverride) => void;
+}) {
+  const builtin = SCENARIO_SPECS[scenarioId];
+  const componentOptions = Array.from(new Set([...builtin.componentPolicy.allowedComponents, ...scenario.allowedComponents]));
+  function patch(patchValue: Partial<ScenarioRuntimeOverride>) {
+    onChange({ ...scenario, ...patchValue });
+  }
+  function toggleComponent(component: string) {
+    const next = scenario.defaultComponents.includes(component)
+      ? scenario.defaultComponents.filter((item) => item !== component)
+      : [...scenario.defaultComponents, component];
+    patch({ defaultComponents: next.length ? next : [scenario.fallbackComponent] });
+  }
+  return (
+    <section className={cx('scenario-settings', expanded && 'expanded')}>
+      <button className="scenario-settings-summary" onClick={onToggle}>
+        <FileCode size={16} />
+        <span>场景设置</span>
+        <strong>{scenario.skillDomain}</strong>
+        <em>{scenario.defaultComponents.join(' / ')}</em>
+        {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+      {expanded ? (
+        <div className="scenario-settings-body">
+          <label>
+            <span>场景名称</span>
+            <input value={scenario.title} onChange={(event) => patch({ title: event.target.value })} />
+          </label>
+          <label>
+            <span>Skill domain</span>
+            <select value={scenario.skillDomain} onChange={(event) => patch({ skillDomain: event.target.value as ScenarioRuntimeOverride['skillDomain'] })}>
+              <option value="literature">literature</option>
+              <option value="structure">structure</option>
+              <option value="omics">omics</option>
+              <option value="knowledge">knowledge</option>
+            </select>
+          </label>
+          <label className="wide">
+            <span>场景描述</span>
+            <input value={scenario.description} onChange={(event) => patch({ description: event.target.value })} />
+          </label>
+          <label className="wide">
+            <span>Scenario markdown</span>
+            <textarea value={scenario.scenarioMarkdown} onChange={(event) => patch({ scenarioMarkdown: event.target.value })} />
+          </label>
+          <div className="component-selector">
+            <span>默认组件集合</span>
+            <div>
+              {componentOptions.map((component) => (
+                <button
+                  key={component}
+                  className={cx(scenario.defaultComponents.includes(component) && 'active')}
+                  onClick={() => toggleComponent(component)}
+                >
+                  {component}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 type RegistryRendererProps = {
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   session: BioAgentSession;
   slot: UIManifestSlot;
   artifact?: RuntimeArtifact;
@@ -1382,12 +1709,12 @@ type RegistryEntry = {
 
 interface HandoffAutoRunRequest {
   id: string;
-  targetAgent: AgentId;
+  targetScenario: ScenarioId;
   prompt: string;
 }
 
-function defaultSlotsForAgent(agentId: AgentId): UIManifestSlot[] {
-  return BIOAGENT_PROFILES[agentId].defaultSlots;
+function defaultSlotsForAgent(scenarioId: ScenarioId): UIManifestSlot[] {
+  return SCENARIO_SPECS[scenarioId].defaultSlots;
 }
 
 function PaperCardList({ slot, artifact, session }: RegistryRendererProps) {
@@ -1508,7 +1835,7 @@ function CanvasSlot({ slot, artifact, session, kind }: RegistryRendererProps & {
     }];
   });
   if (!artifact) {
-    return <EmptyArtifactState title="等待真实 runtime artifact" detail={`${kind} 组件不再使用 demo seed；请先运行对应 Agent 生成 artifact。`} />;
+    return <EmptyArtifactState title="等待真实 runtime artifact" detail={`${kind} 组件不再使用 demo seed；请先运行当前 Scenario 生成 artifact。`} />;
   }
   const hasData = kind === 'volcano'
     ? Boolean(volcanoPoints?.length)
@@ -1664,21 +1991,21 @@ const componentRegistry: Record<string, RegistryEntry> = {
   'network-graph': { label: 'NetworkGraph', render: (props) => <CanvasSlot {...props} kind="network" /> },
   'evidence-matrix': { label: 'EvidenceMatrix', render: ({ session }) => <EvidenceMatrix claims={session.claims} /> },
   'execution-unit-table': { label: 'ExecutionUnitTable', render: ({ session }) => <ExecutionPanel session={session} executionUnits={session.executionUnits} embedded /> },
-  'notebook-timeline': { label: 'NotebookTimeline', render: ({ agentId, session }) => <NotebookTimeline agentId={agentId} notebook={session.notebook} /> },
+  'notebook-timeline': { label: 'NotebookTimeline', render: ({ scenarioId, session }) => <NotebookTimeline scenarioId={scenarioId} notebook={session.notebook} /> },
   'data-table': { label: 'DataTable', render: (props) => <DataTableSlot {...props} /> },
   'unknown-artifact-inspector': { label: 'UnknownArtifactInspector', render: (props) => <UnknownArtifactInspector {...props} /> },
 };
 
 function PrimaryResult({
-  agentId,
+  scenarioId,
   session,
   onArtifactHandoff,
 }: {
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   session: BioAgentSession;
-  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
+  onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
 }) {
-  const slots = (session.uiManifest.length ? session.uiManifest : defaultSlotsForAgent(agentId))
+  const slots = (session.uiManifest.length ? session.uiManifest : defaultSlotsForAgent(scenarioId))
     .slice()
     .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
     .slice(0, 4);
@@ -1690,7 +2017,7 @@ function PrimaryResult({
         {slots.map((slot) => (
           <RegistrySlot
             key={`${slot.componentId}-${slot.artifactRef ?? slot.title ?? slot.priority ?? ''}`}
-            agentId={agentId}
+            scenarioId={scenarioId}
             session={session}
             slot={slot}
             onArtifactHandoff={onArtifactHandoff}
@@ -1702,31 +2029,31 @@ function PrimaryResult({
 }
 
 function RegistrySlot({
-  agentId,
+  scenarioId,
   session,
   slot,
   onArtifactHandoff,
 }: {
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   session: BioAgentSession;
   slot: UIManifestSlot;
-  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
+  onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
 }) {
   const artifact = findArtifact(session, slot.artifactRef);
   const entry = componentRegistry[slot.componentId];
   const artifactSchema = artifact
-    ? BIOAGENT_PROFILES[artifact.producerAgent].outputArtifacts.find((schema) => schema.type === artifact.type)
+    ? SCENARIO_SPECS[artifact.producerScenario].outputArtifacts.find((schema) => schema.type === artifact.type)
     : undefined;
   const handoffTargets = artifact && artifactSchema
-    ? artifactSchema.consumers.filter((consumer) => consumer !== agentId)
+    ? artifactSchema.consumers.filter((consumer) => consumer !== scenarioId)
     : [];
   if (!entry) {
     return (
       <Card className="registry-slot">
         <SectionHeader icon={AlertTriangle} title={slot.title ?? '未注册组件'} subtitle={slot.componentId} />
-        <p className="empty-state">Agent 返回了未知 componentId。当前使用通用 inspector 展示 artifact、manifest 和日志引用。</p>
+        <p className="empty-state">Scenario 返回了未知 componentId。当前使用通用 inspector 展示 artifact、manifest 和日志引用。</p>
         {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到：{slot.artifactRef}</p> : null}
-        <UnknownArtifactInspector agentId={agentId} session={session} slot={slot} artifact={artifact} />
+        <UnknownArtifactInspector scenarioId={scenarioId} session={session} slot={slot} artifact={artifact} />
       </Card>
     );
   }
@@ -1735,15 +2062,15 @@ function RegistrySlot({
       <SectionHeader icon={Target} title={slot.title ?? entry.label} subtitle={`${slot.componentId}${slot.artifactRef ? ` -> ${slot.artifactRef}` : ''}`} />
       {viewCompositionSummary(slot) ? <div className="composition-strip"><code>{viewCompositionSummary(slot)}</code></div> : null}
       {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到，组件保持 empty state，不使用 demo 数据。</p> : null}
-      {entry.render({ agentId, session, slot, artifact })}
+      {entry.render({ scenarioId, session, slot, artifact })}
       {artifact && handoffTargets.length ? (
         <div className="handoff-actions">
           <span>发送 artifact 到</span>
           {handoffTargets.map((target) => {
-            const targetAgent = agents.find((item) => item.id === target);
+            const targetScenario = scenarios.find((item) => item.id === target);
             return (
               <button key={target} onClick={() => onArtifactHandoff(target, artifact)}>
-                {targetAgent?.name ?? target}
+                {targetScenario?.name ?? target}
               </button>
             );
           })}
@@ -1936,7 +2263,7 @@ function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
   ].join('\n')).join('\n\n');
 }
 
-function NotebookTimeline({ agentId, notebook = [] }: { agentId: AgentId; notebook?: NotebookRecord[] }) {
+function NotebookTimeline({ scenarioId, notebook = [] }: { scenarioId: ScenarioId; notebook?: NotebookRecord[] }) {
   const filtered = notebook;
   return (
     <div className="stack">
@@ -1944,10 +2271,10 @@ function NotebookTimeline({ agentId, notebook = [] }: { agentId: AgentId; notebo
       {!filtered.length ? <EmptyArtifactState title="等待真实 notebook 记录" detail="Notebook 只展示当前会话运行产生的记录；全局 demo timeline 仅保留在研究时间线页面。" /> : null}
       <div className="timeline-list">
         {filtered.map((item) => {
-          const agent = agents.find((entry) => entry.id === item.agent) ?? agents[0];
+          const scenario = scenarios.find((entry) => entry.id === item.scenario) ?? scenarios[0];
           return (
             <Card className="timeline-card" key={item.title}>
-              <div className="timeline-dot" style={{ background: agent.color }} />
+              <div className="timeline-dot" style={{ background: scenario.color }} />
               <div>
                 <div className="timeline-meta">
                   <span>{item.time}</span>
@@ -1971,143 +2298,6 @@ function NotebookTimeline({ agentId, notebook = [] }: { agentId: AgentId; notebo
         })}
       </div>
     </div>
-  );
-}
-
-function AgentContractPanel({ agentId }: { agentId: AgentId }) {
-  const profile = BIOAGENT_PROFILES[agentId];
-  return (
-    <div className="contract-strip runtime-contract">
-      <div>
-        <span>Native tools</span>
-        <div className="tool-chips compact">
-          {profile.nativeTools.map((tool) => <code key={tool}>{tool}</code>)}
-        </div>
-      </div>
-      <div>
-        <span>Input contract</span>
-        <div className="field-chips">
-          {profile.inputContract.map((field) => (
-            <code key={field.key} title={field.label}>
-              {field.key}{'required' in field && field.required ? '*' : ''}:{field.type}
-            </code>
-          ))}
-        </div>
-      </div>
-      <div>
-        <span>Artifacts</span>
-        <div className="field-chips">
-          {profile.outputArtifacts.map((artifact) => (
-            <code key={artifact.type} title={artifact.description}>{artifact.type}</code>
-          ))}
-        </div>
-      </div>
-      <div>
-        <span>Scope</span>
-        <div className="field-chips">
-          {profile.scopeDeclaration.supportedTasks.slice(0, 3).map((task) => (
-            <code key={task} title={task}>{task}</code>
-          ))}
-        </div>
-      </div>
-      <div>
-        <span>Boundaries</span>
-        <div className="field-chips">
-          {profile.scopeDeclaration.unsupportedTasks.slice(0, 2).map((task) => (
-            <code key={task} title={task}>{task}</code>
-          ))}
-        </div>
-      </div>
-      <Badge variant={profile.mode === 'agent-server' ? 'success' : 'muted'}>
-        {profile.mode === 'agent-server' ? 'agent-server' : 'runtime-required'}
-      </Badge>
-    </div>
-  );
-}
-
-function Workbench({
-  agentId,
-  config,
-  session,
-  draft,
-  savedScrollTop,
-  onDraftChange,
-  onScrollTopChange,
-  onSessionChange,
-  onNewChat,
-  onDeleteChat,
-  onEditMessage,
-  onDeleteMessage,
-  archivedCount,
-  onArtifactHandoff,
-  autoRunRequest,
-  onAutoRunConsumed,
-}: {
-  agentId: AgentId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
-  draft: string;
-  savedScrollTop: number;
-  onDraftChange: (agentId: AgentId, value: string) => void;
-  onScrollTopChange: (agentId: AgentId, value: number) => void;
-  onSessionChange: (session: BioAgentSession) => void;
-  onNewChat: (agentId: AgentId) => void;
-  onDeleteChat: (agentId: AgentId) => void;
-  onEditMessage: (agentId: AgentId, messageId: string, content: string) => void;
-  onDeleteMessage: (agentId: AgentId, messageId: string) => void;
-  archivedCount: number;
-  onArtifactHandoff: (targetAgent: AgentId, artifact: RuntimeArtifact) => void;
-  autoRunRequest?: HandoffAutoRunRequest;
-  onAutoRunConsumed: (requestId: string) => void;
-}) {
-  const agent = agents.find((item) => item.id === agentId) ?? agents[0];
-  const [role, setRole] = useState('biologist');
-  return (
-    <main className="workbench">
-      <div className="workbench-header">
-        <div className="agent-title">
-          <div className="agent-large-icon" style={{ color: agent.color, background: `${agent.color}18` }}>
-            <agent.icon size={24} />
-          </div>
-          <div>
-            <h1 style={{ color: agent.color }}>{agent.name}</h1>
-            <p>{agent.desc}</p>
-          </div>
-        </div>
-        <div className="role-tabs">
-          <span>角色视图</span>
-          <TabBar tabs={roleTabs} active={role} onChange={setRole} />
-        </div>
-      </div>
-      <div className="manifest-banner">
-        <span>UIManifest</span>
-        {componentManifest[agentId].map((component) => (
-          <code key={component}>{component}</code>
-        ))}
-      </div>
-      <AgentContractPanel agentId={agentId} />
-      <div className="workbench-grid">
-	        <ChatPanel
-	          agentId={agentId}
-	          role={role}
-	          config={config}
-	          session={session}
-          input={draft}
-          savedScrollTop={savedScrollTop}
-          onInputChange={(value) => onDraftChange(agentId, value)}
-          onScrollTopChange={(value) => onScrollTopChange(agentId, value)}
-          onSessionChange={onSessionChange}
-          onNewChat={() => onNewChat(agentId)}
-          onDeleteChat={() => onDeleteChat(agentId)}
-          onEditMessage={(messageId, content) => onEditMessage(agentId, messageId, content)}
-          onDeleteMessage={(messageId) => onDeleteMessage(agentId, messageId)}
-          archivedCount={archivedCount}
-          autoRunRequest={autoRunRequest}
-          onAutoRunConsumed={onAutoRunConsumed}
-        />
-        <ResultsRenderer agentId={agentId} session={session} onArtifactHandoff={onArtifactHandoff} />
-      </div>
-    </main>
   );
 }
 
@@ -2396,7 +2586,7 @@ function EditableBlock({
 function TimelinePage({ alignmentContracts = [] }: { alignmentContracts?: AlignmentContractRecord[] }) {
   const alignmentItems = alignmentContracts.map((contract) => ({
     time: new Date(contract.updatedAt).toLocaleString('zh-CN', { hour12: false }),
-    agent: 'knowledge' as AgentId,
+    scenario: 'knowledge' as ScenarioId,
     title: contract.title,
     desc: `alignment-contract ${contract.id} · ${contract.reason} · checksum ${contract.checksum}`,
     claimType: 'fact' as ClaimType,
@@ -2411,14 +2601,14 @@ function TimelinePage({ alignmentContracts = [] }: { alignmentContracts?: Alignm
       </div>
       <div className="timeline-list">
         {items.map((item) => {
-          const agent = agents.find((entry) => entry.id === item.agent) ?? agents[0];
+          const scenario = scenarios.find((entry) => entry.id === item.scenario) ?? scenarios[0];
           return (
             <Card className="timeline-card" key={`${item.time}-${item.title}`}>
-              <div className="timeline-dot" style={{ background: agent.color }} />
+              <div className="timeline-dot" style={{ background: scenario.color }} />
               <div>
                 <div className="timeline-meta">
                   <span>{item.time}</span>
-                  <Badge variant="info">{agent.name}</Badge>
+                  <Badge variant="info">{scenario.name}</Badge>
                   <ClaimTag type={item.claimType} />
                   <ConfidenceBar value={item.confidence} />
                 </div>
@@ -2433,21 +2623,21 @@ function TimelinePage({ alignmentContracts = [] }: { alignmentContracts?: Alignm
   );
 }
 
-function handoffAutoRunPrompt(targetAgent: AgentId, artifact: RuntimeArtifact, sourceAgentName: string, targetAgentName: string): string {
+function handoffAutoRunPrompt(targetScenario: ScenarioId, artifact: RuntimeArtifact, sourceScenarioName: string, targetScenarioName: string): string {
   const focus = artifactFocusTerm(artifact);
-  if (targetAgent === 'literature' && focus) {
+  if (targetScenario === 'literature-evidence-review' && focus) {
     return `${focus} clinical trials，返回 paper-list JSON artifact、claims、ExecutionUnit。`;
   }
-  if (targetAgent === 'structure' && focus) {
+  if (targetScenario === 'structure-exploration' && focus) {
     return `分析 ${focus} 的结构，返回 structure-summary artifact、dataRef、质量指标和 ExecutionUnit。`;
   }
-  if (targetAgent === 'knowledge' && focus) {
+  if (targetScenario === 'biomedical-knowledge-graph' && focus) {
     return `${focus} gene/protein knowledge graph，返回 knowledge-graph、来源链接、数据库访问日期和 ExecutionUnit。`;
   }
   return [
     `消费 handoff artifact ${artifact.id} (${artifact.type})。`,
-    `来源 Agent: ${sourceAgentName}。`,
-    `请按${targetAgentName}的 input contract 生成下一步 claims、ExecutionUnit、UIManifest 和 runtime artifact。`,
+    `来源 Scenario: ${sourceScenarioName}。`,
+    `请按${targetScenarioName}的 input contract 生成下一步 claims、ExecutionUnit、UIManifest 和 runtime artifact。`,
   ].join('\n');
 }
 
@@ -2492,7 +2682,7 @@ function shouldUsePersistedWorkspaceState(current: BioAgentWorkspaceState, persi
 }
 
 function workspaceActivityScore(state: BioAgentWorkspaceState) {
-  return Object.values(state.sessionsByAgent).reduce((total, session) => {
+  return Object.values(state.sessionsByScenario).reduce((total, session) => {
     const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
     return total
       + userMessages
@@ -2505,7 +2695,7 @@ function workspaceActivityScore(state: BioAgentWorkspaceState) {
 
 export function BioAgentApp() {
   const [page, setPage] = useState<PageId>('dashboard');
-  const [agentId, setAgentId] = useState<AgentId>('literature');
+  const [scenarioId, setScenarioId] = useState<ScenarioId>('literature-evidence-review');
   const [config, setConfig] = useState<BioAgentConfig>(() => loadBioAgentConfig());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceState, setWorkspaceState] = useState<BioAgentWorkspaceState>(() => {
@@ -2516,24 +2706,25 @@ export function BioAgentApp() {
   const [workspaceStatus, setWorkspaceStatus] = useState('');
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [handoffAutoRun, setHandoffAutoRun] = useState<HandoffAutoRunRequest | undefined>();
-  const [drafts, setDrafts] = useState<Record<AgentId, string>>({
-    literature: '',
-    structure: '',
-    omics: '',
-    knowledge: '',
+  const [scenarioOverrides, setScenarioOverrides] = useState<Partial<Record<ScenarioId, ScenarioRuntimeOverride>>>({});
+  const [drafts, setDrafts] = useState<Record<ScenarioId, string>>({
+    'literature-evidence-review': '',
+    'structure-exploration': '',
+    'omics-differential-exploration': '',
+    'biomedical-knowledge-graph': '',
   });
-  const [messageScrollTops, setMessageScrollTops] = useState<Record<AgentId, number>>({
-    literature: 0,
-    structure: 0,
-    omics: 0,
-    knowledge: 0,
+  const [messageScrollTops, setMessageScrollTops] = useState<Record<ScenarioId, number>>({
+    'literature-evidence-review': 0,
+    'structure-exploration': 0,
+    'omics-differential-exploration': 0,
+    'biomedical-knowledge-graph': 0,
   });
 
-  const sessions = workspaceState.sessionsByAgent;
-  const archivedCountByAgent = useMemo(() => agents.reduce((acc, agent) => {
-    acc[agent.id] = workspaceState.archivedSessions.filter((session) => session.agentId === agent.id).length;
+  const sessions = workspaceState.sessionsByScenario;
+  const archivedCountByAgent = useMemo(() => scenarios.reduce((acc, scenario) => {
+    acc[scenario.id] = workspaceState.archivedSessions.filter((session) => session.scenarioId === scenario.id).length;
     return acc;
-  }, {} as Record<AgentId, number>), [workspaceState.archivedSessions]);
+  }, {} as Record<ScenarioId, number>), [workspaceState.archivedSessions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2599,9 +2790,9 @@ export function BioAgentApp() {
   function updateSession(nextSession: BioAgentSession, reason = 'session update') {
     updateWorkspace((current) => ({
       ...current,
-      sessionsByAgent: {
-        ...current.sessionsByAgent,
-        [nextSession.agentId]: versionSession(nextSession, reason),
+      sessionsByScenario: {
+        ...current.sessionsByScenario,
+        [nextSession.scenarioId]: versionSession(nextSession, reason),
       },
     }));
   }
@@ -2626,44 +2817,48 @@ export function BioAgentApp() {
     });
   }
 
-  function updateDraft(nextAgentId: AgentId, value: string) {
-    setDrafts((current) => ({ ...current, [nextAgentId]: value }));
+  function updateDraft(nextScenarioId: ScenarioId, value: string) {
+    setDrafts((current) => ({ ...current, [nextScenarioId]: value }));
   }
 
-  function updateMessageScrollTop(nextAgentId: AgentId, value: number) {
-    setMessageScrollTops((current) => ({ ...current, [nextAgentId]: value }));
+  function updateMessageScrollTop(nextScenarioId: ScenarioId, value: number) {
+    setMessageScrollTops((current) => ({ ...current, [nextScenarioId]: value }));
   }
 
-  function newChat(nextAgentId: AgentId) {
+  function applyScenarioOverride(nextScenarioId: ScenarioId, override: ScenarioRuntimeOverride) {
+    setScenarioOverrides((current) => ({ ...current, [nextScenarioId]: override }));
+  }
+
+  function newChat(nextScenarioId: ScenarioId) {
     updateWorkspace((current) => {
-      const currentSession = versionSession(current.sessionsByAgent[nextAgentId], 'new chat archived previous session');
+      const currentSession = versionSession(current.sessionsByScenario[nextScenarioId], 'new chat archived previous session');
       return {
         ...current,
         archivedSessions: [currentSession, ...current.archivedSessions].slice(0, 80),
-        sessionsByAgent: {
-          ...current.sessionsByAgent,
-          [nextAgentId]: createSession(nextAgentId, `${agents.find((item) => item.id === nextAgentId)?.name ?? nextAgentId} 新聊天`),
+        sessionsByScenario: {
+          ...current.sessionsByScenario,
+          [nextScenarioId]: createSession(nextScenarioId, `${scenarios.find((item) => item.id === nextScenarioId)?.name ?? nextScenarioId} 新聊天`),
         },
       };
     });
   }
 
-  function deleteChat(nextAgentId: AgentId) {
+  function deleteChat(nextScenarioId: ScenarioId) {
     updateWorkspace((current) => {
-      const deleted = versionSession(current.sessionsByAgent[nextAgentId], 'deleted current chat');
+      const deleted = versionSession(current.sessionsByScenario[nextScenarioId], 'deleted current chat');
       return {
         ...current,
         archivedSessions: [{ ...deleted, title: `${deleted.title}（已删除）` }, ...current.archivedSessions].slice(0, 80),
-        sessionsByAgent: {
-          ...current.sessionsByAgent,
-          [nextAgentId]: resetSession(nextAgentId),
+        sessionsByScenario: {
+          ...current.sessionsByScenario,
+          [nextScenarioId]: resetSession(nextScenarioId),
         },
       };
     });
   }
 
-  function editMessage(nextAgentId: AgentId, messageId: string, content: string) {
-    const session = workspaceState.sessionsByAgent[nextAgentId];
+  function editMessage(nextScenarioId: ScenarioId, messageId: string, content: string) {
+    const session = workspaceState.sessionsByScenario[nextScenarioId];
     const nextSession: BioAgentSession = {
       ...session,
       messages: session.messages.map((message) => message.id === messageId ? { ...message, content, updatedAt: nowIso() } as BioAgentMessage : message),
@@ -2672,8 +2867,8 @@ export function BioAgentApp() {
     updateSession(nextSession, `edit message ${messageId}`);
   }
 
-  function deleteMessage(nextAgentId: AgentId, messageId: string) {
-    const session = workspaceState.sessionsByAgent[nextAgentId];
+  function deleteMessage(nextScenarioId: ScenarioId, messageId: string) {
+    const session = workspaceState.sessionsByScenario[nextScenarioId];
     const nextSession: BioAgentSession = {
       ...session,
       messages: session.messages.filter((message) => message.id !== messageId),
@@ -2685,14 +2880,14 @@ export function BioAgentApp() {
   function handleSearch(query: string) {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return;
-    const matchedAgent = agents.find((agent) =>
-      normalized.includes(agent.id)
-      || normalized.includes(agent.name.toLowerCase())
-      || normalized.includes(agent.domain.toLowerCase())
-      || agent.tools.some((tool) => normalized.includes(tool.toLowerCase())),
+    const matchedScenario = scenarios.find((scenario) =>
+      normalized.includes(scenario.id)
+      || normalized.includes(scenario.name.toLowerCase())
+      || normalized.includes(scenario.domain.toLowerCase())
+      || scenario.tools.some((tool) => normalized.includes(tool.toLowerCase())),
     );
-    if (matchedAgent) {
-      setAgentId(matchedAgent.id);
+    if (matchedScenario) {
+      setScenarioId(matchedScenario.id);
       setPage('workbench');
       return;
     }
@@ -2707,25 +2902,25 @@ export function BioAgentApp() {
     setPage('workbench');
   }
 
-  function handleArtifactHandoff(targetAgent: AgentId, artifact: RuntimeArtifact) {
-    const sourceAgent = agents.find((item) => item.id === artifact.producerAgent);
-    const target = agents.find((item) => item.id === targetAgent);
+  function handleArtifactHandoff(targetScenario: ScenarioId, artifact: RuntimeArtifact) {
+    const sourceScenario = scenarios.find((item) => item.id === artifact.producerScenario);
+    const target = scenarios.find((item) => item.id === targetScenario);
     const now = nowIso();
-    const autoRunPrompt = handoffAutoRunPrompt(targetAgent, artifact, sourceAgent?.name ?? artifact.producerAgent, target?.name ?? targetAgent);
+    const autoRunPrompt = handoffAutoRunPrompt(targetScenario, artifact, sourceScenario?.name ?? artifact.producerScenario, target?.name ?? targetScenario);
     const handoffMessage: BioAgentMessage = {
       id: makeId('handoff'),
       role: 'user',
       content: [
-        `请基于来自${sourceAgent?.name ?? artifact.producerAgent}的 artifact 继续分析。`,
+        `请基于来自${sourceScenario?.name ?? artifact.producerScenario}的 artifact 继续分析。`,
         `artifact id: ${artifact.id}`,
         `artifact type: ${artifact.type}`,
-        `目标：按${target?.name ?? targetAgent}的 input contract 生成下一步 claims、ExecutionUnit 和 UIManifest。`,
+        `目标：按${target?.name ?? targetScenario}的 input contract 生成下一步 claims、ExecutionUnit 和 UIManifest。`,
       ].join('\n'),
       createdAt: now,
       status: 'completed',
     };
     setWorkspaceState((current) => {
-      const targetSession = current.sessionsByAgent[targetAgent];
+      const targetSession = current.sessionsByScenario[targetScenario];
       const artifacts = targetSession.artifacts.some((item) => item.id === artifact.id)
         ? targetSession.artifacts
         : [artifact, ...targetSession.artifacts].slice(0, 24);
@@ -2736,9 +2931,9 @@ export function BioAgentApp() {
         notebook: [{
           id: makeId('note'),
           time: new Date(now).toLocaleString('zh-CN', { hour12: false }),
-          agent: targetAgent,
+          scenario: targetScenario,
           title: `接收 ${artifact.type}`,
-          desc: `来自 ${sourceAgent?.name ?? artifact.producerAgent} 的 ${artifact.id} 已进入当前 Agent 上下文。`,
+          desc: `来自 ${sourceScenario?.name ?? artifact.producerScenario} 的 ${artifact.id} 已进入当前 Scenario 上下文。`,
           claimType: 'fact' as const,
           confidence: 1,
           artifactRefs: [artifact.id],
@@ -2748,18 +2943,18 @@ export function BioAgentApp() {
       }, `handoff artifact ${artifact.id}`);
       return {
         ...current,
-        sessionsByAgent: {
-          ...current.sessionsByAgent,
-          [targetAgent]: nextTargetSession,
+        sessionsByScenario: {
+          ...current.sessionsByScenario,
+          [targetScenario]: nextTargetSession,
         },
         updatedAt: now,
       };
     });
-    setAgentId(targetAgent);
+    setScenarioId(targetScenario);
     setPage('workbench');
     setHandoffAutoRun({
       id: makeId('handoff-run'),
-      targetAgent,
+      targetScenario,
       prompt: autoRunPrompt,
     });
   }
@@ -2803,8 +2998,8 @@ export function BioAgentApp() {
       <Sidebar
         page={page}
         setPage={setPage}
-        agentId={agentId}
-        setAgentId={setAgentId}
+        scenarioId={scenarioId}
+        setScenarioId={setScenarioId}
         config={config}
         workspaceStatus={workspaceStatus}
         onWorkspacePathChange={setWorkspacePath}
@@ -2813,14 +3008,14 @@ export function BioAgentApp() {
         <TopBar onSearch={handleSearch} onSettingsOpen={() => setSettingsOpen(true)} />
         <div className="content-shell">
           {page === 'dashboard' ? (
-            <Dashboard setPage={setPage} setAgentId={setAgentId} />
+            <Dashboard setPage={setPage} setScenarioId={setScenarioId} onApplyScenarioDraft={applyScenarioOverride} />
           ) : page === 'workbench' ? (
             <Workbench
-              agentId={agentId}
+              scenarioId={scenarioId}
               config={config}
-              session={sessions[agentId]}
-              draft={drafts[agentId]}
-              savedScrollTop={messageScrollTops[agentId]}
+              session={sessions[scenarioId]}
+              draft={drafts[scenarioId]}
+              savedScrollTop={messageScrollTops[scenarioId]}
               onDraftChange={updateDraft}
               onScrollTopChange={updateMessageScrollTop}
               onSessionChange={updateSession}
@@ -2828,10 +3023,12 @@ export function BioAgentApp() {
               onDeleteChat={deleteChat}
               onEditMessage={editMessage}
               onDeleteMessage={deleteMessage}
-              archivedCount={archivedCountByAgent[agentId]}
+              archivedCount={archivedCountByAgent[scenarioId]}
               onArtifactHandoff={handleArtifactHandoff}
               autoRunRequest={handoffAutoRun}
               onAutoRunConsumed={consumeHandoffAutoRun}
+              scenarioOverride={scenarioOverrides[scenarioId]}
+              onScenarioOverrideChange={applyScenarioOverride}
             />
           ) : page === 'alignment' ? (
             <AlignmentPage contracts={workspaceState.alignmentContracts ?? []} onSaveContract={saveAlignmentContract} />

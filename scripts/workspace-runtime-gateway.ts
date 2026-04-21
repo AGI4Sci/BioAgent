@@ -1,23 +1,18 @@
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { runLegacyBioAgentTool } from './legacy-bioagent-tools.js';
 import { agentServerGenerationSkill, loadSkillRegistry, matchSkill } from './skill-registry.js';
 import { appendTaskAttempt, readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
-import type { AgentServerGenerationResponse, BioAgentProfile, GatewayRequest, SkillAvailability, ToolPayload, WorkspaceTaskRunResult } from './runtime-types.js';
+import type { AgentServerGenerationResponse, BioAgentSkillDomain, GatewayRequest, SkillAvailability, ToolPayload, WorkspaceTaskRunResult } from './runtime-types.js';
 import { fileExists, runWorkspaceTask, sha1 } from './workspace-task-runner.js';
 
-const PROFILE_SET = new Set<BioAgentProfile>(['literature', 'structure', 'omics', 'knowledge']);
+const SKILL_DOMAIN_SET = new Set<BioAgentSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
 
 export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>): Promise<ToolPayload> {
   const request = normalizeGatewayRequest(body);
   const skills = await loadSkillRegistry(request);
-  const skill = matchSkill(request, skills) ?? agentServerGenerationSkill(request.profile);
+  const skill = matchSkill(request, skills) ?? agentServerGenerationSkill(request.skillDomain);
   if (skill.manifest.entrypoint.type === 'agentserver-generation') {
     return runAgentServerGeneratedTask(request, skill, skills);
-  }
-  if (skill.manifest.entrypoint.type === 'legacy-adapter') {
-    const payload = await runLegacyBioAgentTool({ ...request });
-    return annotateLegacyPayload(payload, skill);
   }
   if (skill.id === 'structure.rcsb_latest_or_entry') {
     return runPythonWorkspaceSkill(request, skill, 'structure');
@@ -27,6 +22,9 @@ export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>):
   }
   if (skill.id === 'knowledge.uniprot_chembl_lookup') {
     return runPythonWorkspaceSkill(request, skill, 'knowledge');
+  }
+  if (skill.id === 'sequence.ncbi_blastp_search') {
+    return runPythonWorkspaceSkill(request, skill, 'blastp');
   }
   if (skill.id === 'omics.differential_expression') {
     return runPythonWorkspaceSkill(request, skill, 'omics');
@@ -55,7 +53,7 @@ async function runAgentServerGeneratedTask(
     return repairNeededPayload(request, skill, generation.error);
   }
 
-  const taskId = `generated-${request.profile}-${sha1(`${request.prompt}:${Date.now()}`).slice(0, 12)}`;
+  const taskId = `generated-${request.skillDomain}-${sha1(`${request.prompt}:${Date.now()}`).slice(0, 12)}`;
   for (const file of generation.response.taskFiles) {
     const rel = safeWorkspaceRel(file.path);
     await mkdir(dirname(join(workspace, rel)), { recursive: true });
@@ -87,7 +85,7 @@ async function runAgentServerGeneratedTask(
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
-      profile: request.profile,
+      skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
       status: 'failed',
@@ -116,7 +114,7 @@ async function runAgentServerGeneratedTask(
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
-      profile: request.profile,
+      skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
       status: errors.length ? 'repair-needed' : 'done',
@@ -148,7 +146,7 @@ async function runAgentServerGeneratedTask(
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
-      profile: request.profile,
+      skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
       status: 'failed',
@@ -166,10 +164,10 @@ async function runAgentServerGeneratedTask(
 }
 
 function normalizeGatewayRequest(body: Record<string, unknown>): GatewayRequest {
-  const profile = String(body.profile || '') as BioAgentProfile;
-  if (!PROFILE_SET.has(profile)) throw new Error(`Unsupported BioAgent profile: ${String(body.profile || '')}`);
+  const skillDomain = String(body.skillDomain || '') as BioAgentSkillDomain;
+  if (!SKILL_DOMAIN_SET.has(skillDomain)) throw new Error(`Unsupported BioAgent skill domain: ${String(body.skillDomain || '')}`);
   return {
-    profile,
+    skillDomain,
     prompt: String(body.prompt || ''),
     workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
     agentServerBaseUrl: typeof body.agentServerBaseUrl === 'string' ? cleanUrl(body.agentServerBaseUrl) : undefined,
@@ -211,7 +209,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
-      profile: request.profile,
+      skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -250,7 +248,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
-      profile: request.profile,
+      skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
       status: errors.length ? 'repair-needed' : 'done',
@@ -281,7 +279,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
-      profile: request.profile,
+      skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -345,7 +343,7 @@ async function tryAgentServerRepairAndRerun(params: {
     await appendTaskAttempt(workspace, {
       id: params.taskId,
       prompt: params.request.prompt,
-      profile: params.request.profile,
+      skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
       attempt: 2,
       parentAttempt: 1,
@@ -389,7 +387,7 @@ async function tryAgentServerRepairAndRerun(params: {
     await appendTaskAttempt(workspace, {
       id: params.taskId,
       prompt: params.request.prompt,
-      profile: params.request.profile,
+      skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
       attempt: 2,
       parentAttempt: 1,
@@ -422,7 +420,7 @@ async function tryAgentServerRepairAndRerun(params: {
     await appendTaskAttempt(workspace, {
       id: params.taskId,
       prompt: params.request.prompt,
-      profile: params.request.profile,
+      skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
       attempt: 2,
       parentAttempt: 1,
@@ -467,7 +465,7 @@ async function tryAgentServerRepairAndRerun(params: {
     await appendTaskAttempt(workspace, {
       id: params.taskId,
       prompt: params.request.prompt,
-      profile: params.request.profile,
+      skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
       attempt: 2,
       parentAttempt: 1,
@@ -500,7 +498,7 @@ async function requestAgentServerGeneration(params: {
   try {
     const generationRequest = {
       prompt: params.request.prompt,
-      profile: params.request.profile,
+      skillDomain: params.request.skillDomain,
       workspaceTreeSummary: await workspaceTreeSummary(params.workspace),
       availableSkills: params.skills.map((skill) => ({
         id: skill.id,
@@ -508,10 +506,10 @@ async function requestAgentServerGeneration(params: {
         available: skill.available,
         reason: skill.reason,
       })),
-      artifactSchema: expectedArtifactSchema(params.request.profile),
+      artifactSchema: expectedArtifactSchema(params.request.skillDomain),
       uiManifestContract: { expectedKeys: ['componentId', 'artifactRef', 'encoding', 'layout', 'compare'] },
       uiStateSummary: params.request.uiState,
-      priorAttempts: await readRecentTaskAttempts(params.workspace, params.request.profile),
+      priorAttempts: await readRecentTaskAttempts(params.workspace, params.request.skillDomain),
     };
     const response = await fetch(`${params.baseUrl}/api/agent-server/runs`, {
       method: 'POST',
@@ -519,8 +517,8 @@ async function requestAgentServerGeneration(params: {
       signal: controller.signal,
       body: JSON.stringify({
         agent: {
-          id: `bioagent-${params.request.profile}-task-generation`,
-          name: `BioAgent ${params.request.profile} Task Generation`,
+          id: `bioagent-${params.request.skillDomain}-task-generation`,
+          name: `BioAgent ${params.request.skillDomain} Task Generation`,
           backend: 'codex',
           workspace: params.workspace,
           workingDirectory: params.workspace,
@@ -536,7 +534,7 @@ async function requestAgentServerGeneration(params: {
           metadata: {
             project: 'BioAgent',
             purpose: 'workspace-task-generation',
-            profile: params.request.profile,
+            skillDomain: params.request.skillDomain,
             skillId: params.skill.id,
           },
         },
@@ -601,8 +599,8 @@ async function requestAgentServerRepair(params: {
       signal: controller.signal,
       body: JSON.stringify({
         agent: {
-          id: `bioagent-${params.request.profile}-runtime-repair`,
-          name: `BioAgent ${params.request.profile} Runtime Repair`,
+          id: `bioagent-${params.request.skillDomain}-runtime-repair`,
+          name: `BioAgent ${params.request.skillDomain} Runtime Repair`,
           backend: 'codex',
           workspace: params.run.workspace,
           workingDirectory: params.run.workspace,
@@ -619,7 +617,7 @@ async function requestAgentServerRepair(params: {
           metadata: {
             project: 'BioAgent',
             purpose: 'workspace-task-repair',
-            profile: params.request.profile,
+            skillDomain: params.request.skillDomain,
             skillId: params.skill.id,
             codeRef: params.run.spec.taskRel,
             stdoutRef: params.run.stdoutRef,
@@ -703,7 +701,7 @@ function buildAgentServerRepairPrompt(params: {
     '',
     JSON.stringify({
       prompt: params.request.prompt,
-      profile: params.request.profile,
+      skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
       codeRef: params.run.spec.taskRel,
       inputRef: `.bioagent/task-inputs/${params.run.spec.id}.json`,
@@ -725,7 +723,7 @@ function buildAgentServerRepairPrompt(params: {
 
 function buildAgentServerGenerationPrompt(request: {
   prompt: string;
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
   availableSkills: Array<{ id: string; kind: string; available: boolean; reason: string }>;
   artifactSchema: Record<string, unknown>;
@@ -781,10 +779,10 @@ async function workspaceTreeSummary(workspace: string) {
   return out;
 }
 
-function expectedArtifactSchema(profile: BioAgentProfile): Record<string, unknown> {
-  if (profile === 'literature') return { type: 'paper-list' };
-  if (profile === 'structure') return { type: 'structure-summary' };
-  if (profile === 'omics') return { type: 'omics-differential-expression' };
+function expectedArtifactSchema(skillDomain: BioAgentSkillDomain): Record<string, unknown> {
+  if (skillDomain === 'literature') return { type: 'paper-list' };
+  if (skillDomain === 'structure') return { type: 'structure-summary' };
+  if (skillDomain === 'omics') return { type: 'omics-differential-expression' };
   return { type: 'knowledge-graph' };
 }
 
@@ -867,7 +865,11 @@ function validateAndNormalizePayload(
       `Runtime gateway refs: taskCodeRef=${refs.taskRel}, outputRef=${refs.outputRel}, stdoutRef=${refs.stdoutRel}, stderrRef=${refs.stderrRel}`,
     ].filter(Boolean).join('\n'),
     claims: Array.isArray(payload.claims) ? payload.claims : [],
-    uiManifest: Array.isArray(payload.uiManifest) ? payload.uiManifest : [],
+    uiManifest: composeRuntimeUiManifest(
+      Array.isArray(payload.uiManifest) ? payload.uiManifest : [],
+      Array.isArray(payload.artifacts) ? payload.artifacts : [],
+      request,
+    ),
     executionUnits: (Array.isArray(payload.executionUnits) ? payload.executionUnits : []).map((unit) => isRecord(unit) ? {
       language: 'python',
       codeRef: refs.taskRel,
@@ -883,19 +885,175 @@ function validateAndNormalizePayload(
   };
 }
 
-function annotateLegacyPayload(payload: ToolPayload, skill: SkillAvailability): ToolPayload {
-  return {
-    ...payload,
-    reasoningTrace: [
-      payload.reasoningTrace,
-      `Legacy branch: ${skill.id}. This capability is registered as a seed skill but still executes through the compatibility adapter until its task code is migrated.`,
-    ].filter(Boolean).join('\n'),
-    executionUnits: payload.executionUnits.map((unit) => isRecord(unit) ? {
-      ...unit,
-      skillId: skill.id,
-      legacyBranch: true,
-    } : unit),
+const REGISTERED_COMPONENTS = new Set([
+  'paper-card-list',
+  'molecule-viewer',
+  'volcano-plot',
+  'heatmap-viewer',
+  'umap-viewer',
+  'network-graph',
+  'data-table',
+  'evidence-matrix',
+  'execution-unit-table',
+  'notebook-timeline',
+  'unknown-artifact-inspector',
+]);
+
+const COMPONENT_ALIASES: Array<{ id: string; patterns: RegExp[] }> = [
+  { id: 'paper-card-list', patterns: [/paper[-\s]?card/i, /paper[-\s]?list/i, /文献卡片|文献列表|论文列表/i] },
+  { id: 'molecule-viewer', patterns: [/molecule[-\s]?viewer/i, /structure viewer/i, /mol\*/i, /分子|结构查看|蛋白结构/i] },
+  { id: 'volcano-plot', patterns: [/volcano/i, /火山图/i] },
+  { id: 'heatmap-viewer', patterns: [/heatmap/i, /热图/i] },
+  { id: 'umap-viewer', patterns: [/umap/i, /降维/i] },
+  { id: 'network-graph', patterns: [/network[-\s]?graph/i, /drug[-\s]?target network/i, /knowledge graph/i, /网络图|知识图谱|关系网络/i] },
+  { id: 'data-table', patterns: [/data[-\s]?table/i, /\btable\b/i, /blast/i, /alignment hits?/i, /数据表|表格|证据表|知识卡片|比对结果/i] },
+  { id: 'evidence-matrix', patterns: [/evidence[-\s]?matrix/i, /证据矩阵|证据表/i] },
+  { id: 'execution-unit-table', patterns: [/execution[-\s]?unit/i, /可复现|执行单元/i] },
+  { id: 'notebook-timeline', patterns: [/notebook[-\s]?timeline/i, /研究记录|时间线/i] },
+  { id: 'unknown-artifact-inspector', patterns: [/inspector/i, /原始\s*json|raw json|日志/i] },
+];
+
+const DOMAIN_DEFAULT_COMPONENTS: Record<string, string[]> = {
+  literature: ['paper-card-list', 'evidence-matrix', 'execution-unit-table'],
+  structure: ['molecule-viewer', 'evidence-matrix', 'execution-unit-table'],
+  omics: ['volcano-plot', 'heatmap-viewer', 'umap-viewer', 'execution-unit-table'],
+  knowledge: ['network-graph', 'data-table', 'evidence-matrix', 'execution-unit-table'],
+};
+
+export function composeRuntimeUiManifest(
+  incoming: Array<Record<string, unknown>>,
+  artifacts: Array<Record<string, unknown>>,
+  request: Pick<GatewayRequest, 'prompt' | 'skillDomain' | 'uiState'>,
+): Array<Record<string, unknown>> {
+  const override = isRecord(request.uiState?.scenarioOverride) ? request.uiState.scenarioOverride : undefined;
+  const overrideComponents = toStringList(override?.defaultComponents).filter((id) => REGISTERED_COMPONENTS.has(id));
+  const promptComponents = componentsRequestedByPrompt(request.prompt);
+  const incomingComponents = incoming
+    .map((slot) => typeof slot.componentId === 'string' ? slot.componentId : undefined)
+    .filter((id): id is string => typeof id === 'string' && REGISTERED_COMPONENTS.has(id));
+  const componentIds = uniqueStrings([
+    ...overrideComponents,
+    ...promptComponents,
+    ...(overrideComponents.length || promptComponents.length ? [] : incomingComponents),
+    ...(overrideComponents.length || promptComponents.length || incomingComponents.length ? [] : DOMAIN_DEFAULT_COMPONENTS[request.skillDomain] ?? []),
+  ]).slice(0, 6);
+  const sourceByComponent = new Map(incoming.map((slot) => [String(slot.componentId || ''), slot]));
+  return componentIds.map((componentId, index) => {
+    const base = sourceByComponent.get(componentId) ?? {};
+    return {
+      ...base,
+      componentId,
+      title: typeof base.title === 'string' && base.title.trim() ? base.title : titleForComponent(componentId),
+      artifactRef: typeof base.artifactRef === 'string' && base.artifactRef.trim()
+        ? base.artifactRef
+        : inferArtifactRef(componentId, artifacts),
+      priority: typeof base.priority === 'number' ? base.priority : index + 1,
+      encoding: isRecord(base.encoding) ? base.encoding : inferEncoding(request.prompt, componentId),
+      layout: isRecord(base.layout) ? base.layout : inferLayout(request.prompt),
+    };
+  });
+}
+
+function componentsRequestedByPrompt(prompt: string) {
+  return COMPONENT_ALIASES
+    .filter((entry) => entry.patterns.some((pattern) => pattern.test(prompt)))
+    .filter((entry) => !componentNegated(prompt, entry.id))
+    .map((entry) => entry.id);
+}
+
+function componentNegated(prompt: string, componentId: string) {
+  const labels: Record<string, string[]> = {
+    'paper-card-list': ['paper', '文献', '论文'],
+    'molecule-viewer': ['molecule', 'structure', '结构', '分子'],
+    'volcano-plot': ['volcano', '火山图'],
+    'heatmap-viewer': ['heatmap', '热图'],
+    'umap-viewer': ['umap'],
+    'network-graph': ['network', '网络图', '知识图谱'],
+    'data-table': ['table', '表格', '数据表'],
+    'evidence-matrix': ['evidence matrix', '证据矩阵'],
+    'execution-unit-table': ['execution unit', '执行单元', '可复现'],
+    'notebook-timeline': ['timeline', 'notebook', '时间线', '研究记录'],
   };
+  return (labels[componentId] ?? []).some((label) => {
+    const escaped = escapeRegExp(label);
+    return new RegExp(`(?:不需要|不要|无需|without|no)[^。；;,.，\\n]{0,32}${escaped}`, 'i').test(prompt)
+      || new RegExp(`${escaped}[^。；;,.，\\n]{0,16}(?:不需要|不要|无需|without|no)`, 'i').test(prompt);
+  });
+}
+
+function inferArtifactRef(componentId: string, artifacts: Array<Record<string, unknown>>) {
+  if (componentId === 'evidence-matrix' || componentId === 'execution-unit-table' || componentId === 'notebook-timeline') {
+    return firstArtifactRef(artifacts);
+  }
+  const targetType = componentTargetType(componentId, artifacts);
+  const direct = artifacts.find((artifact) => artifact.type === targetType || artifact.id === targetType);
+  return refForArtifact(direct) ?? firstArtifactRef(artifacts);
+}
+
+function componentTargetType(componentId: string, artifacts: Array<Record<string, unknown>>) {
+  if (componentId === 'paper-card-list') return 'paper-list';
+  if (componentId === 'molecule-viewer') return 'structure-summary';
+  if (componentId === 'volcano-plot' || componentId === 'heatmap-viewer' || componentId === 'umap-viewer') return 'omics-differential-expression';
+  if (componentId === 'network-graph') return 'knowledge-graph';
+  if (componentId === 'data-table') {
+    return artifacts.find((artifact) => artifact.type === 'sequence-alignment') ? 'sequence-alignment' : 'knowledge-graph';
+  }
+  return undefined;
+}
+
+function firstArtifactRef(artifacts: Array<Record<string, unknown>>) {
+  return refForArtifact(artifacts[0]);
+}
+
+function refForArtifact(artifact?: Record<string, unknown>) {
+  if (!artifact) return undefined;
+  return typeof artifact.id === 'string' ? artifact.id : typeof artifact.type === 'string' ? artifact.type : undefined;
+}
+
+function inferEncoding(prompt: string, componentId: string) {
+  const encoding: Record<string, unknown> = {};
+  const colorBy = prompt.match(/(?:colorBy|按)\s*([A-Za-z0-9_\-\u4e00-\u9fa5]+)\s*(?:着色|color)/i)?.[1];
+  const splitBy = prompt.match(/(?:splitBy|按)\s*([A-Za-z0-9_\-\u4e00-\u9fa5]+)\s*(?:分组|拆分|split|facet)/i)?.[1];
+  const highlight = prompt.match(/(?:highlight|高亮|标记)\s*([A-Za-z0-9_,\-\s]+)/i)?.[1];
+  if (colorBy && (componentId === 'umap-viewer' || componentId === 'network-graph')) encoding.colorBy = colorBy;
+  if (splitBy) encoding.splitBy = splitBy;
+  if (highlight) encoding.highlightSelection = highlight.split(/[\s,，]+/).filter(Boolean).slice(0, 12);
+  return Object.keys(encoding).length ? encoding : undefined;
+}
+
+function inferLayout(prompt: string) {
+  if (/side[-\s]?by[-\s]?side|并排|对比/.test(prompt)) return { mode: 'side-by-side', columns: 2 };
+  if (/grid|网格/.test(prompt)) return { mode: 'grid', columns: 2 };
+  return undefined;
+}
+
+function titleForComponent(componentId: string) {
+  const titles: Record<string, string> = {
+    'paper-card-list': '文献卡片',
+    'molecule-viewer': '分子结构查看器',
+    'volcano-plot': '火山图',
+    'heatmap-viewer': '热图',
+    'umap-viewer': 'UMAP',
+    'network-graph': '知识网络',
+    'data-table': '数据表',
+    'evidence-matrix': '证据矩阵',
+    'execution-unit-table': '可复现执行单元',
+    'notebook-timeline': '研究记录',
+    'unknown-artifact-inspector': 'Artifact Inspector',
+  };
+  return titles[componentId] ?? componentId;
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function toStringList(value: unknown) {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
 }
 
 function repairNeededPayload(
@@ -904,7 +1062,7 @@ function repairNeededPayload(
   reason: string,
   refs: Partial<{ taskRel: string; outputRel: string; stdoutRel: string; stderrRel: string }> = {},
 ): ToolPayload {
-  const id = `EU-${request.profile}-${sha1(`${request.prompt}:${reason}`).slice(0, 8)}`;
+  const id = `EU-${request.skillDomain}-${sha1(`${request.prompt}:${reason}`).slice(0, 8)}`;
   return {
     message: `BioAgent runtime gateway needs repair or AgentServer task generation: ${reason}`,
     confidence: 0.2,
@@ -912,7 +1070,7 @@ function repairNeededPayload(
     evidenceLevel: 'runtime',
     reasoningTrace: [
       reason,
-      `profile=${request.profile}`,
+      `skillDomain=${request.skillDomain}`,
       `skill=${skill.id}`,
       'No demo/default/record-only success payload was substituted.',
     ].join('\n'),
@@ -925,12 +1083,12 @@ function repairNeededPayload(
       opposingRefs: [],
     }],
     uiManifest: [
-      { componentId: 'execution-unit-table', title: 'Execution units', artifactRef: `${request.profile}-runtime-result`, priority: 1 },
+      { componentId: 'execution-unit-table', title: 'Execution units', artifactRef: `${request.skillDomain}-runtime-result`, priority: 1 },
     ],
     executionUnits: [{
       id,
       tool: 'bioagent.workspace-runtime-gateway',
-      params: JSON.stringify({ prompt: request.prompt, profile: request.profile, skillId: skill.id, reason }),
+      params: JSON.stringify({ prompt: request.prompt, skillDomain: request.skillDomain, skillId: skill.id, reason }),
       status: 'repair-needed',
       hash: sha1(`${id}:${reason}`).slice(0, 12),
       time: new Date().toISOString(),

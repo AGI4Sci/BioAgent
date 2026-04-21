@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { BIOAGENT_PROFILES } from '../agentProfiles';
-import type { AgentId } from '../data';
+import { SCENARIO_SPECS } from '../scenarioSpecs';
+import type { ScenarioId } from '../data';
 import { normalizeAgentResponse } from './agentClient';
 
 describe('normalizeAgentResponse', () => {
   it('normalizes structured AgentServer JSON embedded in text', () => {
-    const response = normalizeAgentResponse('literature', 'KRAS evidence?', {
+    const response = normalizeAgentResponse('literature-evidence-review', 'KRAS evidence?', {
       ok: true,
       data: {
         run: {
@@ -70,7 +70,7 @@ describe('normalizeAgentResponse', () => {
   });
 
   it('normalizes plain text responses without inventing artifacts', () => {
-    const response = normalizeAgentResponse('structure', 'Analyze PDB 7BZ5', {
+    const response = normalizeAgentResponse('structure-exploration', 'Analyze PDB 7BZ5', {
       run: {
         id: 'plain-run-1',
         status: 'completed',
@@ -83,26 +83,26 @@ describe('normalizeAgentResponse', () => {
     assert.equal(response.message.content, '7BZ5 结构分析完成，但后端没有返回结构化协议。');
     assert.equal(response.claims.length, 1);
     assert.equal(response.executionUnits.length, 1);
-    assert.equal(response.executionUnits[0].tool, 'structure.agent-server-run');
+    assert.equal(response.executionUnits[0].tool, 'structure-exploration.scenario-server-run');
     assert.equal(response.executionUnits[0].status, 'done');
     assert.equal(response.uiManifest.length, 0);
   });
 
-  it('preserves every profile default artifact contract through normalization', () => {
-    (Object.keys(BIOAGENT_PROFILES) as AgentId[]).forEach((agentId) => {
-      const profile = BIOAGENT_PROFILES[agentId];
-      const artifact = profile.outputArtifacts[0];
-      const slot = profile.defaultSlots.find((item) => item.artifactRef === artifact.type) ?? profile.defaultSlots[0];
-      const response = normalizeAgentResponse(agentId, `fixture ${agentId}`, {
+  it('preserves every skillDomain default artifact contract through normalization', () => {
+    (Object.keys(SCENARIO_SPECS) as ScenarioId[]).forEach((scenarioId) => {
+      const skillDomain = SCENARIO_SPECS[scenarioId];
+      const artifact = skillDomain.outputArtifacts[0];
+      const slot = skillDomain.defaultSlots.find((item) => item.artifactRef === artifact.type) ?? skillDomain.defaultSlots[0];
+      const response = normalizeAgentResponse(scenarioId, `fixture ${scenarioId}`, {
         run: {
-          id: `run-${agentId}`,
+          id: `run-${scenarioId}`,
           status: 'completed',
           output: {
             text: [
               'fixture',
               '```json',
               JSON.stringify({
-                message: `${agentId} fixture`,
+                message: `${scenarioId} fixture`,
                 uiManifest: [slot],
                 artifacts: [{
                   type: artifact.type,
@@ -110,13 +110,13 @@ describe('normalizeAgentResponse', () => {
                   data: fixtureDataForArtifact(artifact.type),
                 }],
                 executionUnits: [{
-                  id: `EU-${agentId}`,
-                  tool: `${agentId}.fixture`,
-                  params: { prompt: agentId },
-                  status: profile.executionDefaults.status,
-                  hash: `hash-${agentId}`,
-                  environment: profile.executionDefaults.environment,
-                  databaseVersions: profile.executionDefaults.databaseVersions,
+                  id: `EU-${scenarioId}`,
+                  tool: `${scenarioId}.fixture`,
+                  params: { prompt: scenarioId },
+                  status: skillDomain.executionDefaults.status,
+                  hash: `hash-${scenarioId}`,
+                  environment: skillDomain.executionDefaults.environment,
+                  databaseVersions: skillDomain.executionDefaults.databaseVersions,
                   outputArtifacts: [artifact.type],
                 }],
               }),
@@ -129,14 +129,14 @@ describe('normalizeAgentResponse', () => {
       assert.equal(response.uiManifest[0].artifactRef, artifact.type);
       assert.equal(response.artifacts[0].id, artifact.type);
       assert.equal(response.artifacts[0].type, artifact.type);
-      assert.equal(response.executionUnits[0].environment, profile.executionDefaults.environment);
-      assert.deepEqual(response.executionUnits[0].databaseVersions, profile.executionDefaults.databaseVersions);
+      assert.equal(response.executionUnits[0].environment, skillDomain.executionDefaults.environment);
+      assert.deepEqual(response.executionUnits[0].databaseVersions, skillDomain.executionDefaults.databaseVersions);
       assert.deepEqual(response.executionUnits[0].outputArtifacts, [artifact.type]);
     });
   });
 
   it('preserves repair and self-heal execution states', () => {
-    const response = normalizeAgentResponse('omics', 'bad omics run', {
+    const response = normalizeAgentResponse('omics-differential-exploration', 'bad omics run', {
       run: {
         id: 'run-repair-1',
         status: 'completed',
@@ -197,7 +197,7 @@ describe('normalizeAgentResponse', () => {
   });
 
   it('preserves view composition fields in UIManifest slots', () => {
-    const response = normalizeAgentResponse('omics', 'color UMAP by cell cycle', {
+    const response = normalizeAgentResponse('omics-differential-exploration', 'color UMAP by cell cycle', {
       run: {
         id: 'run-view-composition',
         status: 'completed',
@@ -231,7 +231,7 @@ describe('normalizeAgentResponse', () => {
   });
 
   it('does not convert unknown execution status into record-only success and preserves export policy fields', () => {
-    const response = normalizeAgentResponse('omics', 'restricted export artifact', {
+    const response = normalizeAgentResponse('omics-differential-exploration', 'restricted export artifact', {
       run: {
         id: 'run-export-policy',
         status: 'completed',
@@ -274,7 +274,7 @@ describe('normalizeAgentResponse', () => {
   });
 
   it('preserves notebook timeline belief and dependency refs', () => {
-    const response = normalizeAgentResponse('literature', 'belief notebook refs', {
+    const response = normalizeAgentResponse('literature-evidence-review', 'belief notebook refs', {
       run: {
         id: 'run-notebook-belief',
         status: 'completed',

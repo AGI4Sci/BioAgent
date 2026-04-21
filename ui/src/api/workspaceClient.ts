@@ -47,7 +47,7 @@ async function fetchPersistedWorkspaceState(path: string, config: BioAgentConfig
 }
 
 function workspaceActivityScore(state: BioAgentWorkspaceState) {
-  return Object.values(state.sessionsByAgent).reduce((total, session) => {
+  return Object.values(state.sessionsByScenario).reduce((total, session) => {
     const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
     return total
       + userMessages

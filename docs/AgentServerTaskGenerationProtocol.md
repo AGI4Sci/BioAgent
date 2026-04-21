@@ -7,7 +7,7 @@ Generation request:
 ```json
 {
   "prompt": "User request",
-  "profile": "structure",
+  "skillDomain": "structure",
   "workspaceTreeSummary": [{ "path": "data/input.csv", "kind": "file", "sizeBytes": 1234 }],
   "availableSkills": [{ "id": "structure.rcsb_latest_or_entry", "kind": "seed", "available": true, "reason": "Manifest validation passed" }],
   "artifactSchema": {},
@@ -35,7 +35,7 @@ Repair request:
 ```json
 {
   "prompt": "User request",
-  "profile": "structure",
+  "skillDomain": "structure",
   "codeRef": ".bioagent/tasks/structure.py",
   "inputRef": ".bioagent/task-inputs/structure.json",
   "outputRef": ".bioagent/task-results/structure.json",

@@ -1,4 +1,4 @@
-import type { AgentId, ClaimType, EvidenceLevel } from '../data';
+import type { ScenarioId, ClaimType, EvidenceLevel } from '../data';
 import {
   makeId,
   nowIso,
@@ -10,7 +10,7 @@ import {
   type RuntimeExecutionUnit,
   type SendAgentMessageInput,
 } from '../domain';
-import { agentProtocolForPrompt, BIOAGENT_PROFILES } from '../agentProfiles';
+import { agentProtocolForPrompt, SCENARIO_SPECS } from '../scenarioSpecs';
 import { promptWithScopeCheck, scopeCheck } from './scopeCheck';
 
 const DEFAULT_AGENT_SERVER_URL = 'http://127.0.0.1:18080';
@@ -46,17 +46,21 @@ function pickClaimType(value: unknown): ClaimType {
 }
 
 function agentSystemPrompt(input: SendAgentMessageInput) {
-  const protocol = agentProtocolForPrompt(input.agentId);
+  const protocol = agentProtocolForPrompt(input.scenarioId);
+  const scenario = SCENARIO_SPECS[input.scenarioId];
+  const runtimeScenario = input.scenarioOverride;
   return [
-    `你是 BioAgent 的${input.agentName}，领域是 ${input.agentDomain}。`,
+    `你运行在 BioAgent 的场景工作台中，当前 Scenario 是「${runtimeScenario?.title ?? scenario.title}」，skill domain 是 ${runtimeScenario?.skillDomain ?? scenario.skillDomain}，领域是 ${input.agentDomain}。`,
     '请用中文回答生命科学研究问题。',
     '优先使用当前 backend 的 native tools；只有 native tools 不可用时，才把 BioAgent/AgentServer tools 当兜底。',
     '必须输出可追溯证据、置信度、事实/推断/假设区分，以及可复现 ExecutionUnit 草案。',
     '不要生成 UI 代码；如需驱动前端 UI，请在回答末尾附加一个 JSON 对象。',
     'JSON 字段可包含 message、confidence、claimType、evidenceLevel、reasoningTrace、claims、uiManifest、executionUnits、artifacts。',
-    'artifacts 必须优先使用下方协议中的 type/schema；uiManifest 只能引用已注册 componentId。',
-    '当前 Agent 协议:',
+    'artifacts 必须优先使用下方协议中的 type/schema；uiManifest 只能引用已注册 componentId 和声明式 View Composition。',
+    '当前 ScenarioSpec / skill domain 协议:',
     protocol,
+    runtimeScenario ? '用户编辑后的 Scenario 设置:' : '',
+    runtimeScenario ? JSON.stringify(runtimeScenario, null, 2) : '',
   ].join('\n');
 }
 
@@ -67,15 +71,20 @@ function buildPrompt(input: SendAgentMessageInput) {
   }));
   const artifactContext = summarizeArtifacts(input.artifacts ?? []);
   return [
-    `当前 BioAgent profile: ${input.agentId}`,
+    `当前 BioAgent scenario: ${input.scenarioId}`,
+    `internal skill domain: ${input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain}`,
+    input.scenarioOverride ? `用户编辑 Scenario markdown:\n${input.scenarioOverride.scenarioMarkdown}` : '',
     `当前角色视图: ${input.roleView}`,
     '近期对话:',
     JSON.stringify(recentHistory, null, 2),
     artifactContext.length ? '当前可用 artifacts:' : '',
     artifactContext.length ? JSON.stringify(artifactContext, null, 2) : '',
     '',
+    'Scope check metadata:',
+    JSON.stringify(scopeCheck(input.scenarioId, input.prompt), null, 2),
+    '',
     '用户问题:',
-    promptWithScopeCheck(input.agentId, input.prompt),
+    input.prompt,
   ].filter((line) => line !== '').join('\n');
 }
 
@@ -83,18 +92,19 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
   const runtime = buildRuntimeConfig(input);
   return {
     agent: {
-      id: BIOAGENT_PROFILES[input.agentId].agentServerId,
-      name: input.agentName,
+      id: SCENARIO_SPECS[input.scenarioId].runtimeId,
+      name: SCENARIO_SPECS[input.scenarioId].title,
       backend: 'codex',
       workspace: input.config.workspacePath,
       workingDirectory: input.config.workspacePath,
       systemPrompt: agentSystemPrompt(input),
       reconcileExisting: true,
       metadata: {
-        bioAgentProfile: input.agentId,
+        bioAgentScenario: input.scenarioId,
+        skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain,
         domain: input.agentDomain,
-        nativeTools: BIOAGENT_PROFILES[input.agentId].nativeTools,
-        fallbackTools: BIOAGENT_PROFILES[input.agentId].fallbackTools,
+        nativeTools: SCENARIO_SPECS[input.scenarioId].nativeTools,
+        fallbackTools: SCENARIO_SPECS[input.scenarioId].fallbackTools,
       },
     },
     input: {
@@ -103,17 +113,18 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         rawUserPrompt: input.prompt,
         roleView: input.roleView,
         messageCount: input.messages.length,
-        inputContract: BIOAGENT_PROFILES[input.agentId].inputContract,
-        expectedArtifacts: BIOAGENT_PROFILES[input.agentId].outputArtifacts.map((artifact) => artifact.type),
+        inputContract: SCENARIO_SPECS[input.scenarioId].inputContract,
+        expectedArtifacts: SCENARIO_SPECS[input.scenarioId].outputArtifacts.map((artifact) => artifact.type),
+        scenarioOverride: input.scenarioOverride,
         artifacts: summarizeArtifacts(input.artifacts ?? []),
-        scopeCheck: scopeCheck(input.agentId, input.prompt),
+        scopeCheck: scopeCheck(input.scenarioId, input.prompt),
       },
     },
     runtime,
     metadata: {
       project: 'BioAgent',
       source: 'bioagent-web-ui',
-      agentId: input.agentId,
+      scenarioId: input.scenarioId,
       runtimeConfig: {
         modelProvider: input.config.modelProvider,
         modelBaseUrl: input.config.modelBaseUrl,
@@ -129,7 +140,7 @@ function summarizeArtifacts(artifacts: RuntimeArtifact[]) {
   return artifacts.slice(0, 8).map((artifact) => ({
     id: artifact.id,
     type: artifact.type,
-    producerAgent: artifact.producerAgent,
+    producerScenario: artifact.producerScenario,
     schemaVersion: artifact.schemaVersion,
     metadata: artifact.metadata,
     dataRef: artifact.dataRef,
@@ -159,7 +170,8 @@ function buildRuntimeConfig(input: SendAgentMessageInput): AgentServerRunPayload
     backend: 'codex',
     cwd: input.config.workspacePath,
     metadata: {
-      bioAgentProfile: input.agentId,
+      bioAgentScenario: input.scenarioId,
+      skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain,
       nativeToolFirst: true,
       autoApprove: true,
       sandbox: 'danger-full-access',
@@ -285,7 +297,7 @@ function isExecutionUnitStatus(value: unknown) {
 }
 
 export function normalizeAgentResponse(
-  agentId: AgentId,
+  scenarioId: ScenarioId,
   prompt: string,
   raw: unknown,
 ): NormalizedAgentResponse {
@@ -306,7 +318,7 @@ export function normalizeAgentResponse(
   const evidence = pickEvidence(structured.evidenceLevel ?? structured.evidence);
   const fallbackExecutionUnit: RuntimeExecutionUnit = {
     id: `EU-${runId.slice(-6)}`,
-    tool: `${agentId}.agent-server-run`,
+    tool: `${scenarioId}.scenario-server-run`,
     params: `prompt=${prompt.slice(0, 80)}`,
     status: runStatus === 'completed' ? 'done' : 'failed',
     hash: runId.slice(0, 10),
@@ -341,7 +353,7 @@ export function normalizeAgentResponse(
   return {
     message: {
       id: makeId('msg'),
-      role: 'agent',
+      role: 'scenario',
       content: messageText,
       confidence,
       evidence,
@@ -352,7 +364,7 @@ export function normalizeAgentResponse(
     },
     run: {
       id: runId,
-      agentId,
+      scenarioId,
       status: runStatus,
       prompt,
       response: messageText,
@@ -377,8 +389,8 @@ export function normalizeAgentResponse(
     executionUnits: normalizeExecutionUnits(structured.executionUnits, fallbackExecutionUnit),
     artifacts: Array.isArray(structured.artifacts) ? structured.artifacts.filter(isRecord).map((artifact) => ({
       id: asString(artifact.id) || asString(artifact.type) || makeId('artifact'),
-      type: asString(artifact.type) || 'agent-output',
-      producerAgent: agentId,
+      type: asString(artifact.type) || 'scenario-output',
+      producerScenario: scenarioId,
       schemaVersion: asString(artifact.schemaVersion) || '1',
       metadata: isRecord(artifact.metadata) ? artifact.metadata : undefined,
       data: artifact.data,
@@ -389,7 +401,7 @@ export function normalizeAgentResponse(
       exportPolicy: asExportPolicy(artifact.exportPolicy),
     })) : [],
     notebook: normalizeNotebookRecords(structured.notebook, {
-      agentId,
+      scenarioId,
       prompt,
       messageText,
       claimType,
@@ -405,7 +417,7 @@ export function normalizeAgentResponse(
 function normalizeNotebookRecords(
   value: unknown,
   fallback: {
-    agentId: AgentId;
+    scenarioId: ScenarioId;
     prompt: string;
     messageText: string;
     claimType: ClaimType;
@@ -419,8 +431,8 @@ function normalizeNotebookRecords(
   const defaultRecord = {
     id: makeId('note'),
     time: new Date(fallback.now).toLocaleString('zh-CN', { hour12: false }),
-    agent: fallback.agentId,
-    title: fallback.prompt.slice(0, 32) || 'Agent 对话',
+    scenario: fallback.scenarioId,
+    title: fallback.prompt.slice(0, 32) || 'Scenario 对话',
     desc: fallback.messageText.slice(0, 96),
     claimType: fallback.claimType,
     confidence: fallback.confidence,
@@ -434,8 +446,8 @@ function normalizeNotebookRecords(
   const records = value.filter(isRecord).map((record) => ({
     id: asString(record.id) || makeId('note'),
     time: asString(record.time) || new Date(fallback.now).toLocaleString('zh-CN', { hour12: false }),
-    agent: isAgentId(record.agent) ? record.agent : fallback.agentId,
-    title: asString(record.title) || fallback.prompt.slice(0, 32) || 'Agent 对话',
+    scenario: isScenarioId(record.scenario) ? record.scenario : fallback.scenarioId,
+    title: asString(record.title) || fallback.prompt.slice(0, 32) || 'Scenario 对话',
     desc: asString(record.desc) || asString(record.description) || fallback.messageText.slice(0, 96),
     claimType: pickClaimType(record.claimType),
     confidence: asNumber(record.confidence) ?? fallback.confidence,
@@ -448,8 +460,11 @@ function normalizeNotebookRecords(
   return records.length ? records : [defaultRecord];
 }
 
-function isAgentId(value: unknown): value is AgentId {
-  return value === 'literature' || value === 'structure' || value === 'omics' || value === 'knowledge';
+function isScenarioId(value: unknown): value is ScenarioId {
+  return value === 'literature-evidence-review'
+    || value === 'structure-exploration'
+    || value === 'omics-differential-exploration'
+    || value === 'biomedical-knowledge-graph';
 }
 
 function uniqueStrings(values: string[] | undefined) {
@@ -504,7 +519,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput, signal?: Ab
       const detail = isRecord(json) ? asString(json.error) || asString(json.message) : undefined;
       throw new Error(detail || `AgentServer 请求失败：HTTP ${response.status}`);
     }
-    return normalizeAgentResponse(input.agentId, input.prompt, json);
+    return normalizeAgentResponse(input.scenarioId, input.prompt, json);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error('AgentServer 请求已取消或超时。');
@@ -586,7 +601,7 @@ export async function sendAgentMessageStream(
     if (!finalResult) {
       throw new Error('AgentServer 流式响应结束，但没有返回最终 run result。');
     }
-    return normalizeAgentResponse(input.agentId, input.prompt, { ok: true, data: finalResult });
+    return normalizeAgentResponse(input.scenarioId, input.prompt, { ok: true, data: finalResult });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error('AgentServer 流式请求已取消或超时。');

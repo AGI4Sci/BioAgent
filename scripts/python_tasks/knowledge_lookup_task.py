@@ -50,11 +50,11 @@ def run_uniprot(entity):
             "opposingRefs": [],
         }],
         "uiManifest": knowledge_manifest(),
-        "executionUnits": [execution_unit("knowledge", "UniProt.uniprotkb.search", {"query": query, "size": 1}, "done", ["UniProt current"], ["knowledge-graph"])],
+        "executionUnits": [execution_unit("biomedical-knowledge-graph", "UniProt.uniprotkb.search", {"query": query, "size": 1}, "done", ["UniProt current"], ["knowledge-graph"])],
         "artifacts": [{
             "id": "knowledge-graph",
             "type": "knowledge-graph",
-            "producerAgent": "knowledge",
+            "producerScenario": "biomedical-knowledge-graph",
             "schemaVersion": "1",
             "metadata": {"entity": entity, "accession": accession, "source": "UniProt", "accessedAt": now()},
             "data": {
@@ -120,11 +120,11 @@ def run_chembl_compound(entity, prompt):
             "opposingRefs": [],
         }],
         "uiManifest": knowledge_manifest("ChEMBL compound graph", "ChEMBL compound card"),
-        "executionUnits": [execution_unit("knowledge", "ChEMBL.molecule.search+mechanism+indication", {"entity": entity, "chemblId": chembl_id}, "done", ["ChEMBL current"], ["knowledge-graph"])],
+        "executionUnits": [execution_unit("biomedical-knowledge-graph", "ChEMBL.molecule.search+mechanism+indication", {"entity": entity, "chemblId": chembl_id}, "done", ["ChEMBL current"], ["knowledge-graph"])],
         "artifacts": [{
             "id": "knowledge-graph",
             "type": "knowledge-graph",
-            "producerAgent": "knowledge",
+            "producerScenario": "biomedical-knowledge-graph",
             "schemaVersion": "1",
             "metadata": {"entity": entity, "entityKind": "compound", "chemblId": chembl_id, "source": "ChEMBL", "accessedAt": now(), "sourceRefs": source_refs},
             "data": {
@@ -166,11 +166,11 @@ def unsupported(entity, entity_kind, prompt):
             {"componentId": "data-table", "title": "Unsupported knowledge source", "artifactRef": "knowledge-graph", "priority": 1},
             {"componentId": "execution-unit-table", "title": "Execution units", "artifactRef": "knowledge-graph", "priority": 2},
         ],
-        "executionUnits": [execution_unit("knowledge", "BioAgent.knowledge.unsupported", {"entity": entity, "entityKind": entity_kind, "prompt": prompt}, "failed-with-reason", ["BioAgent connector registry"], ["knowledge-graph"], f"No real {entity_kind} connector is configured.")],
+        "executionUnits": [execution_unit("biomedical-knowledge-graph", "BioAgent.knowledge.unsupported", {"entity": entity, "entityKind": entity_kind, "prompt": prompt}, "failed-with-reason", ["BioAgent connector registry"], ["knowledge-graph"], f"No real {entity_kind} connector is configured.")],
         "artifacts": [{
             "id": "knowledge-graph",
             "type": "knowledge-graph",
-            "producerAgent": "knowledge",
+            "producerScenario": "biomedical-knowledge-graph",
             "schemaVersion": "1",
             "metadata": {"entity": entity, "entityKind": entity_kind, "source": "unsupported", "accessedAt": now()},
             "data": {"nodes": [], "edges": [], "rows": [

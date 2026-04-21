@@ -2,7 +2,7 @@
   "id": "inspector.generic_file_table_log",
   "kind": "seed",
   "description": "Inspect JSON, table, file, and log artifacts when no domain-specific viewer matches.",
-  "profiles": ["literature", "structure", "omics", "knowledge"],
+  "skillDomains": ["literature", "structure", "omics", "knowledge"],
   "inputContract": {
     "artifacts": "Any runtime artifact with data, dataRef, logs, or file refs."
   },

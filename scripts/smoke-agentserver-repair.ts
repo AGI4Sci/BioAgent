@@ -66,7 +66,7 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 
 try {
   const result = await runWorkspaceRuntimeGateway({
-    profile: 'omics',
+    skillDomain: 'omics',
     prompt: 'Run omics differential expression; repair smoke intentionally omits refs',
     workspacePath: workspace,
     agentServerBaseUrl: baseUrl,

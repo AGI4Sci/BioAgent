@@ -2,7 +2,7 @@
   "id": "knowledge.uniprot_chembl_lookup",
   "kind": "seed",
   "description": "Query UniProt for reviewed human gene/protein records or ChEMBL for compound mechanism and indication records.",
-  "profiles": ["knowledge"],
+  "skillDomains": ["knowledge"],
   "inputContract": {
     "prompt": "Gene, protein, accession, compound, inhibitor, or drug query."
   },

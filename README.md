@@ -1,17 +1,46 @@
 # BioAgent
 
-This repository currently contains:
+BioAgent is a scenario-first AI4Science workbench for life-science research.
 
-- The integrated React web UI in `ui/`
-- The workspace runtime gateway, task runner, seed skill registry, and smoke scripts in `scripts/`
-- Python-first scientific task templates in `scripts/python_tasks/`
-- Seed skills in `skills/seed/`
-- Product/design documentation in `docs/`
+The product shape is no longer "one page per agent". A user enters a research scenario, or starts from a built-in Scenario preset, and works in one chat-driven workspace. The scenario contract decides:
 
-The current UI merges the best parts of the two early prototypes:
+- what the user is trying to do
+- which skill domain and seed/workspace skills are available
+- what input contract and artifact schemas are expected
+- which registered UI components may render the results
+- what the honest scope boundaries and failure states are
 
-- `bioagent-platform.jsx`: product structure, workbench layout, pipeline, notebook, and alignment workspace.
-- `bioagent-glm.html`: polished dark BioAgent visual language, evidence/claim tags, agent cards, and scientific canvas visualization style.
+The UI renders structured runtime artifacts through a component registry. The LLM may choose components and View Composition parameters through JSON, but it does not generate arbitrary UI code.
+Workspace seed skills also pass through the same UIManifest composition layer: task-requested components and user-edited Scenario settings can reorder or replace the default slots before React renders the component registry.
+
+## Repository
+
+- `ui/`: React + Vite Scenario workbench
+- `scripts/`: workspace runtime gateway, task runner, skill registry, smoke scripts
+- `scripts/python_tasks/`: Python-first scientific task templates
+- `skills/seed/`: built-in validated skills
+- `docs/`: product and architecture documentation
+
+## Product Model
+
+The core chain is:
+
+```text
+scenario.md or built-in preset
+  -> ScenarioSpec
+  -> skill registry / workspace task / AgentServer repair
+  -> Artifact + ExecutionUnit + claims + UIManifest
+  -> registered scientific UI components
+```
+
+Built-in Scenario presets currently include:
+
+- `literature-evidence-review`
+- `structure-exploration`
+- `omics-differential-exploration`
+- `biomedical-knowledge-graph`
+
+They live in `ui/src/scenarioSpecs.ts`. Each preset declares its `skillDomain`, input contract, output artifacts, scope declaration, default UIManifest slots, and component policy. These presets are not separate pages; they are contracts loaded into the same Scenario workbench.
 
 ## Run The UI
 
@@ -26,63 +55,68 @@ Open:
 http://localhost:5173/
 ```
 
-For workspace-backed chat records, also start the local writer:
+For workspace-backed runs and persisted chat records, also start:
 
 ```bash
 npm run workspace:server
 ```
 
-The workspace path is edited from the left Resource Explorer panel or the Settings dialog. BioAgent writes structured state under:
+The selected workspace is configured in the Resource Explorer or Settings dialog. BioAgent writes structured state under:
 
 ```text
 <workspace>/.bioagent/
 ```
 
-## Runtime Mode
+## Runtime
 
-The workbench first calls the BioAgent project workspace service for profile-specific tools:
+The workbench first calls the BioAgent workspace runtime:
 
 ```text
 POST http://127.0.0.1:5174/api/bioagent/tools/run
 ```
 
-If the project tool is unavailable or cannot satisfy the request, the chat panel falls back to AgentServer:
+Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain only to match seed/workspace skills and run scientific task code.
+
+If no validated local skill can satisfy the request, the runtime can ask AgentServer to generate or repair workspace-local task code:
 
 ```text
 POST http://127.0.0.1:18080/api/agent-server/runs
 ```
 
-Start the workspace service for real BioAgent profile tools. Start AgentServer when you want the generic agent backend fallback. If both are unavailable, BioAgent keeps the user message locally and shows a clear connection error instead of silently falling back to mock output.
-
-BioAgent keeps the frontend protocol in `ui/src/agentProfiles.ts`:
-
-- per-agent AgentServer id and mode
-- native tools and fallback tools
-- input contracts
-- expected artifact schemas
-- default UIManifest slots
-- execution defaults
-
-Agent replies should return natural language plus optional structured JSON with `claims`, `uiManifest`, `executionUnits`, and `artifacts`. The UI never executes generated UI code; it renders only registered components.
-
-The AgentServer fallback prefers streaming via:
+The UI also uses AgentServer directly as a fallback for structured chat responses:
 
 ```text
 POST http://127.0.0.1:18080/api/agent-server/runs/stream
 ```
 
-Streaming envelopes are rendered in the event panel while the run is active. The composer stays editable during a run; extra user guidance is queued visibly and automatically sent as follow-up turns after the active run completes. This keeps the UI responsive today and leaves room for true backend mid-run message injection later.
+If neither workspace runtime nor AgentServer is available, BioAgent records the user message and shows a clear connection error. It does not synthesize chart-driving demo artifacts.
 
-## Chat Records
+## Structured Output Contract
 
-Chat state is stored as `bioagent.workspace.v2` in localStorage and can also be mirrored into the selected workspace directory. The active workspace state includes:
+Scenario responses can include natural language plus structured JSON:
 
-- active sessions per Agent
-- archived sessions created by new-chat and delete-chat actions
-- per-session version snapshots with reason, timestamp, counts, checksum, and snapshot payload
-- artifacts and execution records generated from Agent responses
+```json
+{
+  "message": "...",
+  "confidence": 0.86,
+  "claimType": "inference",
+  "evidenceLevel": "database",
+  "claims": [],
+  "artifacts": [],
+  "executionUnits": [],
+  "uiManifest": []
+}
+```
 
-The workspace writer splits those records into:
+`uiManifest` may reference only registered components such as `molecule-viewer`, `paper-card-list`, `volcano-plot`, `heatmap-viewer`, `umap-viewer`, `network-graph`, `data-table`, `evidence-matrix`, `execution-unit-table`, `notebook-timeline`, or `unknown-artifact-inspector`.
+
+Unknown components fall back to `UnknownArtifactInspector`; generated UI plugins remain disabled by default and must be sandboxed before use.
+
+For workspace-backed runs, BioAgent normalizes returned `uiManifest` with the current task prompt and editable Scenario settings. This keeps high-frequency seed skills stable while still allowing a prompt such as "only show data table + evidence matrix + execution unit" or "UMAP colorBy cellCycle splitBy batch" to produce a different formatted JSON manifest from the same artifact.
+
+## Workspace Records
+
+Chat state is stored in localStorage and mirrored to the workspace when the writer is available:
 
 ```text
 .bioagent/workspace-state.json
@@ -92,38 +126,7 @@ The workspace writer splits those records into:
 .bioagent/config.json
 ```
 
-This keeps BioAgent aligned with AgentServer-style session and artifact bookkeeping while MCP and skills resources remain user-configured later.
-
-The left Resource Explorer can list the selected workspace and supports file/folder creation, rename, delete, refresh, copy path, and double-click folder navigation through the local workspace writer.
-
-## Runtime Settings
-
-Use the top-right Settings button to configure:
-
-- AgentServer base URL
-- workspace writer URL
-- workspace path
-- model provider
-- model base URL
-- model name
-- API key
-- request timeout
-
-Those values are kept in localStorage and mirrored to `<workspace>/.bioagent/config.json`. BioAgent passes model provider/name/base URL/API key to AgentServer per request through `runtime`, so AgentServer can switch model connection without hard-coded frontend constants.
-
-## Runtime Boundary
-
-Example seed data lives in `ui/src/demoData.ts` for first-screen sessions and the global timeline. Dynamic result panels prioritize runtime artifacts from the workspace gateway and show empty or failed states when no real artifact is available.
-
-Current real-mode boundary:
-
-- Literature, structure, omics, and knowledge profiles are marked `agent-server`.
-- BioAgent project tools run from `npm run workspace:server`; `scripts/bioagent-tools.ts` is a compatibility shim over `scripts/workspace-runtime-gateway.ts`.
-- The gateway loads seed/workspace/installed skills, runs workspace-local task code, writes task inputs/results/logs/attempts under `<workspace>/.bioagent/`, and bridges task generation plus repair to AgentServer when configured.
-- Literature uses PubMed E-utilities; structure uses RCSB core entry and AlphaFold DB APIs; knowledge uses UniProt and ChEMBL; unsupported disease/clinical-trial connectors return explicit `failed-with-reason` units.
-- Omics reads workspace CSV matrix/metadata and can use Scanpy, DESeq2, edgeR, or the bounded Python CSV runner while recording requested/effective runner metadata.
-- AgentServer can be running at `http://127.0.0.1:18080` for generic fallback responses.
-- The old local record-only adapter path has been removed. If workspace runtime and AgentServer are unavailable, the UI shows a clear error instead of generating chart-driving draft artifacts.
+The state model stores sessions by Scenario, archived sessions, artifacts, ExecutionUnits, alignment contracts, timeline records, and collaboration/export policy fields.
 
 ## Verify
 
@@ -131,18 +134,10 @@ Current real-mode boundary:
 npm run verify
 ```
 
-`npm run verify` runs typecheck, unit tests, all smoke checks, and the production build. The smoke suite includes fixture normalization, skill registry availability, real seed runtime tasks, unsupported connector semantics, repair-needed behavior, AgentServer task generation, AgentServer repair/rerun, workspace-server HTTP repair, view composition, omics runner selection, and UI unit coverage for execution bundle export policy.
+`npm run verify` runs typecheck, unit tests, smoke checks, and production build. During active development, use:
 
-## Kept Source
-
-```text
-docs/
-scripts/
-skills/
-ui/
-package.json
-tsconfig.json
-vite.config.ts
-PROJECT.md
-README.md
+```bash
+npm run typecheck
+npm run test
+npm run build
 ```

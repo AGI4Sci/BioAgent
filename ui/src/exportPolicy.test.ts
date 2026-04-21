@@ -44,14 +44,14 @@ function fixtureSession(artifact: Pick<RuntimeArtifact, 'id'> & Partial<RuntimeA
   return {
     schemaVersion: 2,
     sessionId: 'session-export-policy',
-    agentId: 'omics',
+    scenarioId: 'omics-differential-exploration',
     title: 'Export policy smoke',
     createdAt: '2026-04-20T00:00:00.000Z',
     updatedAt: '2026-04-20T00:00:00.000Z',
     messages: [],
     runs: [{
       id: 'run-1',
-      agentId: 'omics',
+      scenarioId: 'omics-differential-exploration',
       status: 'completed',
       prompt: 'export',
       response: 'done',
@@ -71,7 +71,7 @@ function fixtureSession(artifact: Pick<RuntimeArtifact, 'id'> & Partial<RuntimeA
     artifacts: [{
       ...artifact,
       type: 'omics-differential-expression',
-      producerAgent: 'omics',
+      producerScenario: 'omics-differential-exploration',
       schemaVersion: '1',
     }],
     notebook: [],

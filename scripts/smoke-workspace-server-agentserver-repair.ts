@@ -64,7 +64,7 @@ try {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      profile: 'omics',
+      skillDomain: 'omics',
       prompt: 'Run omics differential expression; repair smoke intentionally omits refs',
       workspacePath: workspace,
       agentServerBaseUrl,
@@ -90,7 +90,7 @@ try {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      profile: 'omics',
+      skillDomain: 'omics',
       prompt: 'Run omics differential expression; repair smoke reads AgentServer URL from workspace config',
       workspacePath: configuredWorkspace,
     }),

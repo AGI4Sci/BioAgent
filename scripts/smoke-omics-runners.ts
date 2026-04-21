@@ -23,7 +23,7 @@ await writeFile(join(workspace, 'data', 'metadata.csv'), [
 ].join('\n'));
 
 const result = await runWorkspaceRuntimeGateway({
-  profile: 'omics',
+  skillDomain: 'omics',
   workspacePath: workspace,
   prompt: [
     'matrixRef=data/matrix.csv',

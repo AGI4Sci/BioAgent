@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { BioAgentProfile, GatewayRequest, SkillAvailability, SkillManifest } from './runtime-types.js';
+import type { BioAgentSkillDomain, GatewayRequest, SkillAvailability, SkillManifest } from './runtime-types.js';
 import { fileExists } from './workspace-task-runner.js';
 
 const SEED_SKILLS_ROOT = resolve(process.cwd(), 'skills', 'seed');
@@ -30,27 +30,27 @@ export function matchSkill(request: GatewayRequest, skills: SkillAvailability[])
   return skills
     .filter((skill) => skill.available)
     .filter((skill) => !allowed.size || allowed.has(skill.id))
-    .filter((skill) => skill.manifest.profiles.includes(request.profile))
-    .filter((skill) => skill.manifest.entrypoint.type !== 'inspector' || request.artifacts.length > 0 || /\b(inspect|preview|open|log|file|table|json)\b/i.test(request.prompt))
-    .map((skill) => ({ skill, score: scoreSkill(skill.manifest, request.profile, prompt) }))
+    .filter((skill) => skill.manifest.skillDomains.includes(request.skillDomain))
+    .filter((skill) => skill.manifest.entrypoint.type !== 'inspector' || request.artifacts.length > 0)
+    .map((skill) => ({ skill, score: scoreSkill(skill.manifest, request.skillDomain, prompt) }))
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score || priority(left.skill.kind) - priority(right.skill.kind))[0]?.skill;
 }
 
-export function agentServerGenerationSkill(profile: BioAgentProfile): SkillAvailability {
+export function agentServerGenerationSkill(skillDomain: BioAgentSkillDomain): SkillAvailability {
   const checkedAt = new Date().toISOString();
   return {
-    id: `agentserver.generate.${profile}`,
-    kind: 'legacy',
+    id: `agentserver.generate.${skillDomain}`,
+    kind: 'installed',
     available: true,
     reason: 'No executable skill matched; caller should fall through to AgentServer task generation.',
     checkedAt,
     manifestPath: 'agentserver://generation',
     manifest: {
-      id: `agentserver.generate.${profile}`,
-      kind: 'legacy',
+      id: `agentserver.generate.${skillDomain}`,
+      kind: 'installed',
       description: 'Generic AgentServer task generation fallback.',
-      profiles: [profile],
+      skillDomains: [skillDomain],
       inputContract: { prompt: 'string', workspacePath: 'string' },
       outputArtifactSchema: { type: 'runtime-artifact' },
       entrypoint: { type: 'agentserver-generation' },
@@ -80,7 +80,7 @@ async function readManifest(path: string, kind: SkillManifest['kind']): Promise<
     id: String(parsed.id || ''),
     kind: parsed.kind ?? kind,
     description: String(parsed.description || ''),
-    profiles: Array.isArray(parsed.profiles) ? parsed.profiles as BioAgentProfile[] : [],
+    skillDomains: Array.isArray(parsed.skillDomains) ? parsed.skillDomains as BioAgentSkillDomain[] : [],
     inputContract: recordOrEmpty(parsed.inputContract),
     outputArtifactSchema: recordOrEmpty(parsed.outputArtifactSchema),
     entrypoint: recordOrEmpty(parsed.entrypoint) as SkillManifest['entrypoint'],
@@ -99,8 +99,8 @@ async function validateManifest(manifest: SkillManifest, manifestPath: string): 
   if (missing.length) {
     return { id: manifest.id || manifestPath, kind: manifest.kind, available: false, reason: `Manifest missing ${missing.join(', ')}`, checkedAt, manifestPath, manifest };
   }
-  if (!manifest.profiles.length) {
-    return { id: manifest.id, kind: manifest.kind, available: false, reason: 'Manifest profiles is empty', checkedAt, manifestPath, manifest };
+  if (!manifest.skillDomains.length) {
+    return { id: manifest.id, kind: manifest.kind, available: false, reason: 'Manifest skillDomains is empty', checkedAt, manifestPath, manifest };
   }
   if (manifest.entrypoint.type === 'workspace-task' && manifest.entrypoint.path) {
     const path = resolve(dirname(manifestPath), manifest.entrypoint.path);
@@ -127,8 +127,8 @@ async function persistWorkspaceSkillStatus(workspace: string, skills: SkillAvail
   }, null, 2));
 }
 
-function scoreSkill(manifest: SkillManifest, profile: BioAgentProfile, prompt: string) {
-  let score = manifest.profiles.includes(profile) ? 10 : 0;
+function scoreSkill(manifest: SkillManifest, skillDomain: BioAgentSkillDomain, prompt: string) {
+  let score = manifest.skillDomains.includes(skillDomain) ? 10 : 0;
   for (const item of manifest.examplePrompts) {
     const tokens = item.toLowerCase().split(/[^a-z0-9_]+/).filter((token) => token.length > 2);
     score += tokens.filter((token) => prompt.includes(token)).length;

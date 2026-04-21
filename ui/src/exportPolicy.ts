@@ -37,7 +37,7 @@ export function buildExecutionBundle(session: BioAgentSession, decision = evalua
   return {
     schemaVersion: 1,
     sessionId: session.sessionId,
-    agentId: session.agentId,
+    scenarioId: session.scenarioId,
     exportedAt: nowIso(),
     exportPolicy: {
       restrictedArtifactIds: decision.restrictedArtifactIds,
@@ -48,7 +48,7 @@ export function buildExecutionBundle(session: BioAgentSession, decision = evalua
     artifacts: session.artifacts.map(summarizeArtifactForExport),
     runs: session.runs.map((run) => ({
       id: run.id,
-      agentId: run.agentId,
+      scenarioId: run.scenarioId,
       status: run.status,
       prompt: run.prompt,
       createdAt: run.createdAt,
@@ -61,7 +61,7 @@ function summarizeArtifactForExport(artifact: RuntimeArtifact) {
   return {
     id: artifact.id,
     type: artifact.type,
-    producerAgent: artifact.producerAgent,
+    producerScenario: artifact.producerScenario,
     schemaVersion: artifact.schemaVersion,
     metadata: artifact.metadata,
     dataRef: artifact.dataRef,

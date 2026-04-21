@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
-import type { BioAgentProfile, ToolPayload } from './runtime-types.js';
+import type { BioAgentSkillDomain, ToolPayload } from './runtime-types.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-seed-runtime-'));
 await writeFile(join(workspace, 'matrix.csv'), [
@@ -24,38 +24,38 @@ await writeFile(join(workspace, 'metadata.csv'), [
 ].join('\n'));
 
 const cases: Array<{
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   prompt: string;
   artifactType: string;
   skillId: string;
   allowedStatuses?: string[];
 }> = [
   {
-    profile: 'literature',
+    skillDomain: 'literature',
     prompt: 'TP53 tumor suppressor reviews',
     artifactType: 'paper-list',
     skillId: 'literature.pubmed_search',
   },
   {
-    profile: 'structure',
+    skillDomain: 'structure',
     prompt: 'PDB 7BZ5 residues 142-158',
     artifactType: 'structure-summary',
     skillId: 'structure.rcsb_latest_or_entry',
   },
   {
-    profile: 'knowledge',
+    skillDomain: 'knowledge',
     prompt: 'TP53 gene',
     artifactType: 'knowledge-graph',
     skillId: 'knowledge.uniprot_chembl_lookup',
   },
   {
-    profile: 'knowledge',
+    skillDomain: 'knowledge',
     prompt: 'sotorasib compound ChEMBL',
     artifactType: 'knowledge-graph',
     skillId: 'knowledge.uniprot_chembl_lookup',
   },
   {
-    profile: 'omics',
+    skillDomain: 'omics',
     prompt: 'matrixRef=matrix.csv metadataRef=metadata.csv groupColumn=condition caseGroup=treated controlGroup=control',
     artifactType: 'omics-differential-expression',
     skillId: 'omics.differential_expression',
@@ -69,7 +69,7 @@ for (const item of cases) {
 }
 
 async function runSeedCase(item: {
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   prompt: string;
   artifactType: string;
   skillId: string;
@@ -77,7 +77,7 @@ async function runSeedCase(item: {
   let last: ToolPayload | undefined;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     last = await runWorkspaceRuntimeGateway({
-      profile: item.profile,
+      skillDomain: item.skillDomain,
       prompt: item.prompt,
       workspacePath: workspace,
       artifacts: [],
@@ -95,7 +95,7 @@ async function runSeedCase(item: {
 }
 
 function assertSeedResult(
-  expected: { profile: BioAgentProfile; artifactType: string; skillId: string },
+  expected: { skillDomain: BioAgentSkillDomain; artifactType: string; skillId: string },
   result: ToolPayload,
 ) {
   assert.equal(result.artifacts[0]?.type, expected.artifactType);

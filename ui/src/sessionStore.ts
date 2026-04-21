@@ -1,5 +1,6 @@
-import { type AgentId } from './data';
-import { messagesByAgent } from './demoData';
+import { type ScenarioId } from './data';
+import { scenarios } from './data';
+import { messagesByScenario } from './demoData';
 import {
   type AlignmentContractRecord,
   makeId,
@@ -11,15 +12,14 @@ import {
 } from './domain';
 
 const STORAGE_KEY = 'bioagent.workspace.v2';
-const LEGACY_STORAGE_KEY = 'bioagent.sessions.v1';
-const agentIds: AgentId[] = ['literature', 'structure', 'omics', 'knowledge'];
+const scenarioIds: ScenarioId[] = scenarios.map((scenario) => scenario.id);
 
-function isAgentId(value: unknown): value is AgentId {
-  return agentIds.includes(value as AgentId);
+function isScenarioId(value: unknown): value is ScenarioId {
+  return scenarioIds.includes(value as ScenarioId);
 }
 
-function seedMessages(agentId: AgentId): BioAgentMessage[] {
-  return messagesByAgent[agentId].map((message) => ({
+function seedMessages(scenarioId: ScenarioId): BioAgentMessage[] {
+  return messagesByScenario[scenarioId].map((message) => ({
     id: makeId('seed'),
     role: message.role,
     content: message.content,
@@ -32,15 +32,15 @@ function seedMessages(agentId: AgentId): BioAgentMessage[] {
   }));
 }
 
-export function createSession(agentId: AgentId, title = '新聊天', options: { seed?: boolean } = {}): BioAgentSession {
+export function createSession(scenarioId: ScenarioId, title = '新聊天', options: { seed?: boolean } = {}): BioAgentSession {
   const now = nowIso();
   return {
     schemaVersion: 2,
-    sessionId: makeId(`session-${agentId}`),
-    agentId,
+    sessionId: makeId(`session-${scenarioId}`),
+    scenarioId,
     title,
     createdAt: now,
-    messages: options.seed ? seedMessages(agentId) : [],
+    messages: options.seed ? seedMessages(scenarioId) : [],
     runs: [],
     uiManifest: [],
     claims: [],
@@ -52,18 +52,18 @@ export function createSession(agentId: AgentId, title = '新聊天', options: { 
   };
 }
 
-function migrateSession(value: unknown, agentId: AgentId): BioAgentSession {
-  if (isSessionV2(value, agentId)) return value;
-  if (typeof value === 'object' && value !== null && (value as { agentId?: unknown }).agentId === agentId) {
+function migrateSession(value: unknown, scenarioId: ScenarioId): BioAgentSession {
+  if (isSessionV2(value, scenarioId)) return value;
+  if (typeof value === 'object' && value !== null && (value as { scenarioId?: unknown }).scenarioId === scenarioId) {
     const raw = value as Partial<BioAgentSession> & { schemaVersion?: number };
     const now = nowIso();
     return {
       schemaVersion: 2,
-      sessionId: typeof raw.sessionId === 'string' ? raw.sessionId : makeId(`session-${agentId}`),
-      agentId,
+      sessionId: typeof raw.sessionId === 'string' ? raw.sessionId : makeId(`session-${scenarioId}`),
+      scenarioId,
       title: typeof raw.title === 'string' ? raw.title : '迁移聊天',
       createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now,
-      messages: Array.isArray(raw.messages) ? raw.messages : seedMessages(agentId),
+      messages: Array.isArray(raw.messages) ? raw.messages : seedMessages(scenarioId),
       runs: Array.isArray(raw.runs) ? raw.runs : [],
       uiManifest: Array.isArray(raw.uiManifest) ? raw.uiManifest : [],
       claims: Array.isArray(raw.claims) ? raw.claims : [],
@@ -74,14 +74,14 @@ function migrateSession(value: unknown, agentId: AgentId): BioAgentSession {
       updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now,
     };
   }
-  return createSession(agentId);
+  return createSession(scenarioId);
 }
 
-function isSessionV2(value: unknown, agentId: AgentId): value is BioAgentSession {
+function isSessionV2(value: unknown, scenarioId: ScenarioId): value is BioAgentSession {
   return typeof value === 'object'
     && value !== null
     && (value as BioAgentSession).schemaVersion === 2
-    && (value as BioAgentSession).agentId === agentId
+    && (value as BioAgentSession).scenarioId === scenarioId
     && Array.isArray((value as BioAgentSession).messages)
     && Array.isArray((value as BioAgentSession).versions);
 }
@@ -91,10 +91,10 @@ export function createInitialWorkspaceState(): BioAgentWorkspaceState {
   return {
     schemaVersion: 2,
     workspacePath: '',
-    sessionsByAgent: agentIds.reduce((acc, agentId) => {
-      acc[agentId] = createSession(agentId, `${agentLabel(agentId)} 默认聊天`, { seed: true });
+    sessionsByScenario: scenarioIds.reduce((acc, scenarioId) => {
+      acc[scenarioId] = createSession(scenarioId, `${scenarioLabel(scenarioId)} 默认聊天`, { seed: true });
       return acc;
-    }, {} as Record<AgentId, BioAgentSession>),
+    }, {} as Record<ScenarioId, BioAgentSession>),
     archivedSessions: [],
     alignmentContracts: [],
     updatedAt: now,
@@ -106,16 +106,6 @@ export function loadWorkspaceState(): BioAgentWorkspaceState {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) return parseWorkspaceState(JSON.parse(raw));
-    const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy) {
-      const parsed = JSON.parse(legacy) as Partial<Record<AgentId, unknown>>;
-      const migrated = createInitialWorkspaceState();
-      migrated.sessionsByAgent = agentIds.reduce((acc, agentId) => {
-        acc[agentId] = migrateSession(parsed[agentId], agentId);
-        return acc;
-      }, {} as Record<AgentId, BioAgentSession>);
-      return migrated;
-    }
   } catch {
     return createInitialWorkspaceState();
   }
@@ -129,14 +119,14 @@ export function parseWorkspaceState(value: unknown): BioAgentWorkspaceState {
   return {
     schemaVersion: 2,
     workspacePath: typeof raw.workspacePath === 'string' ? raw.workspacePath : '',
-    sessionsByAgent: agentIds.reduce((acc, agentId) => {
-      acc[agentId] = migrateSession(raw.sessionsByAgent?.[agentId], agentId);
+    sessionsByScenario: scenarioIds.reduce((acc, scenarioId) => {
+      acc[scenarioId] = migrateSession(raw.sessionsByScenario?.[scenarioId], scenarioId);
       return acc;
-    }, {} as Record<AgentId, BioAgentSession>),
+    }, {} as Record<ScenarioId, BioAgentSession>),
     archivedSessions: Array.isArray(raw.archivedSessions)
       ? raw.archivedSessions.flatMap((session) => {
-        const agentId = typeof session === 'object' && session !== null ? (session as { agentId?: unknown }).agentId : undefined;
-        return isAgentId(agentId) ? [migrateSession(session, agentId)] : [];
+        const scenarioId = typeof session === 'object' && session !== null ? (session as { scenarioId?: unknown }).scenarioId : undefined;
+        return isScenarioId(scenarioId) ? [migrateSession(session, scenarioId)] : [];
       })
       : [],
     alignmentContracts: Array.isArray(raw.alignmentContracts)
@@ -163,8 +153,8 @@ export function saveWorkspaceState(state: BioAgentWorkspaceState) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-export function resetSession(agentId: AgentId): BioAgentSession {
-  return createSession(agentId, `${agentLabel(agentId)} 新聊天`);
+export function resetSession(scenarioId: ScenarioId): BioAgentSession {
+  return createSession(scenarioId, `${scenarioLabel(scenarioId)} 新聊天`);
 }
 
 export function versionSession(session: BioAgentSession, reason: string): BioAgentSession {
@@ -199,11 +189,6 @@ function checksum(text: string) {
   return hash.toString(16).padStart(8, '0');
 }
 
-function agentLabel(agentId: AgentId) {
-  return {
-    literature: '文献 Agent',
-    structure: '结构 Agent',
-    omics: '组学 Agent',
-    knowledge: '知识库 Agent',
-  }[agentId];
+function scenarioLabel(scenarioId: ScenarioId) {
+  return scenarios.find((scenario) => scenario.id === scenarioId)?.name ?? scenarioId;
 }

@@ -1,7 +1,8 @@
 import type { AgentStreamEvent, NormalizedAgentResponse, SendAgentMessageInput } from '../domain';
 import { makeId, nowIso } from '../domain';
+import { SCENARIO_SPECS } from '../scenarioSpecs';
 import { normalizeAgentResponse } from './agentClient';
-import { promptWithScopeCheck, scopeCheck } from './scopeCheck';
+import { scopeCheck } from './scopeCheck';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -16,19 +17,21 @@ export async function sendBioAgentToolMessage(
   callbacks: { onEvent?: (event: AgentStreamEvent) => void } = {},
   signal?: AbortSignal,
 ): Promise<NormalizedAgentResponse> {
-  callbacks.onEvent?.(toolEvent('project-tool-start', `BioAgent ${input.agentId} project tool started`));
+  callbacks.onEvent?.(toolEvent('project-tool-start', `BioAgent ${input.scenarioId} project tool started`));
   const response = await fetch(`${input.config.workspaceWriterBaseUrl}/api/bioagent/tools/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      profile: input.agentId,
-      prompt: promptWithScopeCheck(input.agentId, input.prompt),
+      scenarioId: input.scenarioId,
+      skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain,
+      prompt: input.prompt,
       workspacePath: input.config.workspacePath,
       agentServerBaseUrl: input.config.agentServerBaseUrl,
       roleView: input.roleView,
       artifacts: summarizeArtifacts(input),
       uiState: {
-        scopeCheck: scopeCheck(input.agentId, input.prompt),
+        scopeCheck: scopeCheck(input.scenarioId, input.prompt),
+        scenarioOverride: input.scenarioOverride,
       },
     }),
     signal,
@@ -44,13 +47,13 @@ export async function sendBioAgentToolMessage(
     const detail = isRecord(json) ? asString(json.error) || asString(json.message) : undefined;
     throw new Error(detail || `BioAgent project tool failed: HTTP ${response.status}`);
   }
-  callbacks.onEvent?.(toolEvent('project-tool-done', `BioAgent ${input.agentId} project tool completed`));
+  callbacks.onEvent?.(toolEvent('project-tool-done', `BioAgent ${input.scenarioId} project tool completed`));
   const result = isRecord(json.result) ? json.result : {};
-  return normalizeAgentResponse(input.agentId, input.prompt, {
+  return normalizeAgentResponse(input.scenarioId, input.prompt, {
     ok: true,
     data: {
       run: {
-        id: makeId(`project-${input.agentId}`),
+        id: makeId(`project-${input.scenarioId}`),
         status: 'completed',
         createdAt: nowIso(),
         completedAt: nowIso(),
@@ -66,7 +69,7 @@ function summarizeArtifacts(input: SendAgentMessageInput) {
   return (input.artifacts ?? []).slice(0, 8).map((artifact) => ({
     id: artifact.id,
     type: artifact.type,
-    producerAgent: artifact.producerAgent,
+    producerScenario: artifact.producerScenario,
     schemaVersion: artifact.schemaVersion,
     metadata: artifact.metadata,
     dataRef: artifact.dataRef,

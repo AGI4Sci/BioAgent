@@ -2,14 +2,14 @@
   "id": "structure.rcsb_latest_or_entry",
   "kind": "seed",
   "description": "Fetch the latest matching RCSB structure or a requested PDB/AlphaFold entry, write coordinates and return a structure-summary artifact.",
-  "profiles": ["structure"],
+  "skillDomains": ["structure"],
   "inputContract": {
     "prompt": "Free text containing a PDB id, UniProt accession, gene/protein name, residue range, or latest-structure request.",
     "workspacePath": "Writable BioAgent workspace."
   },
   "outputArtifactSchema": {
     "type": "structure-summary",
-    "required": ["id", "type", "producerAgent", "schemaVersion", "metadata", "data"]
+    "required": ["id", "type", "producerScenario", "schemaVersion", "metadata", "data"]
   },
   "entrypoint": {
     "type": "workspace-task",
@@ -38,4 +38,3 @@
     "unsupportedTasks": ["Molecular dynamics", "binding free energy calculation", "de novo structure prediction"]
   }
 }
-

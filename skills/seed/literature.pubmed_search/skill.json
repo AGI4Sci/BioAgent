@@ -2,7 +2,7 @@
   "id": "literature.pubmed_search",
   "kind": "seed",
   "description": "Search PubMed E-utilities and return paper-list artifacts with evidence claims.",
-  "profiles": ["literature"],
+  "skillDomains": ["literature"],
   "inputContract": {
     "prompt": "Free text PubMed query or artifact-derived entity."
   },

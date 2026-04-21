@@ -7,7 +7,7 @@ import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-knowledge-unsupported-'));
 const result = await runWorkspaceRuntimeGateway({
-  profile: 'knowledge',
+  skillDomain: 'knowledge',
   prompt: 'melanoma disease OpenTargets connector status',
   workspacePath: workspace,
 });

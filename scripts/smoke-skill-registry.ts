@@ -13,7 +13,7 @@ await writeFile(join(brokenSkillDir, 'skill.json'), JSON.stringify({
   id: 'broken.skill',
   kind: 'workspace',
   description: 'Broken workspace skill used by registry smoke.',
-  profiles: ['literature'],
+  skillDomains: ['literature'],
   inputContract: { prompt: 'string' },
   outputArtifactSchema: { type: 'paper-list' },
   entrypoint: { type: 'workspace-task', command: 'python', path: './missing-task.py' },
@@ -31,6 +31,7 @@ for (const id of [
   'structure.rcsb_latest_or_entry',
   'omics.differential_expression',
   'knowledge.uniprot_chembl_lookup',
+  'sequence.ncbi_blastp_search',
   'inspector.generic_file_table_log',
 ]) {
   assert.equal(byId.get(id)?.available, true, `${id} should be available`);
@@ -41,13 +42,29 @@ assert.equal(broken?.available, false);
 assert.match(String(broken?.reason), /Entrypoint not found/);
 
 const matched = matchSkill({
-  profile: 'literature',
+  skillDomain: 'literature',
   prompt: 'KRAS literature broken skill',
   workspacePath: workspace,
   artifacts: [],
   availableSkills: ['broken.skill'],
 }, skills);
 assert.equal(matched, undefined, 'unavailable skills must not be matched even when explicitly allowed');
+
+const knowledgeMatched = matchSkill({
+  skillDomain: 'knowledge',
+  prompt: 'BRAF V600E melanoma target prioritization with ChEMBL drug-target network, data table, evidence matrix',
+  workspacePath: workspace,
+  artifacts: [],
+}, skills);
+assert.equal(knowledgeMatched?.id, 'knowledge.uniprot_chembl_lookup', 'raw knowledge prompts with "data table" should not route to the generic inspector');
+
+const blastMatched = matchSkill({
+  skillDomain: 'knowledge',
+  prompt: 'BLASTP protein sequence alignment result table for sequence=MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKT',
+  workspacePath: workspace,
+  artifacts: [],
+}, skills);
+assert.equal(blastMatched?.id, 'sequence.ncbi_blastp_search', 'BLAST protein sequence prompts should route to the sequence BLASTP seed skill');
 
 const status = JSON.parse(await readFile(join(workspace, '.bioagent', 'skills', 'status.json'), 'utf8')) as {
   skills: Array<Pick<SkillAvailability, 'id' | 'available' | 'reason'>>;

@@ -7,7 +7,7 @@ import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-repair-needed-'));
 const result = await runWorkspaceRuntimeGateway({
-  profile: 'omics',
+  skillDomain: 'omics',
   prompt: 'Run omics differential expression without matrixRef or metadataRef',
   workspacePath: workspace,
 });

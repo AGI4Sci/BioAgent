@@ -22,7 +22,7 @@ Required shape:
     "id": "domain.task_name",
     "kind": "workspace",
     "description": "What reusable task this skill performs.",
-    "profiles": ["structure"],
+    "skillDomains": ["structure"],
     "inputContract": {},
     "outputArtifactSchema": {},
     "entrypoint": { "type": "workspace-task", "command": "python", "path": "tasks/example.py" },
@@ -55,4 +55,3 @@ Promotion rules:
 - The proposed skill stays unavailable until validation smoke passes and `userConfirmedPromotion` is true.
 - User-specific data paths, identifiers, credentials, and one-off thresholds must be parameterized or removed before acceptance.
 - Failed tasks can generate repair notes, but cannot be promoted until a later successful run exists.
-

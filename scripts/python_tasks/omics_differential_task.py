@@ -65,7 +65,7 @@ def main():
         ],
         "executionUnits": [
             execution_unit(
-                "omics",
+                "omics-differential-exploration",
                 runner_result["runner"],
                 params,
                 "done",
@@ -77,7 +77,7 @@ def main():
         "artifacts": [{
             "id": "omics-differential-expression",
             "type": "omics-differential-expression",
-            "producerAgent": "omics",
+            "producerScenario": "omics-differential-exploration",
             "schemaVersion": "1",
             "metadata": {
                 "runner": runner_result["runner"],

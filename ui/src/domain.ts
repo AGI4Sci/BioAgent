@@ -1,6 +1,6 @@
-import type { AgentId, ClaimType, EvidenceLevel } from './data';
+import type { ScenarioId, ClaimType, EvidenceLevel } from './data';
 
-export type MessageRole = 'user' | 'agent' | 'system';
+export type MessageRole = 'user' | 'scenario' | 'system';
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed';
 export type ExecutionUnitStatus = 'planned' | 'running' | 'done' | 'failed' | 'record-only' | 'repair-needed' | 'self-healed' | 'failed-with-reason';
 
@@ -195,7 +195,7 @@ export interface ViewCompare {
 export interface RuntimeArtifact {
   id: string;
   type: string;
-  producerAgent: AgentId;
+  producerScenario: ScenarioId;
   schemaVersion: string;
   metadata?: Record<string, unknown>;
   data?: unknown;
@@ -238,7 +238,7 @@ export interface RuntimeExecutionUnit {
 export interface NotebookRecord {
   id: string;
   time: string;
-  agent: AgentId;
+  scenario: ScenarioId;
   title: string;
   desc: string;
   claimType: ClaimType;
@@ -252,7 +252,7 @@ export interface NotebookRecord {
 
 export interface BioAgentRun {
   id: string;
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   status: RunStatus;
   prompt: string;
   response: string;
@@ -264,7 +264,7 @@ export interface BioAgentRun {
 export interface BioAgentSession {
   schemaVersion: 2;
   sessionId: string;
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   title: string;
   createdAt: string;
   messages: BioAgentMessage[];
@@ -281,7 +281,7 @@ export interface BioAgentSession {
 export interface BioAgentWorkspaceState {
   schemaVersion: 2;
   workspacePath: string;
-  sessionsByAgent: Record<AgentId, BioAgentSession>;
+  sessionsByScenario: Record<ScenarioId, BioAgentSession>;
   archivedSessions: BioAgentSession[];
   alignmentContracts: AlignmentContractRecord[];
   beliefGraphs?: BeliefDependencyGraph[];
@@ -341,7 +341,7 @@ export interface BioAgentConfig {
 }
 
 export interface SendAgentMessageInput {
-  agentId: AgentId;
+  scenarioId: ScenarioId;
   agentName: string;
   agentDomain: string;
   prompt: string;
@@ -349,6 +349,17 @@ export interface SendAgentMessageInput {
   messages: BioAgentMessage[];
   artifacts?: RuntimeArtifact[];
   config: BioAgentConfig;
+  scenarioOverride?: ScenarioRuntimeOverride;
+}
+
+export interface ScenarioRuntimeOverride {
+  title: string;
+  description: string;
+  skillDomain: 'literature' | 'structure' | 'omics' | 'knowledge';
+  scenarioMarkdown: string;
+  defaultComponents: string[];
+  allowedComponents: string[];
+  fallbackComponent: string;
 }
 
 export interface NormalizedAgentResponse {

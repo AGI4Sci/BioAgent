@@ -78,7 +78,7 @@ const server = createServer(async (req, res) => {
   const body = await readJson(req);
   const metadata = isRecord(body.input) && isRecord(body.input.metadata) ? body.input.metadata : {};
   assert.equal(metadata.purpose, 'workspace-task-generation');
-  assert.equal(metadata.profile, 'literature');
+  assert.equal(metadata.skillDomain, 'literature');
   assert.equal(metadata.skillId, 'agentserver.generate.literature');
   const promptText = isRecord(body.input) && typeof body.input.text === 'string' ? body.input.text : '';
   sawPriorAttempt = promptText.includes('prior-generation-failure');
@@ -127,7 +127,7 @@ try {
   await appendTaskAttempt(workspace, {
     id: 'prior-generation-failure',
     prompt: 'older custom literature request',
-    profile: 'literature',
+    skillDomain: 'literature',
     skillId: 'agentserver.generate.literature',
     attempt: 1,
     status: 'failed-with-reason',
@@ -135,7 +135,7 @@ try {
     createdAt: '2026-04-20T00:00:00.000Z',
   });
   const result = await runWorkspaceRuntimeGateway({
-    profile: 'literature',
+    skillDomain: 'literature',
     prompt: 'custom literature request that intentionally bypasses local skills',
     workspacePath: workspace,
     agentServerBaseUrl: baseUrl,

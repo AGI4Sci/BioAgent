@@ -1,35 +1,35 @@
 import assert from 'node:assert/strict';
 
-import { BIOAGENT_PROFILES } from '../ui/src/agentProfiles';
-import type { AgentId } from '../ui/src/data';
+import { SCENARIO_SPECS } from '../ui/src/scenarioSpecs';
+import type { ScenarioId } from '../ui/src/data';
 import { normalizeAgentResponse } from '../ui/src/api/agentClient';
 
-const agentIds = Object.keys(BIOAGENT_PROFILES) as AgentId[];
+const scenarioIds = Object.keys(SCENARIO_SPECS) as ScenarioId[];
 
-for (const agentId of agentIds) {
-  const profile = BIOAGENT_PROFILES[agentId];
-  const artifact = profile.outputArtifacts[0];
-  const slot = profile.defaultSlots.find((item) => item.artifactRef === artifact.type) ?? profile.defaultSlots[0];
-  const normalized = normalizeAgentResponse(agentId, `smoke ${agentId}`, {
+for (const scenarioId of scenarioIds) {
+  const skillDomain = SCENARIO_SPECS[scenarioId];
+  const artifact = skillDomain.outputArtifacts[0];
+  const slot = skillDomain.defaultSlots.find((item) => item.artifactRef === artifact.type) ?? skillDomain.defaultSlots[0];
+  const normalized = normalizeAgentResponse(scenarioId, `smoke ${scenarioId}`, {
     run: {
-      id: `smoke-run-${agentId}`,
+      id: `smoke-run-${scenarioId}`,
       status: 'completed',
       output: {
         text: [
-          `${agentId} smoke completed.`,
+          `${scenarioId} smoke completed.`,
           '```json',
           JSON.stringify({
-            message: `${agentId} fixture normalized`,
+            message: `${scenarioId} fixture normalized`,
             confidence: 0.91,
             claimType: 'fact',
-            evidenceLevel: evidenceForAgent(agentId),
-            reasoningTrace: `fixture path for ${agentId}`,
+            evidenceLevel: evidenceForAgent(scenarioId),
+            reasoningTrace: `fixture path for ${scenarioId}`,
             claims: [{
-              id: `claim-${agentId}`,
-              text: `${agentId} artifact follows BioAgent contract`,
+              id: `claim-${scenarioId}`,
+              text: `${scenarioId} artifact follows BioAgent contract`,
               type: 'fact',
               confidence: 0.91,
-              evidenceLevel: evidenceForAgent(agentId),
+              evidenceLevel: evidenceForAgent(scenarioId),
               supportingRefs: [`${artifact.type}:fixture`],
               opposingRefs: [],
             }],
@@ -41,13 +41,13 @@ for (const agentId of agentIds) {
               data: dataForArtifact(artifact.type),
             }],
             executionUnits: [{
-              id: `EU-${agentId}`,
-              tool: `${agentId}.fixture`,
-              params: { input: `smoke ${agentId}` },
-              status: profile.executionDefaults.status,
-              hash: `hash-${agentId}`,
-              environment: profile.executionDefaults.environment,
-              databaseVersions: profile.executionDefaults.databaseVersions,
+              id: `EU-${scenarioId}`,
+              tool: `${scenarioId}.fixture`,
+              params: { input: `smoke ${scenarioId}` },
+              status: skillDomain.executionDefaults.status,
+              hash: `hash-${scenarioId}`,
+              environment: skillDomain.executionDefaults.environment,
+              databaseVersions: skillDomain.executionDefaults.databaseVersions,
               outputArtifacts: [artifact.type],
             }],
           }),
@@ -57,20 +57,20 @@ for (const agentId of agentIds) {
     },
   });
 
-  assert.equal(normalized.message.content, `${agentId} fixture normalized`);
+  assert.equal(normalized.message.content, `${scenarioId} fixture normalized`);
   assert.equal(normalized.uiManifest[0].artifactRef, artifact.type);
   assert.equal(normalized.artifacts[0].id, artifact.type);
   assert.equal(normalized.artifacts[0].type, artifact.type);
-  assert.equal(normalized.executionUnits[0].environment, profile.executionDefaults.environment);
-  assert.deepEqual(normalized.executionUnits[0].databaseVersions, profile.executionDefaults.databaseVersions);
+  assert.equal(normalized.executionUnits[0].environment, skillDomain.executionDefaults.environment);
+  assert.deepEqual(normalized.executionUnits[0].databaseVersions, skillDomain.executionDefaults.databaseVersions);
   assert.equal(normalized.claims[0].supportingRefs[0], `${artifact.type}:fixture`);
-  console.log(`[ok] ${agentId} -> ${artifact.type}`);
+  console.log(`[ok] ${scenarioId} -> ${artifact.type}`);
 }
 
-function evidenceForAgent(agentId: AgentId) {
-  if (agentId === 'literature') return 'review';
-  if (agentId === 'structure') return 'database';
-  if (agentId === 'omics') return 'experimental';
+function evidenceForAgent(scenarioId: ScenarioId) {
+  if (scenarioId === 'literature-evidence-review') return 'review';
+  if (scenarioId === 'structure-exploration') return 'database';
+  if (scenarioId === 'omics-differential-exploration') return 'experimental';
   return 'database';
 }
 

@@ -1,4 +1,4 @@
-export type BioAgentProfile = 'literature' | 'structure' | 'omics' | 'knowledge';
+export type BioAgentSkillDomain = 'literature' | 'structure' | 'omics' | 'knowledge';
 
 export type ExecutionUnitStatus =
   | 'planned'
@@ -11,7 +11,7 @@ export type ExecutionUnitStatus =
   | 'failed-with-reason';
 
 export interface GatewayRequest {
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   prompt: string;
   workspacePath?: string;
   agentServerBaseUrl?: string;
@@ -62,16 +62,15 @@ export interface WorkspaceTaskRunResult {
 
 export interface SkillManifest {
   id: string;
-  kind: 'seed' | 'workspace' | 'installed' | 'legacy';
+  kind: 'seed' | 'workspace' | 'installed';
   description: string;
-  profiles: BioAgentProfile[];
+  skillDomains: BioAgentSkillDomain[];
   inputContract: Record<string, unknown>;
   outputArtifactSchema: Record<string, unknown>;
   entrypoint: {
-    type: 'workspace-task' | 'legacy-adapter' | 'inspector' | 'agentserver-generation';
+    type: 'workspace-task' | 'inspector' | 'agentserver-generation';
     command?: string;
     path?: string;
-    legacyProfile?: BioAgentProfile;
   };
   environment: Record<string, unknown>;
   validationSmoke: Record<string, unknown>;
@@ -121,7 +120,7 @@ export interface SkillPromotionProposal {
 
 export interface AgentServerGenerationRequest {
   prompt: string;
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
   availableSkills: Array<Pick<SkillAvailability, 'id' | 'kind' | 'available' | 'reason'>>;
   artifactSchema: Record<string, unknown>;
@@ -146,7 +145,7 @@ export interface AgentServerGenerationResponse {
 
 export interface AgentServerRepairRequest {
   prompt: string;
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   codeRef: string;
   inputRef?: string;
   outputRef?: string;
@@ -167,7 +166,7 @@ export interface AgentServerRepairResponse extends AgentServerGenerationResponse
 export interface TaskAttemptRecord {
   id: string;
   prompt: string;
-  profile: BioAgentProfile;
+  skillDomain: BioAgentSkillDomain;
   skillId?: string;
   attempt: number;
   parentAttempt?: number;

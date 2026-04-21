@@ -95,8 +95,8 @@ createServer(async (req, res) => {
       await writeFile(join(bioagentDir, 'config.json'), JSON.stringify(redactConfigForFile(config), null, 2));
       await rememberWorkspace(root, state);
 
-      const sessions = isRecord(state.sessionsByAgent)
-        ? Object.values(state.sessionsByAgent)
+      const sessions = isRecord(state.sessionsByScenario)
+        ? Object.values(state.sessionsByScenario)
         : [];
       for (const session of sessions as Array<Record<string, unknown>>) {
         const sessionId = safeName(String(session.sessionId || 'session'));
@@ -214,7 +214,7 @@ async function readWorkspaceHistory(): Promise<Array<{ workspacePath: string; sc
       }
     }
   } catch {
-    // No history file yet; fall back to the legacy single marker below.
+    // No history file yet; fall back to the single marker below.
   }
   try {
     const marker = JSON.parse(await readFile(lastWorkspaceFile(), 'utf8'));
@@ -226,7 +226,7 @@ async function readWorkspaceHistory(): Promise<Array<{ workspacePath: string; sc
       });
     }
   } catch {
-    // No legacy marker.
+    // No marker.
   }
   return records
     .filter((item, index, all) => all.findIndex((candidate) => candidate.workspacePath === item.workspacePath) === index)
@@ -234,7 +234,7 @@ async function readWorkspaceHistory(): Promise<Array<{ workspacePath: string; sc
 }
 
 function workspaceActivityScore(state: Record<string, unknown>): number {
-  const sessions = isRecord(state.sessionsByAgent) ? Object.values(state.sessionsByAgent) : [];
+  const sessions = isRecord(state.sessionsByScenario) ? Object.values(state.sessionsByScenario) : [];
   const archived = Array.isArray(state.archivedSessions) ? state.archivedSessions.length : 0;
   const contracts = Array.isArray(state.alignmentContracts) ? state.alignmentContracts.length : 0;
   return sessions.reduce<number>((total, session) => {

@@ -1,6 +1,6 @@
 # BioAgent - PROJECT.md
 
-最后更新：2026-04-20
+最后更新：2026-04-21
 
 ## 使用约定
 - 本文档作为 BioAgent 工程任务板使用，正文只保留正在推进或待推进的任务；已完成任务压缩到归档摘要。
@@ -8,13 +8,14 @@
 - 当前 Web UI 位于 `ui/`，本项目服务运行在 `http://localhost:5173/`；本地 workspace writer 运行在 `http://127.0.0.1:5174/`。
 - AgentServer 是项目无关的通用“大脑”和 fallback backend；BioAgent 不应维护一个写死工具清单，而应优先通过 skill registry、workspace-local task code 和 AgentServer 动态探索/写代码来解决用户请求。
 - 如果确实定位到 AgentServer 通用能力缺口，可以修改 `/Applications/workspace/ailab/research/app/AgentServer`；修改必须泛化到协议、配置、通用工具连接、网络环境或 backend 能力层，并在对应 TODO 标明影响的 API / backend / tool 约定。
-- BioAgent 当前的 `POST /api/bioagent/tools/run` 已接入薄的 workspace runtime gateway；`scripts/bioagent-tools.ts` 仅作为兼容 shim 保留，不能重新扩展为“更多 if/else 工具分支”。新增科学能力必须进入 seed/workspace skills、workspace-local task code 或 AgentServer 生成任务，而不是回到 TypeScript backend 分支。
+- BioAgent 的最终产品形态是 Scenario-first workbench，而不是每个 Agent 一套页面。用户准备 `scenario.md` 或选择内置 Scenario preset，系统编译为 `ScenarioSpec`，再由 skill registry、workspace task、AgentServer repair 和 UIManifest 驱动运行。
+- BioAgent 当前的 `POST /api/bioagent/tools/run` 已接入薄的 workspace runtime gateway；前端发送 `scenarioId` 和内部 `skillDomain`。新增科学能力必须进入 seed/workspace skills、workspace-local task code 或 AgentServer 生成任务，而不是回到 TypeScript backend 分支。
 - 语言边界必须显式：TypeScript 主要用于 Web UI、workspace writer、artifact/session 协议、组件 registry 和轻量编排壳；科学任务执行代码优先生成到 workspace 内的 Python 脚本 / notebook / package 中，并作为 artifact 的一部分沉淀。只有在性能、生态或既有科学工具要求时，才使用 R、C/C++、Rust、Julia、Shell、WASM 或其它语言；选择非 Python 语言必须在 ExecutionUnit 中记录原因、环境和可复现入口。
-- BioAgent 不应把具体科学任务长期写死在 TypeScript backend 分支里。内置 project tool 只能作为通用能力原语、任务引导器或兼容 fallback；真实任务应尽量表现为 workspace-local code artifact，例如 `.bioagent/tasks/*.py`、`.bioagent/tasks/*.ipynb`、`.bioagent/tasks/*.R`，并输出标准 artifact JSON、日志和 ExecutionUnit。
+- BioAgent 不应把具体科学任务长期写死在 TypeScript backend 分支里。workspace runtime 只能作为通用能力原语和任务引导器；真实任务应尽量表现为 workspace-local code artifact，例如 `.bioagent/tasks/*.py`、`.bioagent/tasks/*.ipynb`、`.bioagent/tasks/*.R`，并输出标准 artifact JSON、日志和 ExecutionUnit。
 - 用户请求的解析顺序应为：先检索已安装 skills 是否能满足；若没有合适 skill，则调用 AgentServer 探索、生成 workspace task code 并运行；若任务反复成功且被频繁使用，再由反思循环提炼为新的 skill。脚本即工具，skill 是被验证和泛化后的脚本/流程。
 - 自愈机制必须优先复用 AgentServer 的通用“大脑”能力：任务失败后，BioAgent 应把 prompt、任务代码、stderr/stdout、artifact schema、用户反馈和失败现象交给 AgentServer，让其修改 workspace 任务代码并重跑；如果仍无法完成，必须返回明确失败原因和下一步所需条件，不能用 demo、默认结构、默认数据或 record-only 结果冒充成功。
-- UI 页面只是交互、状态和展示承载层：动态性优先来自 artifact schema、UIManifest 和 View Composition；展示需求先用 `colorBy`、`splitBy`、`overlayBy`、`facetBy`、`compareWith` 等声明式参数表达，只有标准组件、View Composition 和通用 inspector 都无法表达时，才生成临时 UI plugin，并且必须 sandbox、版本化、可回滚。
-- 每个 Agent 必须维护 scope declaration：能独立完成什么、需要什么输入、何时需要跨 Agent 串联、何时必须承认当前 Phase 无法完成；禁止把跨领域开放问题强行包装成未经验证的巨型脚本。
+- UI 页面只是交互、状态和展示承载层：动态性优先来自 ScenarioSpec、artifact schema、UIManifest 和 View Composition；展示需求先用 `colorBy`、`splitBy`、`overlayBy`、`facetBy`、`compareWith` 等声明式参数表达，只有标准组件、View Composition 和通用 inspector 都无法表达时，才生成临时 UI plugin，并且必须 sandbox、版本化、可回滚。
+- 每个 Scenario 必须维护 scope declaration：能独立完成什么、需要什么输入、何时需要跨 Scenario 串联、何时必须承认当前阶段无法完成；禁止把跨领域开放问题强行包装成未经验证的巨型脚本。
 - 湿实验反向路径中，agent 是结构化证据呈现者，不是最终裁判；“假设成立/不成立”必须由研究者或授权角色确认，并写入时间线。
 - 研究时间线是一等公民：它是研究记忆、分支探索历史、belief dependency graph 的时间投影，也是未来研究编排层的状态基底。
 - 多人协作与权限边界必须在 artifact、时间线、对齐工作台和实验数据回传中保留字段与设计空间；后续实现不能默认所有数据全员可见或可导出。
@@ -23,8 +24,8 @@
 - 代码路径必须尽量保持唯一真相源：引入新链路或发现冗余时必须删除、合并或明确降级旧链路，避免两个并行逻辑长期共存。
 
 ## 当前状态
-- 已有 React + Vite Web UI，包含研究概览、单 Agent 工作台、对齐工作台、研究时间线。
-- 文献、结构、组学、知识库四个 Agent 已通过 workspace runtime gateway 和 seed skills 返回真实 runtime artifact；`scripts/bioagent-tools.ts` 已降级为 shim，科学任务逻辑迁入 workspace-local Python task。
+- 已有 React + Vite Web UI，包含研究概览、Scenario 工作台、对齐工作台、研究时间线。
+- 文献证据评估、结构探索、组学差异分析、生物医学知识图谱四个内置 Scenario preset 已通过 workspace runtime gateway 和 seed skills 返回真实 runtime artifact；科学任务逻辑迁入 workspace-local Python task。
 - workspace writer 已能落盘 `.bioagent/workspace-state.json`、`sessions/`、`artifacts/`、`versions/`、`config.json`，并提供 Resource Explorer 文件操作。
 - 已完成的 Agent 对话、project tool、handoff、workspace、ExecutionUnit 导出等任务见本文末尾归档摘要。
 
@@ -32,6 +33,25 @@
 
 ## P0 - 当前阻塞
 - 暂无当前阻塞。T025/T026/T027/T028/T029/T030/T031/T032/T021 均已按当前阶段成功标准收口；剩余内容仅保留为后续产品化或归档说明，不作为本轮阻塞。
+
+### T033 Scenario-first 产品形态收口
+
+#### 目标说明
+- 删除“不同 Agent 页面”作为产品主抽象，改为统一 Scenario workbench。ScenarioSpec 是一等公民；内置四个 preset 只是默认场景，不是页面分叉。
+
+#### 成功标准
+- 前端协议、工作台入口、session state、dashboard 文案都以 Scenario 为主语。
+- `ui/src/scenarioSpecs.ts` 是前端场景契约唯一入口，声明 `skillDomain`、input/output artifact schema、scope declaration、default UIManifest slots 和 component policy。
+- LLM/AgentServer prompt 只允许生成结构化 artifact、ExecutionUnit、claims 和 UIManifest；UI 不执行生成代码。
+- workspace runtime 接收 `scenarioId + skillDomain`，skillDomain 只作为内部 skill matching 维度。
+- README 与产品设计文档明确最终链路：`scenario.md -> ScenarioSpec -> skill/runtime -> artifact -> UIManifest -> component registry`。
+
+#### TODO
+- [x] 建立 `ScenarioSpec` 作为前端场景契约唯一入口。
+- [x] 将 UI 状态和 session 主键改为 `ScenarioId` / `sessionsByScenario`。
+- [x] 将 dashboard 与 workbench 文案切换为 Scenario preset / ScenarioSpec。
+- [x] 将 workspace runtime 请求切换为 `scenarioId` + `skillDomain`。
+- [x] 更新 README、PROJECT 和设计文档。
 
 ---
 
@@ -44,16 +64,16 @@
 
 #### 成功标准
 - 新增更合适的入口文件，例如 `scripts/workspace-runtime-gateway.ts` 或 `scripts/skill-runtime.ts`，并让 `workspace-server.ts` 调用新入口。
-- `scripts/bioagent-tools.ts` 只作为兼容 shim 暂存，或被删除；新增功能不得继续写入该文件。
-- gateway 接口输入统一为 `profile`、`prompt`、`workspacePath`、`artifacts`、`uiState`、`availableSkills`；输出统一为 `ToolPayload` / `Artifact` / `ExecutionUnit` / logs。
+- `scripts/bioagent-tools.ts` 只作为薄入口，不承载科学逻辑；新增功能不得继续写入该文件。
+- gateway 接口输入统一为 `skillDomain`、`prompt`、`workspacePath`、`artifacts`、`uiState`、`availableSkills`；输出统一为 `ToolPayload` / `Artifact` / `ExecutionUnit` / logs。
 - gateway 不包含数据库字段解析、科学算法、可视化逻辑；这些能力必须在 seed skills、workspace task code 或 AgentServer 生成代码中实现。
 - 失败时返回 failed state、日志引用和修复入口，不返回 demo/default/record-only 成功态。
 
 #### TODO
-- [x] 新增 runtime gateway 文件和类型定义，保留现有 `POST /api/bioagent/tools/run` API 兼容：`scripts/bioagent-tools.ts` 已降级为 shim，实际入口为 `scripts/workspace-runtime-gateway.ts`。
+- [x] 新增 runtime gateway 文件和类型定义：`scripts/bioagent-tools.ts` 是薄入口，实际入口为 `scripts/workspace-runtime-gateway.ts`。
 - [x] 抽出通用 task runner：`scripts/workspace-task-runner.ts` 支持 Python/R/Shell/CLI task，捕获 stdout/stderr、exitCode、output JSON、artifact refs、runtime fingerprint。
-- [x] 把结构 Agent 当前 Python task 执行路径迁入 gateway，作为第一个非 TS 科学逻辑样板：`structure.rcsb_latest_or_entry` seed skill 已通过 gateway 运行真实 RCSB task。
-- [x] 将 literature / knowledge / omics 的 TS 科学逻辑标记为待迁移 legacy branches，并禁止新增分支：旧实现已移动到 `scripts/legacy-bioagent-tools.ts`；PubMed、UniProt/ChEMBL 和基础 omics CSV differential 已迁入 seed workspace task。
+- [x] 把结构探索 Scenario 当前 Python task 执行路径迁入 gateway，作为第一个非 TS 科学逻辑样板：`structure.rcsb_latest_or_entry` seed skill 已通过 gateway 运行真实 RCSB task。
+- [x] 删除旧 TS 科学逻辑分支；PubMed、UniProt/ChEMBL、RCSB 和基础 omics CSV differential 均通过 seed workspace task 运行。
 - [x] 为 gateway 增加 schema validation：`message`、`claims`、`uiManifest`、`executionUnits`、`artifacts` 缺失或类型错误时返回 `repair-needed`，不生成 demo/default 成功态。
 - [x] 更新 smoke：`npm run smoke:fixtures` 仍覆盖 PubMed/RCSB/omics/UniProt/ChEMBL fixture contract；直接 gateway smoke 已验证结构、PubMed、UniProt、ChEMBL 和 omics CSV differential workspace task。
 - [x] 增加统一验证入口：`npm run verify` 会串起 typecheck、unit tests、全部 smoke 和 production build；README 已更新到 runtime gateway / seed skills / no local record-only adapter 的当前事实。
@@ -68,14 +88,14 @@
 - skills 明确分为 seed skills、workspace skills、user-installed skills。
 - 首批 seed skills 覆盖 PubMed 检索、RCSB/AlphaFold 结构下载、基础差异表达、UniProt/ChEMBL 查询、通用文件/表格/日志 inspector。
 - 每个 seed skill 都有最小 validation smoke，失败时自动标记 unavailable，不被匹配为可执行能力。
-- skill matching 可以根据 prompt、agent profile、artifact input contract、历史成功率和 scope declaration 选择能力；无匹配时明确转入 AgentServer task generation。
+- skill matching 可以根据 prompt、ScenarioSpec、artifact input contract、历史成功率和 scope declaration 选择能力；无匹配时明确转入 AgentServer task generation。
 
 #### TODO
 - [x] 定义 `.bioagent/skills/`、`skills/seed/`、`skills/installed/` 目录结构和 manifest schema。
 - [x] 把结构 Python task 提炼为 `structure.rcsb_latest_or_entry` seed skill。
 - [x] 把 PubMed、UniProt、ChEMBL、omics differential runner 迁移为 seed skill task/template，而不是 TS 分支；PubMed、UniProt/ChEMBL 和基础 omics CSV differential 已迁入 workspace Python task，Scanpy/DESeq2/edgeR 后续应作为 omics task 内部可选后端补强，而不是回到 TS gateway 分支。
 - [x] 实现 skill registry loader：读取 repo seed skills、workspace skills、user-installed skills，并输出 availability。
-- [x] 实现 skill matcher MVP：prompt + profile + artifact contract + validation status。
+- [x] 实现 skill matcher MVP：prompt + skillDomain + artifact contract + validation status。
 - [x] 实现 validation smoke runner，并把结果写入 `.bioagent/skills/status.json`；`npm run smoke:skill-registry` 会验证 seed skills 可用、坏 workspace skill 被标记 unavailable，且 unavailable skill 即使被显式 allow 也不会被匹配；`npm run smoke:seed-runtime` 通过 gateway 真实运行 PubMed、RCSB、UniProt、ChEMBL compound 和 omics workspace seed tasks。
 - [x] 设计 skill promotion 草案格式：已在 `scripts/runtime-types.ts` 定义 `SkillPromotionProposal`，并在 `docs/SkillPromotionProposal.md` 记录待用户确认的 proposal 结构与 promotion 规则。
 
@@ -91,7 +111,7 @@
 - AgentServer 无法完成时返回明确原因和下一步所需条件，不生成 demo/default 结果。
 
 #### TODO
-- [x] 定义 AgentServer generation request：prompt、profile、workspace tree summary、available skills、artifact schema、UIManifest contract、uiState/scope summary、prior attempts；类型见 `AgentServerGenerationRequest`，说明见 `docs/AgentServerTaskGenerationProtocol.md`；gateway 在无 skill 时会把最近 attempt history 和 UI scopeCheck 一并交给 AgentServer。
+- [x] 定义 AgentServer generation request：prompt、skillDomain、workspace tree summary、available skills、artifact schema、UIManifest contract、uiState/scope summary、prior attempts；类型见 `AgentServerGenerationRequest`，说明见 `docs/AgentServerTaskGenerationProtocol.md`；gateway 在无 skill 时会把最近 attempt history 和 UI scopeCheck 一并交给 AgentServer。
 - [x] 定义 AgentServer generation response：task files、entrypoint、environment requirements、validation command、expected artifacts；类型见 `AgentServerGenerationResponse`。
 - [x] 接入 AgentServer task generation 运行路径：无可用 skill 时，gateway 会向配置的 AgentServer `/api/agent-server/runs` 请求 `taskFiles/entrypoint`，写入 workspace-local task code 并执行；`npm run smoke:agentserver-generation` 使用本地 contract mock 验证 generated task 写入、运行、artifact 输出和 attempt history。
 - [x] 定义 repair request：codeRef、inputRef、outputRef、stdoutRef、stderrRef、schema errors、用户反馈、UI 截图/状态摘要；类型见 `AgentServerRepairRequest` / `AgentServerRepairResponse`。
@@ -116,23 +136,24 @@
 - [x] 为 molecule viewer、volcano、heatmap、UMAP、network、paper list、data table 增加组合参数支持；paper/data table 支持 filter/sort/limit transform，volcano/UMAP/network 支持 `colorBy`，heatmap 展示 split/facet label，molecule viewer 展示 highlightSelection，所有标准 slot 展示 composition summary。
 - [x] 实现 UnknownArtifactInspector：未知 componentId 或显式 `unknown-artifact-inspector` 会展示 JSON/table preview、dataRef、codeRef、stdout/stderr/output refs。
 - [x] 为 UIManifest 增加 validation 和 unsupported-state 提示：未注册 componentId 不再空白，显示 unsupported note 并进入 UnknownArtifactInspector。
+- [x] workspace runtime seed skill 输出也接入 UIManifest composition：根据任务 prompt、用户编辑的 Scenario 设置和 artifact 类型重排/替换组件槽位；`npm run smoke:runtime-ui-manifest` 覆盖任务显式组件、Scenario override 和 View Composition hint。
 - [x] 定义 dynamic UI plugin sandbox 设计，但暂不默认启用代码生成；见 `docs/DynamicUIPluginSandbox.md`。
 - [x] 用 prompt 验证：`npm run smoke:view` 覆盖 UMAP 按 cell cycle 着色并 side-by-side batch 对比，不新增科学 task，只保留 UIManifest View Composition。
 
 ### T029 Agent Scope Declaration 与诚实边界
 
 #### 目标说明
-- 为每个单 Agent 明确 Phase 1/2 的能力边界、输入要求、可独立完成的任务、需要手动串联的跨 Agent 场景和不能诚实完成的问题。
+- 为每个Scenario 明确 Phase 1/2 的能力边界、输入要求、可独立完成的任务、需要手动串联的跨 Agent 场景和不能诚实完成的问题。
 
 #### 成功标准
-- 每个 Agent profile 有机器可读 scope declaration。
+- 每个 ScenarioSpec 有机器可读 scope declaration。
 - 用户提出跨领域开放问题时，系统返回拆解计划和边界，而不是生成未经验证的巨型脚本。
 - skill matching 和 AgentServer task generation 都读取 scope declaration。
 - UI 能展示“当前 Agent 能做什么 / 缺什么 / 下一步该转交给谁”。
 
 #### TODO
-- [x] 为 literature / structure / omics / knowledge / alignment 定义 scope declaration schema；当前 Web agent profiles 已定义 `AgentScopeDeclaration`，alignment 仍需在对齐工作台模型中接入。
-- [x] 补充每个 Agent 的 supportedTasks、requiredInputs、unsupportedTasks、handoffTargets、phaseLimitations；literature / structure / omics / knowledge 已写入 `BIOAGENT_PROFILES`。
+- [x] 为 literature / structure / omics / knowledge / alignment 定义 scope declaration schema；当前 Web ScenarioSpecs 已定义 `ScenarioScopeDeclaration`，alignment 仍需在对齐工作台模型中接入。
+- [x] 补充每个 Agent 的 supportedTasks、requiredInputs、unsupportedTasks、handoffTargets、phaseLimitations；literature / structure / omics / knowledge 已写入 `SCENARIO_SPECS`。
 - [x] 在 prompt 路由前执行 scope check；超出范围时生成 handoff plan 或 manual chaining plan，并注入 AgentServer / project tool prompt metadata。
 - [x] 在 UI 参数面板或 Agent contract 区展示 scope。
 - [x] 为复杂跨域问题 smoke：保守性 + CRISPR 效率 + 文献证据，确认 scope check 生成 staged handoff plan 且提示不要生成未经验证的巨型脚本。
@@ -203,7 +224,7 @@
 - 将 BioAgent 的科学任务执行层从 TypeScript 写死分支迁移为 workspace-local code artifact：优先由 AgentServer 生成/修改 Python 任务代码，BioAgent workspace service 负责执行、收集 artifact、渲染 UI，并在失败后把错误与用户反馈交还 AgentServer 自愈重试。
 
 #### 成功标准
-- TypeScript 只保留 UI、协议、workspace I/O、artifact registry、任务调度和兼容 fallback；文献、结构、组学、知识库等具体科学任务优先以 workspace Python 代码表达。
+- TypeScript 只保留 UI、协议、workspace I/O、artifact registry 和任务调度；文献、结构、组学、知识库等具体科学任务优先以 workspace Python 代码表达。
 - 每次科学任务至少沉淀一个可复验任务代码 artifact、一个标准结果 artifact、一个执行日志和一个 ExecutionUnit；ExecutionUnit 记录代码路径、语言、依赖、输入、输出、失败/成功状态。
 - 当任务失败或用户反馈指出结果不真实时，BioAgent 能把任务代码、日志、artifact schema、浏览器反馈交给 AgentServer，让 AgentServer 修改代码并重跑；重试次数、diff、失败原因都要写入 artifact/log。
 - 允许为了性能或生态使用 R、C/C++、Rust、Julia、Shell、WASM 或其它语言，但必须由任务代码显式声明选择理由、环境和可复现入口；不能因为 Web UI 是 TypeScript 就把科学分析逻辑默认写进 TypeScript。
@@ -212,13 +233,13 @@
 #### TODO
 - [x] 定义并落地首批 workspace 任务目录引用：结构任务使用 `.bioagent/tasks/`、`.bioagent/task-inputs/`、`.bioagent/task-results/`、`.bioagent/logs/`、`.bioagent/structures/`，每次运行写出 task code、input JSON、output JSON、stdout/stderr 和坐标文件。
 - [x] 定义并接入首批 Python-first ExecutionUnit 字段：`language`、`codeRef`、`entrypoint`、`inputs`、`outputs`、`stdoutRef`、`stderrRef`、`attempt`；动态结果区 ExecutionUnit 面板展示 code artifact 和日志引用。
-- [x] 先迁移结构 Agent 的 RCSB/AlphaFold 任务：最新 PDB 搜索、坐标下载、mmCIF/PDB 解析、atomCoordinates 输出已放到 workspace Python task；TypeScript 只负责复制任务模板、执行 Python、读取标准结果 JSON。
-- [x] 补齐通用 task runner 抽象：将结构 Agent 当前的 Python runner 提炼为 profile 无关的 workspace runner，支持 Python/R/Shell/CLI 脚本、捕获日志、退出码、产物路径和 runtime fingerprint；具体科学逻辑保留在 seed skill task code 中，剩余 legacy adapter 仅作为兼容后备。
+- [x] 先迁移结构探索 Scenario 的 RCSB/AlphaFold 任务：最新 PDB 搜索、坐标下载、mmCIF/PDB 解析、atomCoordinates 输出已放到 workspace Python task；TypeScript 只负责复制任务模板、执行 Python、读取标准结果 JSON。
+- [x] 补齐通用 task runner 抽象：将结构探索 Scenario 当前的 Python runner 提炼为 skill-domain 无关的 workspace runner，支持 Python/R/Shell/CLI 脚本、捕获日志、退出码、产物路径和 runtime fingerprint；具体科学逻辑保留在 seed skill task code 中。
 - [x] 接入 AgentServer 自愈协议：失败时把 prompt、codeRef、日志、artifact schema、用户反馈和 UI 状态发给 AgentServer `/api/agent-server/runs`，请其生成 patch 或新 attempt，再由 BioAgent 执行；修复 diff、parentAttempt、selfHealReason、AgentServer run id 和失败原因写入 attempt history / ExecutionUnit。
-- [x] 再迁移组学 Agent：将 Scanpy/DESeq2/edgeR 调用表达为 workspace task code，保留 Python/R 环境约定和真实 runner smoke；`scripts/python_tasks/omics_differential_task.py` 内部已包含 Scanpy、DESeq2、edgeR 后端选择与 fallback，`npm run smoke:omics-runners` 覆盖真实 Scanpy 或明确 fallback。
+- [x] 再迁移组学差异分析 Scenario：将 Scanpy/DESeq2/edgeR 调用表达为 workspace task code，保留 Python/R 环境约定和真实 runner smoke；`scripts/python_tasks/omics_differential_task.py` 内部已包含 Scanpy、DESeq2、edgeR 后端选择与 fallback，`npm run smoke:omics-runners` 覆盖真实 Scanpy 或明确 fallback。
 - [x] 更新动态结果区：展示 `taskCodeRef`、attempt history、自愈 diff 摘要、失败原因；没有真实 artifact 时保持 empty/failed state。ExecutionUnit 面板已展示 codeRef、stdout/stderr/outputRef、attempt、parentAttempt、selfHealReason、failureReason、patchSummary、diffRef。
 - [x] 验证失败-反馈-自愈闭环：构造 schema 缺字段/缺输入场景，确认 AgentServer 能修改 task code 重跑，并通过同一 workspace-server HTTP API 返回真实 artifact 和 `self-healed` ExecutionUnit。为避免视觉验证慢且不稳定，本轮不用 Computer Use，改用 `npm run smoke:workspace-agentserver-repair` 做无浏览器端到端验证；该 smoke 同时覆盖请求体显式 `agentServerBaseUrl` 和 workspace `.bioagent/config.json` 回退配置；`npm run smoke:repair` 覆盖 repair-needed empty state，确认无法修复时不生成 demo/default artifact。
-- [x] 移除前端一键 record-only local adapter：发送失败后 UI 不再生成会驱动结果图的本地草案 artifact；用户会看到明确错误，并继续走 workspace runtime / AgentServer 配置修复路径。omics profile 的默认输入也从 `demo:rna-seq` 改为 workspace 文件约定 `matrix.csv`。
+- [x] 移除前端一键 record-only local adapter：发送失败后 UI 不再生成会驱动结果图的本地草案 artifact；用户会看到明确错误，并继续走 workspace runtime / AgentServer 配置修复路径。omics skillDomain 的默认输入也从 `demo:rna-seq` 改为 workspace 文件约定 `matrix.csv`。
 - [x] 收紧 knowledge unsupported 语义：未接 disease / clinical-trial connector 时仍可返回结构化 unsupported artifact 供 UI 解释缺口，但 ExecutionUnit 状态改为 `failed-with-reason`，不再用 `record-only`；`npm run smoke:knowledge-unsupported` 锁定该失败语义。
 
 ## 归档摘要
@@ -233,10 +254,10 @@
 - T009 对齐工作台契约设计：已定义 `alignment-contract` schema，后续进入可编辑保存实现。
 - T010 ExecutionUnit 导出与可复现性检查：已完成 JSON Bundle 为 Phase 1 规范审计产物，真实 project tool 返回 ExecutionUnit 字段。
 - T011 动态结果区数据来源去 demo 化：已移除 paper cards、molecule viewer、volcano、heatmap、UMAP、network、data table、evidence matrix、ExecutionUnit、notebook 的无条件 demo fallback；右侧组件现在展示 `project-tool` / `record-only` / `empty` 来源条、artifact metadata、dataRef 和 producing tool。
-- T012 文献 Agent 结果区真实 `paper-list` 渲染：已通过 Safari Computer Use 验证 `TP53 tumor suppressor reviews` 由 BioAgent project tool 完成，右侧展示真实 PubMed paper cards、PubMed URL、`PubMed.eutils.esearch+esummary` ExecutionUnit。
-- T013 结构 Agent 结果区真实 `structure-summary` 渲染：已通过 Safari Computer Use 验证 `PDB 7BZ5 residues 142-158` 返回 RCSB `.cif` dataRef、residue range、molecule viewer 和 `RCSB.core.entry` ExecutionUnit；无 artifact 时不再加载默认 7BZ5。
-- T014 组学 Agent 结果区真实 omics artifact 渲染：已通过 Safari Computer Use 验证固定 CSV fixture 生成 `.bioagent/omics/...json`、`omics.local-csv-differential` ExecutionUnit，并驱动 volcano、heatmap、UMAP。
-- T015 知识库 Agent 结果区真实 `knowledge-graph` 渲染：已通过 Safari Computer Use 验证 `TP53 gene` 返回 UniProt reviewed human entry `P04637`、3 个节点、2 条边和 `UniProt.uniprotkb.search` ExecutionUnit；demo drug/pathway fallback 已从动态表格/网络中移除。
+- T012 文献证据评估 Scenario 结果区真实 `paper-list` 渲染：已通过 Safari Computer Use 验证 `TP53 tumor suppressor reviews` 由 BioAgent project tool 完成，右侧展示真实 PubMed paper cards、PubMed URL、`PubMed.eutils.esearch+esummary` ExecutionUnit。
+- T013 结构探索 Scenario 结果区真实 `structure-summary` 渲染：已通过 Safari Computer Use 验证 `PDB 7BZ5 residues 142-158` 返回 RCSB `.cif` dataRef、residue range、molecule viewer 和 `RCSB.core.entry` ExecutionUnit；无 artifact 时不再加载默认 7BZ5。
+- T014 组学差异分析 Scenario 结果区真实 omics artifact 渲染：已通过 Safari Computer Use 验证固定 CSV fixture 生成 `.bioagent/omics/...json`、`omics.local-csv-differential` ExecutionUnit，并驱动 volcano、heatmap、UMAP。
+- T015 生物医学知识图谱 Scenario 结果区真实 `knowledge-graph` 渲染：已通过 Safari Computer Use 验证 `TP53 gene` 返回 UniProt reviewed human entry `P04637`、3 个节点、2 条边和 `UniProt.uniprotkb.search` ExecutionUnit；demo drug/pathway fallback 已从动态表格/网络中移除。
 - T016 ExecutionUnit 与结果区一致性检查：已建立 artifact 到 ExecutionUnit 的 resolver，结果区 source badge 展示 producing tool/status；缺引用时显示审计 warning。
 - T017 Browser Smoke 四 Agent 动态结果区真实数据回归：已用 Safari 覆盖 Literature、Structure、Omics、Knowledge；记录见 `docs/ComputerUseSmoke.md`。
 - T018 组学真实统计运行时接入：已定义 BioAgent workspace-local Python/R runtime 路径，接入 Scanpy `rank_genes_groups`、DESeq2、edgeR 三条真实 runner；artifact/log 记录 requested/effective runner、runtime availability、软件版本、统计模型、输入指纹、outputRef、logRef，失败时回退到 `omics.local-csv-differential`。用户确认安装后，已在 `/tmp/bioagent-results-smoke` 安装 workspace-local Scanpy 1.12.1、R 4.4.3、DESeq2 1.46.0、edgeR 4.4.0；direct smoke 覆盖三条 runner，Safari Computer Use 覆盖 Scanpy 与 edgeR 大矩阵动态结果区。

@@ -2,7 +2,7 @@
   "id": "omics.differential_expression",
   "kind": "seed",
   "description": "Run differential expression from workspace matrix and metadata files with Scanpy, DESeq2, edgeR, or bounded CSV fallback.",
-  "profiles": ["omics"],
+  "skillDomains": ["omics"],
   "inputContract": {
     "prompt": "Must include matrixRef and metadataRef; may include groupColumn, caseGroup, controlGroup, alpha, runner."
   },

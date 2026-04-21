@@ -42,7 +42,7 @@ def main():
         ],
         "executionUnits": [
             execution_unit(
-                "literature",
+                "literature-evidence-review",
                 "PubMed.eutils.esearch+esummary",
                 {"query": query, "retmax": retmax, "database": "pubmed"},
                 "done",
@@ -54,7 +54,7 @@ def main():
             {
                 "id": "paper-list",
                 "type": "paper-list",
-                "producerAgent": "literature",
+                "producerScenario": "literature-evidence-review",
                 "schemaVersion": "1",
                 "metadata": {"query": query, "retmax": retmax, "source": "PubMed", "accessedAt": now()},
                 "data": {"query": query, "papers": papers},
@@ -66,8 +66,20 @@ def main():
 
 
 def literature_query(prompt):
+    explicit = re.search(r"\bquery\s*=\s*([^。\n;；]+)", prompt, flags=re.I)
+    if explicit:
+        return clean_query_text(explicit.group(1))
     text = re.sub(r"返回.*$", "", prompt)
-    text = re.sub(r"请|文献|证据|近三年|三年|paper-list|JSON|artifact|claims|ExecutionUnit", " ", text, flags=re.I)
+    text = re.sub(r"(只展示|only show|show only|不要|不需要|无需|no )[^。\n;；]*", " ", text, flags=re.I)
+    text = re.sub(r"请|文献|证据|近三年|三年|paper-list|paper-card-list|JSON|artifact|claims|ExecutionUnit|execution unit|uiManifest|evidence matrix|data table", " ", text, flags=re.I)
+    return clean_query_text(text)
+
+
+def clean_query_text(text):
+    text = re.sub(r"(只展示|only show|show only|不要|不需要|无需|no )[^。\n;；.]*", " ", text, flags=re.I)
+    text = re.sub(r"paper-card-list|paper-list|evidence matrix|execution unit|uiManifest|JSON|artifact|claims", " ", text, flags=re.I)
+    text = re.sub(r"\bmaxResults\s*=\s*\d+", " ", text, flags=re.I)
+    text = re.sub(r"\s*[.。]\s*$", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:180] or "KRAS G12D pancreatic cancer targeted therapy"
 
@@ -132,4 +144,3 @@ def now():
 
 if __name__ == "__main__":
     main()
-

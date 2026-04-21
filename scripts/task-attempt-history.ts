@@ -15,7 +15,7 @@ export async function appendTaskAttempt(workspacePath: string, record: TaskAttem
   await writeFile(path, JSON.stringify({
     id: record.id,
     prompt: record.prompt,
-    profile: record.profile,
+    skillDomain: record.skillDomain,
     updatedAt: new Date().toISOString(),
     attempts,
   }, null, 2));
@@ -27,7 +27,7 @@ export async function readTaskAttempts(workspacePath: string, id: string): Promi
   return readAttempts(join(workspace, '.bioagent', 'task-attempts', `${safeName(id)}.json`));
 }
 
-export async function readRecentTaskAttempts(workspacePath: string, profile?: string, limit = 8): Promise<TaskAttemptRecord[]> {
+export async function readRecentTaskAttempts(workspacePath: string, skillDomain?: string, limit = 8): Promise<TaskAttemptRecord[]> {
   const workspace = resolve(workspacePath || process.cwd());
   const dir = join(workspace, '.bioagent', 'task-attempts');
   if (!await fileExists(dir)) return [];
@@ -42,7 +42,7 @@ export async function readRecentTaskAttempts(workspacePath: string, profile?: st
     .map((file) => readAttempts(join(dir, file))));
   return groups
     .flat()
-    .filter((attempt) => !profile || attempt.profile === profile)
+    .filter((attempt) => !skillDomain || attempt.skillDomain === skillDomain)
     .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || ''))
     .slice(0, limit);
 }

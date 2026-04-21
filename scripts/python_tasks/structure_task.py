@@ -139,7 +139,7 @@ def rcsb_payload(config: dict[str, Any], pdb_id: str, searched: dict[str, Any] |
         "artifacts": [{
             "id": "structure-summary",
             "type": "structure-summary",
-            "producerAgent": "structure",
+            "producerScenario": "structure-exploration",
             "schemaVersion": "1",
             "dataRef": coordinate["url"],
             "metadata": {
@@ -215,7 +215,7 @@ def alphafold_payload(config: dict[str, Any], accession: str, residues: list[str
         "artifacts": [{
             "id": "structure-summary",
             "type": "structure-summary",
-            "producerAgent": "structure",
+            "producerScenario": "structure-exploration",
             "schemaVersion": "1",
             "dataRef": model_url,
             "metadata": {

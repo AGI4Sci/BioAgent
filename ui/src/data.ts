@@ -16,13 +16,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-export type AgentId = 'literature' | 'structure' | 'omics' | 'knowledge';
+export type ScenarioId = 'literature-evidence-review' | 'structure-exploration' | 'omics-differential-exploration' | 'biomedical-knowledge-graph';
 export type PageId = 'dashboard' | 'workbench' | 'alignment' | 'timeline';
 export type ClaimType = 'fact' | 'inference' | 'hypothesis';
 export type EvidenceLevel = 'meta' | 'rct' | 'cohort' | 'case' | 'experimental' | 'review' | 'database' | 'preprint' | 'prediction';
 
-export interface AgentViewConfig {
-  id: AgentId;
+export interface ScenarioViewConfig {
+  id: ScenarioId;
   name: string;
   domain: string;
   desc: string;
@@ -33,10 +33,10 @@ export interface AgentViewConfig {
   defaultResult: string;
 }
 
-export const agents: AgentViewConfig[] = [
+export const scenarios: ScenarioViewConfig[] = [
   {
-    id: 'literature',
-    name: '文献 Agent',
+    id: 'literature-evidence-review',
+    name: '文献证据评估',
     domain: 'literature-research',
     desc: '文献检索、综述生成、证据矩阵与矛盾证据整理',
     icon: BookOpen,
@@ -46,8 +46,8 @@ export const agents: AgentViewConfig[] = [
     defaultResult: 'paper-card-list',
   },
   {
-    id: 'structure',
-    name: '结构 Agent',
+    id: 'structure-exploration',
+    name: '结构探索',
     domain: 'protein-structure',
     desc: '蛋白结构、结合口袋、pLDDT 置信度与分子查看器',
     icon: FlaskConical,
@@ -57,8 +57,8 @@ export const agents: AgentViewConfig[] = [
     defaultResult: 'molecule-viewer',
   },
   {
-    id: 'omics',
-    name: '组学 Agent',
+    id: 'omics-differential-exploration',
+    name: '组学差异分析',
     domain: 'omics-analysis',
     desc: '差异表达、富集分析、热图、火山图与 UMAP 探索',
     icon: Dna,
@@ -68,8 +68,8 @@ export const agents: AgentViewConfig[] = [
     defaultResult: 'volcano-plot',
   },
   {
-    id: 'knowledge',
-    name: '知识库 Agent',
+    id: 'biomedical-knowledge-graph',
+    name: '生物医学知识图谱',
     domain: 'bio-knowledge',
     desc: 'UniProt、ChEMBL、OpenTargets、ClinicalTrials 知识查询',
     icon: Database,
@@ -82,13 +82,13 @@ export const agents: AgentViewConfig[] = [
 
 export const navItems = [
   { id: 'dashboard' as const, label: '研究概览', icon: Activity },
-  { id: 'workbench' as const, label: '单 Agent 工作台', icon: Brain },
+  { id: 'workbench' as const, label: '场景工作台', icon: Brain },
   { id: 'alignment' as const, label: '对齐工作台', icon: Users },
   { id: 'timeline' as const, label: '研究时间线', icon: GitBranch },
 ];
 
 export const stats = [
-  { label: '单 Agent Profiles', value: '4', icon: Brain, color: '#00E5A0' },
+  { label: 'Built-in Scenarios', value: '4', icon: Brain, color: '#00E5A0' },
   { label: 'Execution Units', value: '18', icon: Shield, color: '#FF7043' },
   { label: 'Evidence Claims', value: '64', icon: FileText, color: '#4ECDC4' },
   { label: 'UI Components', value: '11', icon: BarChart3, color: '#FFD54F' },

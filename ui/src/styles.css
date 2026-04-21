@@ -1711,6 +1711,47 @@ code,
   border-top: 1px solid rgba(46, 61, 85, 0.5);
 }
 
+.eu-detail {
+  grid-column: 1 / -1;
+  color: var(--bio-300);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  padding-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.composition-strip,
+.inspector-ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(46, 61, 85, 0.62);
+  border-radius: 6px;
+  background: rgba(5, 8, 16, 0.44);
+}
+
+.composition-strip code,
+.inspector-ref-list code {
+  color: var(--teal);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.inspector-json {
+  margin: 0;
+  max-height: 340px;
+  overflow: auto;
+  padding: 14px;
+  color: var(--bio-100);
+  font-size: 11px;
+  line-height: 1.6;
+  border: 1px solid rgba(46, 61, 85, 0.62);
+  border-radius: 6px;
+  background: rgba(5, 8, 16, 0.66);
+}
+
 .eu-row code {
   color: var(--teal);
   font-size: 11px;

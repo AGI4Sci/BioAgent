@@ -1,0 +1,34 @@
+{
+  "id": "omics.differential_expression",
+  "kind": "seed",
+  "description": "Run differential expression from workspace matrix and metadata files with Scanpy, DESeq2, edgeR, or bounded CSV fallback.",
+  "profiles": ["omics"],
+  "inputContract": {
+    "prompt": "Must include matrixRef and metadataRef; may include groupColumn, caseGroup, controlGroup, alpha, runner."
+  },
+  "outputArtifactSchema": {
+    "type": "omics-differential-expression",
+    "required": ["points", "heatmap", "umap", "runner", "logRef"]
+  },
+  "entrypoint": {
+    "type": "workspace-task",
+    "command": "python",
+    "path": "../../../scripts/python_tasks/omics_differential_task.py"
+  },
+  "environment": {
+    "language": "python",
+    "dependencies": ["python>=3.10", "csv", "statistics"],
+    "optionalRuntimes": ["scanpy.rank_genes_groups", "DESeq2", "edgeR"],
+    "migrationStatus": "workspace Python CSV task; production runner backends should be added inside this task"
+  },
+  "validationSmoke": {
+    "mode": "workspace-task",
+    "expectedPromptPattern": "matrixRef=<path> metadataRef=<path>",
+    "expectedArtifactType": "omics-differential-expression"
+  },
+  "examplePrompts": [
+    "matrixRef=.bioagent/omics/example-matrix.csv metadataRef=.bioagent/omics/example-metadata.csv groupColumn=condition caseGroup=treated controlGroup=control",
+    "Run Scanpy differential expression matrixRef=data/counts.csv metadataRef=data/meta.csv runner=scanpy"
+  ],
+  "promotionHistory": []
+}

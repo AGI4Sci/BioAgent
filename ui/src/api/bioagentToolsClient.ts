@@ -1,6 +1,7 @@
 import type { AgentStreamEvent, NormalizedAgentResponse, SendAgentMessageInput } from '../domain';
 import { makeId, nowIso } from '../domain';
 import { normalizeAgentResponse } from './agentClient';
+import { promptWithScopeCheck, scopeCheck } from './scopeCheck';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -21,10 +22,14 @@ export async function sendBioAgentToolMessage(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       profile: input.agentId,
-      prompt: input.prompt,
+      prompt: promptWithScopeCheck(input.agentId, input.prompt),
       workspacePath: input.config.workspacePath,
+      agentServerBaseUrl: input.config.agentServerBaseUrl,
       roleView: input.roleView,
       artifacts: summarizeArtifacts(input),
+      uiState: {
+        scopeCheck: scopeCheck(input.agentId, input.prompt),
+      },
     }),
     signal,
   });

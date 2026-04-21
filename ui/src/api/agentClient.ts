@@ -11,6 +11,7 @@ import {
   type SendAgentMessageInput,
 } from '../domain';
 import { agentProtocolForPrompt, BIOAGENT_PROFILES } from '../agentProfiles';
+import { promptWithScopeCheck, scopeCheck } from './scopeCheck';
 
 const DEFAULT_AGENT_SERVER_URL = 'http://127.0.0.1:18080';
 const DEFAULT_REQUEST_TIMEOUT_MS = 300_000;
@@ -74,7 +75,7 @@ function buildPrompt(input: SendAgentMessageInput) {
     artifactContext.length ? JSON.stringify(artifactContext, null, 2) : '',
     '',
     '用户问题:',
-    input.prompt,
+    promptWithScopeCheck(input.agentId, input.prompt),
   ].filter((line) => line !== '').join('\n');
 }
 
@@ -105,6 +106,7 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         inputContract: BIOAGENT_PROFILES[input.agentId].inputContract,
         expectedArtifacts: BIOAGENT_PROFILES[input.agentId].outputArtifacts.map((artifact) => artifact.type),
         artifacts: summarizeArtifacts(input.artifacts ?? []),
+        scopeCheck: scopeCheck(input.agentId, input.prompt),
       },
     },
     runtime,
@@ -241,9 +243,9 @@ function normalizeExecutionUnits(value: unknown, fallback: RuntimeExecutionUnit)
       id: asString(record.id) || `${fallback.id}-${index + 1}`,
       tool: asString(record.tool) || asString(record.name) || fallback.tool,
       params: asString(record.params) || JSON.stringify(record.params ?? record.input ?? {}),
-      status: record.status === 'done' || record.status === 'running' || record.status === 'failed' || record.status === 'planned'
+      status: isExecutionUnitStatus(record.status)
         ? record.status
-        : 'record-only',
+        : 'failed-with-reason',
       hash: asString(record.hash) || fallback.hash,
       code: asString(record.code) || asString(record.command),
       language: asString(record.language),
@@ -255,6 +257,9 @@ function normalizeExecutionUnits(value: unknown, fallback: RuntimeExecutionUnit)
       attempt: asNumber(record.attempt),
       parentAttempt: asNumber(record.parentAttempt),
       selfHealReason: asString(record.selfHealReason),
+      patchSummary: asString(record.patchSummary),
+      diffRef: asString(record.diffRef),
+      failureReason: asString(record.failureReason),
       seed: asNumber(record.seed) ?? asNumber(record.randomSeed),
       time: asString(record.time),
       environment: asString(record.environment),
@@ -266,6 +271,17 @@ function normalizeExecutionUnits(value: unknown, fallback: RuntimeExecutionUnit)
     } satisfies RuntimeExecutionUnit;
   });
   return units.length ? units : [fallback];
+}
+
+function isExecutionUnitStatus(value: unknown) {
+  return value === 'done'
+    || value === 'running'
+    || value === 'failed'
+    || value === 'planned'
+    || value === 'record-only'
+    || value === 'repair-needed'
+    || value === 'self-healed'
+    || value === 'failed-with-reason';
 }
 
 export function normalizeAgentResponse(
@@ -307,6 +323,8 @@ export function normalizeAgentResponse(
       evidenceLevel: pickEvidence(record.evidenceLevel ?? record.evidence),
       supportingRefs: Array.isArray(record.supportingRefs) ? record.supportingRefs.filter((entry): entry is string => typeof entry === 'string') : [],
       opposingRefs: Array.isArray(record.opposingRefs) ? record.opposingRefs.filter((entry): entry is string => typeof entry === 'string') : [],
+      dependencyRefs: asStringArray(record.dependencyRefs),
+      updateReason: asString(record.updateReason),
       updatedAt: now,
     };
   }) : [{
@@ -348,6 +366,12 @@ export function normalizeAgentResponse(
       props: isRecord(slot.props) ? slot.props : undefined,
       artifactRef: asString(slot.artifactRef),
       priority: asNumber(slot.priority),
+      encoding: isRecord(slot.encoding) ? slot.encoding : undefined,
+      layout: isRecord(slot.layout) ? slot.layout : undefined,
+      selection: isRecord(slot.selection) ? slot.selection : undefined,
+      sync: isRecord(slot.sync) ? slot.sync : undefined,
+      transform: Array.isArray(slot.transform) ? slot.transform.filter(isViewTransform) : undefined,
+      compare: isRecord(slot.compare) ? slot.compare : undefined,
     })) : [],
     claims,
     executionUnits: normalizeExecutionUnits(structured.executionUnits, fallbackExecutionUnit),
@@ -359,17 +383,101 @@ export function normalizeAgentResponse(
       metadata: isRecord(artifact.metadata) ? artifact.metadata : undefined,
       data: artifact.data,
       dataRef: asString(artifact.dataRef),
+      visibility: asTimelineVisibility(artifact.visibility),
+      audience: asStringArray(artifact.audience),
+      sensitiveDataFlags: asStringArray(artifact.sensitiveDataFlags),
+      exportPolicy: asExportPolicy(artifact.exportPolicy),
     })) : [],
-    notebook: [{
-      id: makeId('note'),
-      time: new Date(now).toLocaleString('zh-CN', { hour12: false }),
-      agent: agentId,
-      title: prompt.slice(0, 32) || 'Agent 对话',
-      desc: messageText.slice(0, 96),
+    notebook: normalizeNotebookRecords(structured.notebook, {
+      agentId,
+      prompt,
+      messageText,
       claimType,
       confidence,
-    }],
+      now,
+      claims,
+      artifacts: Array.isArray(structured.artifacts) ? structured.artifacts.filter(isRecord) : [],
+      executionUnits: Array.isArray(structured.executionUnits) ? structured.executionUnits.filter(isRecord) : [],
+    }),
   };
+}
+
+function normalizeNotebookRecords(
+  value: unknown,
+  fallback: {
+    agentId: AgentId;
+    prompt: string;
+    messageText: string;
+    claimType: ClaimType;
+    confidence: number;
+    now: string;
+    claims: Array<{ id: string; dependencyRefs?: string[]; updateReason?: string }>;
+    artifacts: Record<string, unknown>[];
+    executionUnits: Record<string, unknown>[];
+  },
+) {
+  const defaultRecord = {
+    id: makeId('note'),
+    time: new Date(fallback.now).toLocaleString('zh-CN', { hour12: false }),
+    agent: fallback.agentId,
+    title: fallback.prompt.slice(0, 32) || 'Agent 对话',
+    desc: fallback.messageText.slice(0, 96),
+    claimType: fallback.claimType,
+    confidence: fallback.confidence,
+    artifactRefs: fallback.artifacts.map((artifact) => asString(artifact.id) || asString(artifact.type)).filter((item): item is string => Boolean(item)),
+    executionUnitRefs: fallback.executionUnits.map((unit) => asString(unit.id) || asString(unit.tool)).filter((item): item is string => Boolean(item)),
+    beliefRefs: fallback.claims.map((claim) => claim.id).filter(Boolean),
+    dependencyRefs: uniqueStrings(fallback.claims.flatMap((claim) => claim.dependencyRefs ?? [])),
+    updateReason: fallback.claims.map((claim) => claim.updateReason).find(Boolean),
+  };
+  if (!Array.isArray(value)) return [defaultRecord];
+  const records = value.filter(isRecord).map((record) => ({
+    id: asString(record.id) || makeId('note'),
+    time: asString(record.time) || new Date(fallback.now).toLocaleString('zh-CN', { hour12: false }),
+    agent: isAgentId(record.agent) ? record.agent : fallback.agentId,
+    title: asString(record.title) || fallback.prompt.slice(0, 32) || 'Agent 对话',
+    desc: asString(record.desc) || asString(record.description) || fallback.messageText.slice(0, 96),
+    claimType: pickClaimType(record.claimType),
+    confidence: asNumber(record.confidence) ?? fallback.confidence,
+    artifactRefs: asStringArray(record.artifactRefs),
+    executionUnitRefs: asStringArray(record.executionUnitRefs),
+    beliefRefs: asStringArray(record.beliefRefs),
+    dependencyRefs: asStringArray(record.dependencyRefs),
+    updateReason: asString(record.updateReason),
+  }));
+  return records.length ? records : [defaultRecord];
+}
+
+function isAgentId(value: unknown): value is AgentId {
+  return value === 'literature' || value === 'structure' || value === 'omics' || value === 'knowledge';
+}
+
+function uniqueStrings(values: string[] | undefined) {
+  return [...new Set(values ?? [])];
+}
+
+function asTimelineVisibility(value: unknown) {
+  return value === 'private-draft'
+    || value === 'team-visible'
+    || value === 'project-record'
+    || value === 'restricted-sensitive'
+    ? value
+    : undefined;
+}
+
+function asExportPolicy(value: unknown) {
+  return value === 'allowed' || value === 'restricted' || value === 'blocked'
+    ? value
+    : undefined;
+}
+
+function isViewTransform(value: unknown) {
+  if (!isRecord(value)) return false;
+  return value.type === 'filter'
+    || value.type === 'sort'
+    || value.type === 'limit'
+    || value.type === 'group'
+    || value.type === 'derive';
 }
 
 export async function sendAgentMessage(input: SendAgentMessageInput, signal?: AbortSignal): Promise<NormalizedAgentResponse> {

@@ -39,12 +39,12 @@ export const messagesByAgent: Record<AgentId, Array<{
     {
       role: 'agent',
       content:
-        'DESeq2 record-only 执行单元已生成。示例结果显示 847 个差异基因，上调 492 个，下调 355 个；干扰素γ反应为最显著富集通路。当前结果是 mock 数据契约，用于验证 UIManifest 渲染。',
+        '示例会话展示了 omics runtime 的预期产物形态：差异基因摘要、火山图、热图和 UMAP 都应来自 workspace task artifact；没有真实 artifact 时动态结果区保持 empty state。',
       confidence: 0.88,
       evidence: 'prediction',
       claimType: 'inference',
       expandable:
-        'ExecutionUnit params: design=~condition, alpha=0.05, seed=1\nArtifacts: volcano-plot, enrichment-table, execution-unit.json',
+        'Expected ExecutionUnit params: design=~condition, alpha=0.05\nExpected artifacts: omics-differential-expression, execution-unit.json',
     },
   ],
   knowledge: [
@@ -76,6 +76,6 @@ export const executionUnits = [
 export const timeline = [
   { time: '2026-04-19 14:30', agent: 'literature' as AgentId, title: 'KRAS G12C 耐药文献综述', desc: '47 篇文献进入证据矩阵，识别 3 类耐药机制', claimType: 'inference' as ClaimType, confidence: 0.91 },
   { time: '2026-04-19 15:05', agent: 'structure' as AgentId, title: '7BZ5 结合口袋分析', desc: 'Switch-II 口袋体积和关键残基已归档', claimType: 'fact' as ClaimType, confidence: 0.94 },
-  { time: '2026-04-19 15:40', agent: 'omics' as AgentId, title: '差异表达 mock 契约', desc: '火山图、热图、UMAP 组件契约完成验证', claimType: 'inference' as ClaimType, confidence: 0.82 },
+  { time: '2026-04-19 15:40', agent: 'omics' as AgentId, title: '差异表达视图契约', desc: '火山图、热图、UMAP 等待 workspace task artifact 驱动', claimType: 'inference' as ClaimType, confidence: 0.82 },
   { time: '2026-04-19 16:10', agent: 'knowledge' as AgentId, title: 'KRAS 知识库卡片', desc: 'UniProt / ChEMBL / OpenTargets 视图进入 manifest', claimType: 'fact' as ClaimType, confidence: 0.96 },
 ];

@@ -69,7 +69,7 @@ describe('normalizeAgentResponse', () => {
     assert.equal(response.artifacts[0].id, 'papers-1');
   });
 
-  it('creates recordable fallback objects for plain text responses', () => {
+  it('normalizes plain text responses without inventing artifacts', () => {
     const response = normalizeAgentResponse('structure', 'Analyze PDB 7BZ5', {
       run: {
         id: 'plain-run-1',
@@ -133,6 +133,198 @@ describe('normalizeAgentResponse', () => {
       assert.deepEqual(response.executionUnits[0].databaseVersions, profile.executionDefaults.databaseVersions);
       assert.deepEqual(response.executionUnits[0].outputArtifacts, [artifact.type]);
     });
+  });
+
+  it('preserves repair and self-heal execution states', () => {
+    const response = normalizeAgentResponse('omics', 'bad omics run', {
+      run: {
+        id: 'run-repair-1',
+        status: 'completed',
+        output: {
+          text: [
+            'repair state',
+            '```json',
+            JSON.stringify({
+              message: 'Repair needed.',
+              executionUnits: [
+                {
+                  id: 'EU-repair',
+                  tool: 'bioagent.workspace-runtime-gateway',
+                  params: { reason: 'missing matrixRef' },
+                  status: 'repair-needed',
+                  hash: 'repair-hash',
+                  codeRef: '.bioagent/tasks/omics.py',
+                  stderrRef: '.bioagent/logs/omics.stderr.log',
+                  failureReason: 'matrixRef and metadataRef are required',
+                },
+                {
+                  id: 'EU-healed',
+                  tool: 'bioagent.workspace-runtime-gateway',
+                  params: {},
+                  status: 'self-healed',
+                  hash: 'healed-hash',
+                  attempt: 2,
+                  parentAttempt: 1,
+                  selfHealReason: 'schema validation failed',
+                  patchSummary: 'Added missing artifacts field.',
+                  diffRef: '.bioagent/diffs/attempt-2.patch',
+                },
+                {
+                  id: 'EU-failed-reason',
+                  tool: 'bioagent.workspace-runtime-gateway',
+                  params: {},
+                  status: 'failed-with-reason',
+                  hash: 'failed-reason-hash',
+                  failureReason: 'AgentServer unavailable',
+                },
+              ],
+              artifacts: [],
+              uiManifest: [],
+              claims: [],
+            }),
+            '```',
+          ].join('\n'),
+        },
+      },
+    });
+
+    assert.equal(response.executionUnits[0].status, 'repair-needed');
+    assert.equal(response.executionUnits[0].failureReason, 'matrixRef and metadataRef are required');
+    assert.equal(response.executionUnits[1].status, 'self-healed');
+    assert.equal(response.executionUnits[1].parentAttempt, 1);
+    assert.equal(response.executionUnits[1].patchSummary, 'Added missing artifacts field.');
+    assert.equal(response.executionUnits[2].status, 'failed-with-reason');
+  });
+
+  it('preserves view composition fields in UIManifest slots', () => {
+    const response = normalizeAgentResponse('omics', 'color UMAP by cell cycle', {
+      run: {
+        id: 'run-view-composition',
+        status: 'completed',
+        output: {
+          text: [
+            'view composition',
+            '```json',
+            JSON.stringify({
+              message: 'UMAP view updated.',
+              uiManifest: [{
+                componentId: 'umap-viewer',
+                artifactRef: 'omics-differential-expression',
+                encoding: { colorBy: 'cellCycle', splitBy: 'batch', syncViewport: true },
+                layout: { mode: 'side-by-side', columns: 2 },
+                compare: { artifactRefs: ['batch-a', 'batch-b'], mode: 'side-by-side' },
+              }],
+              executionUnits: [],
+              artifacts: [],
+              claims: [],
+            }),
+            '```',
+          ].join('\n'),
+        },
+      },
+    });
+
+    assert.equal(response.uiManifest[0].encoding?.colorBy, 'cellCycle');
+    assert.equal(response.uiManifest[0].encoding?.splitBy, 'batch');
+    assert.equal(response.uiManifest[0].layout?.mode, 'side-by-side');
+    assert.equal(response.uiManifest[0].compare?.mode, 'side-by-side');
+  });
+
+  it('does not convert unknown execution status into record-only success and preserves export policy fields', () => {
+    const response = normalizeAgentResponse('omics', 'restricted export artifact', {
+      run: {
+        id: 'run-export-policy',
+        status: 'completed',
+        output: {
+          text: [
+            'export policy',
+            '```json',
+            JSON.stringify({
+              message: 'Artifact has collaboration policy.',
+              executionUnits: [{
+                id: 'EU-unknown-status',
+                tool: 'omics.runner',
+                params: {},
+                status: 'unexpected-successish-status',
+                hash: 'hash-unknown-status',
+              }],
+              artifacts: [{
+                id: 'artifact-restricted',
+                type: 'omics-differential-expression',
+                schemaVersion: '1',
+                visibility: 'restricted-sensitive',
+                audience: ['team-a'],
+                sensitiveDataFlags: ['human-subject'],
+                exportPolicy: 'restricted',
+              }],
+              uiManifest: [],
+              claims: [],
+            }),
+            '```',
+          ].join('\n'),
+        },
+      },
+    });
+
+    assert.equal(response.executionUnits[0].status, 'failed-with-reason');
+    assert.equal(response.artifacts[0].visibility, 'restricted-sensitive');
+    assert.deepEqual(response.artifacts[0].audience, ['team-a']);
+    assert.deepEqual(response.artifacts[0].sensitiveDataFlags, ['human-subject']);
+    assert.equal(response.artifacts[0].exportPolicy, 'restricted');
+  });
+
+  it('preserves notebook timeline belief and dependency refs', () => {
+    const response = normalizeAgentResponse('literature', 'belief notebook refs', {
+      run: {
+        id: 'run-notebook-belief',
+        status: 'completed',
+        output: {
+          text: [
+            'notebook refs',
+            '```json',
+            JSON.stringify({
+              message: 'Belief refs attached.',
+              claims: [{
+                id: 'claim-belief-1',
+                text: 'Claim with dependencies.',
+                dependencyRefs: ['paper-1', 'assumption-1'],
+                updateReason: 'new opposing evidence reviewed',
+              }],
+              notebook: [{
+                id: 'note-belief-1',
+                title: 'Belief update',
+                desc: 'Notebook entry with refs.',
+                beliefRefs: ['belief-graph-1', 'decision-1'],
+                dependencyRefs: ['paper-1'],
+                artifactRefs: ['artifact-paper-list'],
+                executionUnitRefs: ['EU-literature'],
+                updateReason: 'manual review',
+              }],
+              executionUnits: [{
+                id: 'EU-literature',
+                tool: 'literature.search',
+                params: {},
+                status: 'done',
+                hash: 'hash-literature',
+              }],
+              artifacts: [{
+                id: 'artifact-paper-list',
+                type: 'paper-list',
+                schemaVersion: '1',
+              }],
+            }),
+            '```',
+          ].join('\n'),
+        },
+      },
+    });
+
+    assert.equal(response.notebook[0].id, 'note-belief-1');
+    assert.deepEqual(response.notebook[0].beliefRefs, ['belief-graph-1', 'decision-1']);
+    assert.deepEqual(response.notebook[0].dependencyRefs, ['paper-1']);
+    assert.deepEqual(response.notebook[0].artifactRefs, ['artifact-paper-list']);
+    assert.deepEqual(response.notebook[0].executionUnitRefs, ['EU-literature']);
+    assert.equal(response.notebook[0].updateReason, 'manual review');
   });
 });
 

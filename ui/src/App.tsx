@@ -63,7 +63,7 @@ import { BIOAGENT_PROFILES, componentManifest } from './agentProfiles';
 import { timeline } from './demoData';
 import { sendAgentMessageStream } from './api/agentClient';
 import { sendBioAgentToolMessage } from './api/bioagentToolsClient';
-import { runLocalBioAgentAdapter } from './api/localAdapters';
+import { buildExecutionBundle, evaluateExecutionBundleExport } from './exportPolicy';
 import {
   makeId,
   nowIso,
@@ -327,6 +327,47 @@ function slotPayload(slot: UIManifestSlot, artifact?: RuntimeArtifact): Record<s
   return slot.props ?? {};
 }
 
+function viewCompositionSummary(slot: UIManifestSlot) {
+  const encoding = slot.encoding ?? {};
+  const parts = [
+    encoding.colorBy ? `colorBy=${encoding.colorBy}` : undefined,
+    encoding.splitBy ? `splitBy=${encoding.splitBy}` : undefined,
+    encoding.overlayBy ? `overlayBy=${encoding.overlayBy}` : undefined,
+    encoding.facetBy ? `facetBy=${encoding.facetBy}` : undefined,
+    encoding.syncViewport ? 'syncViewport=true' : undefined,
+    slot.layout?.mode ? `layout=${slot.layout.mode}` : undefined,
+    slot.compare?.mode ? `compare=${slot.compare.mode}` : undefined,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function applyViewTransforms(rows: Record<string, unknown>[], slot: UIManifestSlot) {
+  return (slot.transform ?? []).reduce((current, transform) => {
+    if (transform.type === 'filter' && transform.field) {
+      return current.filter((row) => compareValue(row[transform.field ?? ''], transform.op ?? '==', transform.value));
+    }
+    if (transform.type === 'sort' && transform.field) {
+      return [...current].sort((left, right) => String(left[transform.field ?? ''] ?? '').localeCompare(String(right[transform.field ?? ''] ?? '')));
+    }
+    if (transform.type === 'limit') {
+      const limit = typeof transform.value === 'number' ? transform.value : Number(transform.value);
+      return Number.isFinite(limit) && limit >= 0 ? current.slice(0, limit) : current;
+    }
+    return current;
+  }, rows);
+}
+
+function compareValue(left: unknown, op: string, right: unknown) {
+  const leftNumber = typeof left === 'number' ? left : typeof left === 'string' ? Number(left) : Number.NaN;
+  const rightNumber = typeof right === 'number' ? right : typeof right === 'string' ? Number(right) : Number.NaN;
+  if (op === '<=' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber <= rightNumber;
+  if (op === '>=' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber >= rightNumber;
+  if (op === '<' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber < rightNumber;
+  if (op === '>' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber > rightNumber;
+  if (op === '!=' || op === '!==') return String(left ?? '') !== String(right ?? '');
+  return String(left ?? '') === String(right ?? '');
+}
+
 function arrayPayload(slot: UIManifestSlot, key: string, artifact?: RuntimeArtifact): Record<string, unknown>[] {
   const payload = artifact?.data ?? slot.props?.[key] ?? slot.props;
   if (Array.isArray(payload)) return payload.filter(isRecord);
@@ -358,29 +399,12 @@ function compactParams(params: string) {
 }
 
 function exportExecutionBundle(session: BioAgentSession) {
-  exportJsonFile(`execution-units-${session.agentId}-${session.sessionId}.json`, {
-    schemaVersion: 1,
-    sessionId: session.sessionId,
-    agentId: session.agentId,
-    exportedAt: nowIso(),
-    executionUnits: session.executionUnits,
-    artifacts: session.artifacts.map((artifact) => ({
-      id: artifact.id,
-      type: artifact.type,
-      producerAgent: artifact.producerAgent,
-      schemaVersion: artifact.schemaVersion,
-      metadata: artifact.metadata,
-      dataRef: artifact.dataRef,
-    })),
-    runs: session.runs.map((run) => ({
-      id: run.id,
-      agentId: run.agentId,
-      status: run.status,
-      prompt: run.prompt,
-      createdAt: run.createdAt,
-      completedAt: run.completedAt,
-    })),
-  });
+  const decision = evaluateExecutionBundleExport(session);
+  if (!decision.allowed) {
+    window.alert(`导出被 artifact policy 阻止：${decision.blockedArtifactIds.join(', ')}`);
+    return;
+  }
+  exportJsonFile(`execution-units-${session.agentId}-${session.sessionId}.json`, buildExecutionBundle(session, decision));
 }
 
 function Sidebar({
@@ -800,7 +824,7 @@ function Dashboard({ setPage, setAgentId }: { setPage: (page: PageId) => void; s
         </Card>
 
         <Card>
-          <SectionHeader icon={Target} title="最近活跃度" subtitle="mock runtime events" />
+          <SectionHeader icon={Target} title="最近活跃度" subtitle="workspace runtime events" />
           <div className="chart-220">
             <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <AreaChart data={activityData}>
@@ -898,7 +922,6 @@ function ChatPanel({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
   const [errorText, setErrorText] = useState('');
-  const [fallbackPrompt, setFallbackPrompt] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
@@ -922,7 +945,6 @@ function ChatPanel({
     setStreamEvents([]);
     setGuidanceQueue([]);
     setErrorText('');
-    setFallbackPrompt('');
   }, [agentId, session.sessionId]);
 
   useEffect(() => {
@@ -978,7 +1000,6 @@ function ChatPanel({
     onSessionChange(optimisticSession);
     onInputChange('');
     setErrorText('');
-    setFallbackPrompt('');
     setStreamEvents([{
       id: makeId('evt'),
       type: 'queued',
@@ -1029,7 +1050,6 @@ function ChatPanel({
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setErrorText(message);
-      setFallbackPrompt(prompt);
       onSessionChange({
         ...optimisticSession,
         messages: [
@@ -1112,14 +1132,6 @@ function ChatPanel({
       notebook: [...response.notebook, ...baseSession.notebook].slice(0, 24),
       updatedAt: nowIso(),
     };
-  }
-
-  function handleLocalFallback() {
-    const prompt = fallbackPrompt.trim();
-    if (!prompt || isSending) return;
-    setErrorText('');
-    setFallbackPrompt('');
-    onSessionChange(mergeAgentResponse(session, runLocalBioAgentAdapter(agentId, prompt)));
   }
 
   function handleClear() {
@@ -1250,7 +1262,6 @@ function ChatPanel({
       {errorText ? (
         <div className="composer-error">
           <span>{errorText}</span>
-          {fallbackPrompt ? <button onClick={handleLocalFallback}>生成 record-only 草案</button> : null}
         </div>
       ) : null}
       <div className="composer">
@@ -1275,9 +1286,10 @@ type VolcanoPoint = {
   logFC: number;
   negLogP: number;
   sig: boolean;
+  category?: string;
 };
 
-function volcanoPointsFromPayload(payload: Record<string, unknown>): VolcanoPoint[] | undefined {
+function volcanoPointsFromPayload(payload: Record<string, unknown>, colorField?: string): VolcanoPoint[] | undefined {
   const records = toRecordList(payload.points);
   const points = records.flatMap((record, index) => {
     const logFC = asNumber(record.logFC) ?? asNumber(record.log2FC);
@@ -1288,6 +1300,7 @@ function volcanoPointsFromPayload(payload: Record<string, unknown>): VolcanoPoin
       logFC,
       negLogP,
       sig: typeof record.significant === 'boolean' ? record.significant : Math.abs(logFC) > 1.4 && negLogP > 3,
+      category: colorField ? asString(record[colorField]) : undefined,
     }];
   });
   return points.length ? points : undefined;
@@ -1296,6 +1309,8 @@ function volcanoPointsFromPayload(payload: Record<string, unknown>): VolcanoPoin
 function VolcanoChart({ points }: { points?: VolcanoPoint[] }) {
   const data = useMemo(() => points ?? [], [points]);
   if (!data.length) return <EmptyArtifactState title="没有 volcano points" detail="火山图需要 artifact.data.points，不会绘制 demo 基因点。" />;
+  const categories = Array.from(new Set(data.map((point) => point.category).filter(Boolean)));
+  const palette = ['#00E5A0', '#FF7043', '#4ECDC4', '#FFD54F', '#3D7AED'];
   return (
     <div className="chart-300">
         <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
@@ -1306,7 +1321,7 @@ function VolcanoChart({ points }: { points?: VolcanoPoint[] }) {
           <Tooltip contentStyle={{ background: '#1A2332', border: '1px solid #243044', borderRadius: 8 }} />
           <Scatter data={data}>
             {data.map((entry) => (
-              <Cell key={entry.gene} fill={entry.sig ? (entry.logFC > 0 ? '#FF7043' : '#4ECDC4') : 'rgba(123,147,176,0.35)'} />
+              <Cell key={entry.gene} fill={entry.category ? palette[Math.max(0, categories.indexOf(entry.category)) % palette.length] : entry.sig ? (entry.logFC > 0 ? '#FF7043' : '#4ECDC4') : 'rgba(123,147,176,0.35)'} />
             ))}
           </Scatter>
         </ScatterChart>
@@ -1376,7 +1391,7 @@ function defaultSlotsForAgent(agentId: AgentId): UIManifestSlot[] {
 }
 
 function PaperCardList({ slot, artifact, session }: RegistryRendererProps) {
-  const records = arrayPayload(slot, 'papers', artifact);
+  const records = applyViewTransforms(arrayPayload(slot, 'papers', artifact), slot);
   const papers = records.map((record, index) => ({
     title: asString(record.title) || asString(record.name) || `Paper ${index + 1}`,
     source: asString(record.source) || asString(record.journal) || asString(record.venue) || 'unknown source',
@@ -1390,6 +1405,7 @@ function PaperCardList({ slot, artifact, session }: RegistryRendererProps) {
   return (
     <div className="stack">
       <ArtifactSourceBar artifact={artifact} session={session} />
+      {viewCompositionSummary(slot) ? <div className="composition-strip"><code>{viewCompositionSummary(slot)}</code></div> : null}
       <div className="paper-list">
         {papers.map((paper) => (
           <Card key={`${paper.title}-${paper.source}`} className="paper-card">
@@ -1443,6 +1459,7 @@ function MoleculeSlot({ slot, artifact, session }: RegistryRendererProps) {
         <code>ligand={ligand}</code>
         {dataRef ? <code title={dataRef}>dataRef={compactParams(dataRef)}</code> : <code>record-only structure</code>}
         {residues.length ? <code>residues={residues.join(',')}</code> : null}
+        {slot.encoding?.highlightSelection ? <code>highlightSelection={Array.isArray(slot.encoding.highlightSelection) ? slot.encoding.highlightSelection.join(',') : slot.encoding.highlightSelection}</code> : null}
       </div>
       {dataRef ? (
         <Card className="viz-card">
@@ -1468,23 +1485,30 @@ function MoleculeSlot({ slot, artifact, session }: RegistryRendererProps) {
 
 function CanvasSlot({ slot, artifact, session, kind }: RegistryRendererProps & { kind: 'volcano' | 'heatmap' | 'umap' | 'network' }) {
   const payload = slotPayload(slot, artifact);
+  const colorField = slot.encoding?.colorBy;
+  const splitField = slot.encoding?.splitBy || slot.encoding?.facetBy;
   const networkNodes = toRecordList(payload.nodes).map((node) => ({
     id: asString(node.id),
     label: asString(node.label) || asString(node.name),
-    type: asString(node.type),
+    type: colorField ? asString(node[colorField]) || asString(node.type) : asString(node.type),
   }));
   const networkEdges = toRecordList(payload.edges).map((edge) => ({
     source: asString(edge.source) || asString(edge.from),
     target: asString(edge.target) || asString(edge.to),
   }));
-  const volcanoPoints = volcanoPointsFromPayload(payload);
+  const volcanoPoints = volcanoPointsFromPayload(payload, colorField);
   const heatmap = isRecord(payload.heatmap)
     ? asNumberMatrix(payload.heatmap.matrix ?? payload.heatmap.values)
     : asNumberMatrix(payload.matrix ?? payload.values);
   const umapPoints = toRecordList(payload.umap ?? payload.points).flatMap((point) => {
     const x = asNumber(point.x) ?? asNumber(point.umap1);
     const y = asNumber(point.y) ?? asNumber(point.umap2);
-    return x === undefined || y === undefined ? [] : [{ x, y, cluster: asString(point.cluster) || asString(point.group), label: asString(point.label) }];
+    return x === undefined || y === undefined ? [] : [{
+      x,
+      y,
+      cluster: colorField ? asString(point[colorField]) || asString(point.cluster) || asString(point.group) : asString(point.cluster) || asString(point.group),
+      label: asString(point.label),
+    }];
   });
   if (!artifact) {
     return <EmptyArtifactState title="等待真实 runtime artifact" detail={`${kind} 组件不再使用 demo seed；请先运行对应 Agent 生成 artifact。`} />;
@@ -1509,12 +1533,14 @@ function CanvasSlot({ slot, artifact, session, kind }: RegistryRendererProps & {
         {volcanoPoints?.length ? <code>{volcanoPoints.length} volcano points</code> : null}
         {umapPoints.length ? <code>{umapPoints.length} UMAP points</code> : null}
         {heatmap ? <code>{heatmap.length}x{heatmap[0]?.length ?? 0} heatmap</code> : null}
+        {colorField ? <code>colorBy={colorField}</code> : null}
+        {splitField ? <code>splitBy={splitField}</code> : null}
       </div>
       <Card className="viz-card">
         {kind === 'volcano' ? (
           <VolcanoChart points={volcanoPoints} />
         ) : kind === 'heatmap' ? (
-          <HeatmapViewer matrix={heatmap} label={asString(payload.label) || asString(isRecord(payload.heatmap) ? payload.heatmap.label : undefined)} />
+          <HeatmapViewer matrix={heatmap} label={[asString(payload.label) || asString(isRecord(payload.heatmap) ? payload.heatmap.label : undefined), splitField ? `splitBy=${splitField}` : undefined].filter(Boolean).join(' · ') || undefined} />
         ) : kind === 'umap' ? (
           <UmapViewer points={umapPoints.length ? umapPoints : undefined} />
         ) : (
@@ -1526,7 +1552,7 @@ function CanvasSlot({ slot, artifact, session, kind }: RegistryRendererProps & {
 }
 
 function DataTableSlot({ slot, artifact, session }: RegistryRendererProps) {
-  const records = arrayPayload(slot, 'rows', artifact);
+  const records = applyViewTransforms(arrayPayload(slot, 'rows', artifact), slot);
   const rows = records;
   if (!artifact || !rows.length) {
     return <EmptyArtifactState title="等待真实 knowledge rows" detail="知识表格只展示 knowledge-graph artifact 中的 rows，不再填充 demo 药物或通路。" />;
@@ -1535,6 +1561,7 @@ function DataTableSlot({ slot, artifact, session }: RegistryRendererProps) {
   return (
     <div className="stack">
       <ArtifactSourceBar artifact={artifact} session={session} />
+      {viewCompositionSummary(slot) ? <div className="composition-strip"><code>{viewCompositionSummary(slot)}</code></div> : null}
       <div className="artifact-table">
         <div className="artifact-table-head" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}>
           {columns.map((column) => <span key={column}>{column}</span>)}
@@ -1545,6 +1572,55 @@ function DataTableSlot({ slot, artifact, session }: RegistryRendererProps) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function UnknownArtifactInspector({ slot, artifact, session }: RegistryRendererProps) {
+  const payload = artifact?.data ?? slot.props ?? {};
+  const rows = Array.isArray(payload)
+    ? payload.filter(isRecord)
+    : isRecord(payload) && Array.isArray(payload.rows)
+      ? payload.rows.filter(isRecord)
+      : [];
+  const unit = session ? executionUnitForArtifact(session, artifact) : undefined;
+  const refs = [
+    artifact?.dataRef ? { label: 'dataRef', value: artifact.dataRef } : undefined,
+    unit?.codeRef ? { label: 'codeRef', value: unit.codeRef } : undefined,
+    unit?.stdoutRef ? { label: 'stdoutRef', value: unit.stdoutRef } : undefined,
+    unit?.stderrRef ? { label: 'stderrRef', value: unit.stderrRef } : undefined,
+    unit?.outputRef ? { label: 'outputRef', value: unit.outputRef } : undefined,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
+  const columns = rows.length ? Array.from(new Set(rows.flatMap((row) => Object.keys(row)))).slice(0, 6) : [];
+  return (
+    <div className="stack">
+      <ArtifactSourceBar artifact={artifact} session={session} />
+      <div className="slot-meta">
+        <Badge variant="warning">inspector</Badge>
+        {artifact ? <code>{artifact.type}</code> : null}
+        {viewCompositionSummary(slot) ? <code>{viewCompositionSummary(slot)}</code> : null}
+      </div>
+      {refs.length ? (
+        <div className="inspector-ref-list">
+          {refs.map((ref) => (
+            <code key={`${ref.label}-${ref.value}`}>{ref.label}: {ref.value}</code>
+          ))}
+        </div>
+      ) : null}
+      {rows.length ? (
+        <div className="artifact-table">
+          <div className="artifact-table-head" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}>
+            {columns.map((column) => <span key={column}>{column}</span>)}
+          </div>
+          {rows.slice(0, 20).map((row, index) => (
+            <div className="artifact-table-row" key={index} style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}>
+              {columns.map((column) => <span key={column}>{String(row[column] ?? '-')}</span>)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <pre className="inspector-json">{JSON.stringify(payload, null, 2)}</pre>
+      )}
     </div>
   );
 }
@@ -1593,6 +1669,7 @@ const componentRegistry: Record<string, RegistryEntry> = {
   'execution-unit-table': { label: 'ExecutionUnitTable', render: ({ session }) => <ExecutionPanel session={session} executionUnits={session.executionUnits} embedded /> },
   'notebook-timeline': { label: 'NotebookTimeline', render: ({ agentId, session }) => <NotebookTimeline agentId={agentId} notebook={session.notebook} /> },
   'data-table': { label: 'DataTable', render: (props) => <DataTableSlot {...props} /> },
+  'unknown-artifact-inspector': { label: 'UnknownArtifactInspector', render: (props) => <UnknownArtifactInspector {...props} /> },
 };
 
 function PrimaryResult({
@@ -1650,14 +1727,16 @@ function RegistrySlot({
     return (
       <Card className="registry-slot">
         <SectionHeader icon={AlertTriangle} title={slot.title ?? '未注册组件'} subtitle={slot.componentId} />
-        <p className="empty-state">Agent 返回了未知 componentId。已保留原始 manifest，等待注册对应渲染器。</p>
+        <p className="empty-state">Agent 返回了未知 componentId。当前使用通用 inspector 展示 artifact、manifest 和日志引用。</p>
         {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到：{slot.artifactRef}</p> : null}
+        <UnknownArtifactInspector agentId={agentId} session={session} slot={slot} artifact={artifact} />
       </Card>
     );
   }
   return (
     <Card className="registry-slot">
       <SectionHeader icon={Target} title={slot.title ?? entry.label} subtitle={`${slot.componentId}${slot.artifactRef ? ` -> ${slot.artifactRef}` : ''}`} />
+      {viewCompositionSummary(slot) ? <div className="composition-strip"><code>{viewCompositionSummary(slot)}</code></div> : null}
       {slot.artifactRef && !artifact ? <p className="empty-state">artifactRef 未找到，组件保持 empty state，不使用 demo 数据。</p> : null}
       {entry.render({ agentId, session, slot, artifact })}
       {artifact && handoffTargets.length ? (
@@ -1723,6 +1802,8 @@ function EvidenceMatrix({ claims }: { claims: EvidenceClaim[] }) {
     type: claim.type,
     supportingRefs: claim.supportingRefs,
     opposingRefs: claim.opposingRefs,
+    dependencyRefs: claim.dependencyRefs ?? [],
+    updateReason: claim.updateReason,
   }));
   return (
     <div className="stack">
@@ -1732,17 +1813,19 @@ function EvidenceMatrix({ claims }: { claims: EvidenceClaim[] }) {
         <Card className="evidence-row" key={row.id}>
           <div className="evidence-main">
             <h3>{row.claim}</h3>
-            <p>{row.support} · {row.oppose}</p>
-            {row.supportingRefs.length || row.opposingRefs.length ? (
+            <p>{row.support} · {row.oppose}{row.dependencyRefs.length ? ` · ${row.dependencyRefs.length} 条依赖` : ''}</p>
+            {row.updateReason ? <p className="empty-state">updateReason: {row.updateReason}</p> : null}
+            {row.supportingRefs.length || row.opposingRefs.length || row.dependencyRefs.length ? (
               <>
                 <button className="expand-link source-toggle" onClick={() => setExpandedClaim(expandedClaim === row.id ? null : row.id)}>
                   {expandedClaim === row.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  {expandedClaim === row.id ? '收起来源' : '查看来源'}
+                  {expandedClaim === row.id ? '收起来源' : '查看来源/依赖'}
                 </button>
                 {expandedClaim === row.id ? (
                   <div className="source-list">
                     {row.supportingRefs.map((ref) => <code key={`support-${ref}`}>+ {ref}</code>)}
                     {row.opposingRefs.map((ref) => <code key={`oppose-${ref}`}>- {ref}</code>)}
+                    {row.dependencyRefs.map((ref) => <code key={`dependency-${ref}`}>depends-on {ref}</code>)}
                   </div>
                 ) : null}
               </>
@@ -1784,16 +1867,21 @@ function ExecutionPanel({
             <span>Status</span>
             <span>Hash</span>
           </div>
-          {rows.map((unit) => (
-            <div className="eu-row" key={unit.id}>
+          {rows.map((unit, index) => (
+            <div className="eu-row" key={`${unit.id}-${unit.hash || index}-${index}`}>
               <code>{unit.id}</code>
               <span>{unit.tool}</span>
               <code title={unit.params}>{compactParams(unit.params)}</code>
               <code title={[unit.codeRef, unit.stdoutRef, unit.stderrRef].filter(Boolean).join('\n') || unit.code || ''}>
                 {unit.codeRef || unit.language || unit.code || 'n/a'}
               </code>
-              <Badge variant={unit.status === 'done' ? 'success' : unit.status === 'planned' || unit.status === 'record-only' ? 'muted' : unit.status === 'failed' ? 'danger' : 'warning'}>{unit.status}</Badge>
+              <Badge variant={executionStatusVariant(unit.status)}>{unit.status}</Badge>
               <code>{unit.hash}</code>
+              {executionStatusDetail(unit) ? (
+                <div className="eu-detail">
+                  {executionStatusDetail(unit)}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1804,6 +1892,29 @@ function ExecutionPanel({
       </Card>
     </div>
   );
+}
+
+function executionStatusVariant(status: RuntimeExecutionUnit['status']): 'info' | 'success' | 'warning' | 'danger' | 'muted' | 'coral' {
+  if (status === 'done' || status === 'self-healed') return 'success';
+  if (status === 'failed' || status === 'failed-with-reason') return 'danger';
+  if (status === 'repair-needed') return 'warning';
+  if (status === 'planned' || status === 'record-only') return 'muted';
+  return 'info';
+}
+
+function executionStatusDetail(unit: RuntimeExecutionUnit) {
+  const lines = [
+    unit.attempt ? `attempt=${unit.attempt}` : undefined,
+    unit.parentAttempt ? `parentAttempt=${unit.parentAttempt}` : undefined,
+    unit.selfHealReason ? `selfHealReason=${unit.selfHealReason}` : undefined,
+    unit.failureReason ? `failureReason=${unit.failureReason}` : undefined,
+    unit.patchSummary ? `patchSummary=${unit.patchSummary}` : undefined,
+    unit.diffRef ? `diffRef=${unit.diffRef}` : undefined,
+    unit.stdoutRef ? `stdout=${unit.stdoutRef}` : undefined,
+    unit.stderrRef ? `stderr=${unit.stderrRef}` : undefined,
+    unit.outputRef ? `output=${unit.outputRef}` : undefined,
+  ].filter(Boolean);
+  return lines.length ? lines.join(' · ') : '';
 }
 
 function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
@@ -1818,6 +1929,12 @@ function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
     `stdoutRef: ${unit.stdoutRef || 'n/a'}`,
     `stderrRef: ${unit.stderrRef || 'n/a'}`,
     `outputRef: ${unit.outputRef || 'n/a'}`,
+    `attempt: ${unit.attempt || 'n/a'}`,
+    `parentAttempt: ${unit.parentAttempt || 'n/a'}`,
+    `selfHealReason: ${unit.selfHealReason || 'n/a'}`,
+    `failureReason: ${unit.failureReason || 'n/a'}`,
+    `patchSummary: ${unit.patchSummary || 'n/a'}`,
+    `diffRef: ${unit.diffRef || 'n/a'}`,
     `databases: ${(unit.databaseVersions ?? []).join(', ') || 'n/a'}`,
   ].join('\n')).join('\n\n');
 }
@@ -1842,6 +1959,15 @@ function NotebookTimeline({ agentId, notebook = [] }: { agentId: AgentId; notebo
                 </div>
                 <h3>{item.title}</h3>
                 <p>{item.desc}</p>
+                {item.updateReason ? <p className="empty-state">updateReason: {item.updateReason}</p> : null}
+                {item.artifactRefs?.length || item.executionUnitRefs?.length || item.beliefRefs?.length || item.dependencyRefs?.length ? (
+                  <div className="source-list">
+                    {(item.artifactRefs ?? []).map((ref) => <code key={`artifact-${item.id}-${ref}`}>artifact {ref}</code>)}
+                    {(item.executionUnitRefs ?? []).map((ref) => <code key={`eu-${item.id}-${ref}`}>execution {ref}</code>)}
+                    {(item.beliefRefs ?? []).map((ref) => <code key={`belief-${item.id}-${ref}`}>belief {ref}</code>)}
+                    {(item.dependencyRefs ?? []).map((ref) => <code key={`dependency-${item.id}-${ref}`}>depends-on {ref}</code>)}
+                  </div>
+                ) : null}
               </div>
             </Card>
           );
@@ -1879,8 +2005,24 @@ function AgentContractPanel({ agentId }: { agentId: AgentId }) {
           ))}
         </div>
       </div>
+      <div>
+        <span>Scope</span>
+        <div className="field-chips">
+          {profile.scopeDeclaration.supportedTasks.slice(0, 3).map((task) => (
+            <code key={task} title={task}>{task}</code>
+          ))}
+        </div>
+      </div>
+      <div>
+        <span>Boundaries</span>
+        <div className="field-chips">
+          {profile.scopeDeclaration.unsupportedTasks.slice(0, 2).map((task) => (
+            <code key={task} title={task}>{task}</code>
+          ))}
+        </div>
+      </div>
       <Badge variant={profile.mode === 'agent-server' ? 'success' : 'muted'}>
-        {profile.mode === 'agent-server' ? 'agent-server' : 'demo-ready'}
+        {profile.mode === 'agent-server' ? 'agent-server' : 'runtime-required'}
       </Badge>
     </div>
   );
@@ -1978,12 +2120,18 @@ const defaultAlignmentContract: AlignmentContractData = {
   dataReality: '内部药敏样本约 200 例，包含 GDSC/CCLE 对齐后的表达矩阵、药物响应标签和基础质控记录。',
   aiAssessment: '特征维度显著高于样本量，主模型需要正则化、先验通路约束和外部数据预训练。',
   bioReality: '窄谱靶向药低响应率是生物学现实，需要按机制拆分模型，不能简单合并为一个泛化分类器。',
-  feasibilityMatrix: feasibilityRows.map((row) => `${row.dim}: AI=${row.ai}; Bio=${row.bio}; Action=${row.action}`).join('\n'),
+  feasibilityMatrix: feasibilityRows.map((row) => `${row.dim}: status=needs-data; source=AI-draft; AI=${row.ai}; Bio=${row.bio}; Action=${row.action}`).join('\n'),
   researchGoal: '聚焦 12 种药物的敏感性预测，排除 3 种极低响应率窄谱靶向药。',
   technicalRoute: 'GDSC/CCLE 预训练 + 内部数据微调，按机制拆分模型。',
   successCriteria: 'AUROC > 0.80，假阳性率 < 20%，至少 3 个命中完成实验验证。',
   knownRisks: '批次效应、药物机制差异和验证成本可能影响项目节奏。',
   recalibrationRecord: '模型在 2 种 HDAC 抑制剂上 AUROC 仅 0.58；共识为拆分模型并补充组蛋白修饰数据。',
+  dataAssetsChecklist: 'needs-data: 列出表达矩阵、药敏标签、质控报告和外部公共数据 sourceRefs。',
+  sampleSizeChecklist: 'needs-data: 按药物、癌种、批次统计样本量；低于阈值不得给出确定可行判断。',
+  labelQualityChecklist: 'needs-data: 标注标签来源、缺失率、不平衡比例和人工复核状态。',
+  batchEffectChecklist: 'needs-data: 记录 GDSC/CCLE/内部数据批次变量、校正策略和残余风险。',
+  experimentalConstraints: 'needs-data: 记录预算、周期、可用细胞系、验证读出和失败重试条件。',
+  feasibilitySourceNotes: 'unknown: 每个矩阵单元必须标注 user-input / artifact-statistic / literature-evidence / AI-draft。',
 };
 
 function AlignmentPage({
@@ -1991,24 +2139,24 @@ function AlignmentPage({
   onSaveContract,
 }: {
   contracts: AlignmentContractRecord[];
-  onSaveContract: (data: AlignmentContractData, reason: string) => void;
+  onSaveContract: (data: AlignmentContractData, reason: string, confirmationStatus?: AlignmentContractRecord['confirmationStatus']) => void;
 }) {
   const [step, setStep] = useState(0);
   const latest = contracts[0];
-  const [draft, setDraft] = useState<AlignmentContractData>(() => latest?.data ?? defaultAlignmentContract);
+  const [draft, setDraft] = useState<AlignmentContractData>(() => alignmentDraftData(latest));
   const [reason, setReason] = useState('alignment contract saved from workspace');
   const steps = ['数据摸底', '可行性评估', '方案共识', '持续校准'];
   useEffect(() => {
-    setDraft(latest?.data ?? defaultAlignmentContract);
+    setDraft(alignmentDraftData(latest));
   }, [latest?.id]);
   function updateField(field: keyof AlignmentContractData, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
-  function saveDraft(nextReason = reason) {
-    onSaveContract(draft, nextReason.trim() || 'alignment contract saved from workspace');
+  function saveDraft(nextReason = reason, confirmationStatus: AlignmentContractRecord['confirmationStatus'] = 'needs-data') {
+    onSaveContract(draft, nextReason.trim() || 'alignment contract saved from workspace', confirmationStatus);
   }
   function restore(contract: AlignmentContractRecord) {
-    setDraft(contract.data);
+    setDraft(alignmentDraftData(contract));
     onSaveContract(contract.data, `restore alignment contract ${contract.id}`);
   }
   return (
@@ -2022,6 +2170,8 @@ function AlignmentPage({
         {latest ? <code>{latest.id}</code> : <code>not saved</code>}
         {latest ? <code>checksum={latest.checksum}</code> : null}
         {latest ? <code>versions={contracts.length}</code> : null}
+        {latest ? <code>authority={latest.decisionAuthority || 'researcher'}</code> : null}
+        {latest ? <Badge variant={latest.confirmationStatus === 'user-confirmed' ? 'success' : latest.confirmationStatus === 'needs-data' ? 'warning' : 'muted'}>{latest.confirmationStatus || 'needs-data'}</Badge> : null}
       </div>
       <div className="stepper">
         {steps.map((name, index) => (
@@ -2036,12 +2186,16 @@ function AlignmentPage({
       ) : step === 1 ? (
         <Feasibility draft={draft} onChange={updateField} />
       ) : step === 2 ? (
-        <ProjectContract draft={draft} onChange={updateField} reason={reason} onReasonChange={setReason} onSave={() => saveDraft()} />
+        <ProjectContract draft={draft} onChange={updateField} reason={reason} onReasonChange={setReason} onSave={() => saveDraft()} onConfirm={() => saveDraft('researcher confirmed alignment contract', 'user-confirmed')} />
       ) : (
         <Recalibration draft={draft} onChange={updateField} contracts={contracts} onRestore={restore} onSave={() => saveDraft('alignment recalibration saved')} />
       )}
     </main>
   );
+}
+
+function alignmentDraftData(contract?: AlignmentContractRecord): AlignmentContractData {
+  return { ...defaultAlignmentContract, ...(contract?.data ?? {}) };
 }
 
 function AlignmentSurvey({
@@ -2059,6 +2213,8 @@ function AlignmentSurvey({
         <Progress label="特征维度" value={100} color="#00E5A0" detail="20K genes" />
         <Progress label="标签平衡度" value={35} color="#FF7043" detail="3 drugs < 5%" />
         <EditableBlock label="AI assessment" value={draft.aiAssessment} onChange={(value) => onChange('aiAssessment', value)} />
+        <EditableBlock label="Data assets checklist" value={draft.dataAssetsChecklist} onChange={(value) => onChange('dataAssetsChecklist', value)} rows={4} />
+        <EditableBlock label="Sample size checklist" value={draft.sampleSizeChecklist} onChange={(value) => onChange('sampleSizeChecklist', value)} rows={4} />
       </Card>
       <Card>
         <SectionHeader icon={Target} title="生物视角" subtitle="数据来源与实验现实" />
@@ -2067,6 +2223,8 @@ function AlignmentSurvey({
         <Progress label="批次一致性" value={60} color="#FFD54F" detail="GDSC vs CCLE" />
         <EditableBlock label="Data reality" value={draft.dataReality} onChange={(value) => onChange('dataReality', value)} />
         <EditableBlock label="Bio reality" value={draft.bioReality} onChange={(value) => onChange('bioReality', value)} />
+        <EditableBlock label="Label quality checklist" value={draft.labelQualityChecklist} onChange={(value) => onChange('labelQualityChecklist', value)} rows={4} />
+        <EditableBlock label="Batch effect checklist" value={draft.batchEffectChecklist} onChange={(value) => onChange('batchEffectChecklist', value)} rows={4} />
       </Card>
     </div>
   );
@@ -2102,17 +2260,22 @@ function Feasibility({
             <div className="feasibility-row" key={row.dim}>
               <div className="feasibility-top">
                 <strong>{row.dim}</strong>
-                <Badge variant={row.status === 'ok' ? 'success' : 'warning'}>{row.status === 'ok' ? '可行' : '需注意'}</Badge>
+                <Badge variant="warning">needs-data</Badge>
               </div>
               <div className="dual-view">
-                <span>AI: {row.ai}</span>
-                <span>Bio: {row.bio}</span>
+                <span>AI draft: {row.ai}</span>
+                <span>Bio input: {row.bio}</span>
+              </div>
+              <div className="slot-meta">
+                <code>source=AI-draft</code>
+                <code>state=unknown until sourceRefs are attached</code>
               </div>
               <p>{row.action}</p>
             </div>
           ))}
         </div>
         <EditableBlock label="Editable feasibility matrix" value={draft.feasibilityMatrix} onChange={(value) => onChange('feasibilityMatrix', value)} rows={8} />
+        <EditableBlock label="Feasibility source notes" value={draft.feasibilitySourceNotes} onChange={(value) => onChange('feasibilitySourceNotes', value)} rows={5} />
       </Card>
       <Card>
         <SectionHeader title="双视角能力雷达" subtitle="AI vs Bio assessment" />
@@ -2139,18 +2302,21 @@ function ProjectContract({
   reason,
   onReasonChange,
   onSave,
+  onConfirm,
 }: {
   draft: AlignmentContractData;
   onChange: (field: keyof AlignmentContractData, value: string) => void;
   reason: string;
   onReasonChange: (value: string) => void;
   onSave: () => void;
+  onConfirm: () => void;
 }) {
   const fields: Array<[keyof AlignmentContractData, string]> = [
     ['researchGoal', '研究目标'],
     ['technicalRoute', '技术路线'],
     ['successCriteria', '成功标准'],
     ['knownRisks', '已知风险'],
+    ['experimentalConstraints', '实验约束'],
   ];
   return (
     <Card>
@@ -2165,7 +2331,9 @@ function ProjectContract({
           <span>Version reason</span>
           <input value={reason} onChange={(event) => onReasonChange(event.target.value)} />
         </label>
+        <Badge variant="warning">AI draft · needs-data until researcher confirmation</Badge>
         <ActionButton icon={FilePlus} onClick={onSave}>保存 alignment-contract</ActionButton>
+        <ActionButton icon={Check} variant="secondary" onClick={onConfirm}>研究者确认保存</ActionButton>
       </div>
     </Card>
   );
@@ -2576,6 +2744,8 @@ export function BioAgentApp() {
           desc: `来自 ${sourceAgent?.name ?? artifact.producerAgent} 的 ${artifact.id} 已进入当前 Agent 上下文。`,
           claimType: 'fact' as const,
           confidence: 1,
+          artifactRefs: [artifact.id],
+          updateReason: 'artifact handoff',
         }, ...targetSession.notebook].slice(0, 24),
         updatedAt: now,
       }, `handoff artifact ${artifact.id}`);
@@ -2601,11 +2771,12 @@ export function BioAgentApp() {
     setHandoffAutoRun((current) => current?.id === requestId ? undefined : current);
   }
 
-  function saveAlignmentContract(data: AlignmentContractData, reason: string) {
+  function saveAlignmentContract(data: AlignmentContractData, reason: string, confirmationStatus: AlignmentContractRecord['confirmationStatus'] = 'needs-data') {
     const now = nowIso();
     const checksum = checksumText(JSON.stringify(data));
+    const id = makeId('alignment-contract');
     const contract: AlignmentContractRecord = {
-      id: makeId('alignment-contract'),
+      id,
       type: 'alignment-contract',
       schemaVersion: '1',
       title: `Alignment contract ${new Date(now).toLocaleString('zh-CN', { hour12: false })}`,
@@ -2613,6 +2784,13 @@ export function BioAgentApp() {
       updatedAt: now,
       reason,
       checksum,
+      sourceRefs: ['alignment-workspace:user-input', 'alignment-workspace:ai-draft'],
+      assumptionRefs: ['assumption:data-quality-review-required', 'assumption:researcher-final-authority'],
+      decisionAuthority: 'researcher',
+      confirmationStatus,
+      confirmedBy: confirmationStatus === 'user-confirmed' ? 'researcher' : undefined,
+      confirmedAt: confirmationStatus === 'user-confirmed' ? now : undefined,
+      sourceContractVersion: id,
       data,
     };
     updateWorkspace((current) => ({

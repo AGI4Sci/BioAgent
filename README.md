@@ -1,10 +1,12 @@
 # BioAgent
 
-This repository has been reset to keep only:
+This repository currently contains:
 
 - The integrated React web UI in `ui/`
+- The workspace runtime gateway, task runner, seed skill registry, and smoke scripts in `scripts/`
+- Python-first scientific task templates in `scripts/python_tasks/`
+- Seed skills in `skills/seed/`
 - Product/design documentation in `docs/`
-- Lightweight frontend project config
 
 The current UI merges the best parts of the two early prototypes:
 
@@ -109,32 +111,34 @@ Use the top-right Settings button to configure:
 
 Those values are kept in localStorage and mirrored to `<workspace>/.bioagent/config.json`. BioAgent passes model provider/name/base URL/API key to AgentServer per request through `runtime`, so AgentServer can switch model connection without hard-coded frontend constants.
 
-## Demo vs Real Mode
+## Runtime Boundary
 
-Demo seed data lives in `ui/src/demoData.ts` and is labeled in the UI as demo/fallback data. Runtime agent artifacts are labeled separately and take priority whenever an AgentServer response provides matching `artifactRef`, `dataRef`, or artifact `type`.
+Example seed data lives in `ui/src/demoData.ts` for first-screen sessions and the global timeline. Dynamic result panels prioritize runtime artifacts from the workspace gateway and show empty or failed states when no real artifact is available.
 
 Current real-mode boundary:
 
 - Literature, structure, omics, and knowledge profiles are marked `agent-server`.
-- BioAgent project tools run from `npm run workspace:server`; AgentServer remains a generic fallback brain and is not customized for BioAgent profiles.
-- Literature uses PubMed E-utilities; structure uses RCSB core entry and AlphaFold DB prediction APIs; knowledge uses UniProt REST from the BioAgent workspace service.
-- Omics reads workspace CSV matrix/metadata fixtures and returns `omics-differential-expression` artifacts. The bounded CSV runner writes audited output/log files under `<workspace>/.bioagent/omics/`.
+- BioAgent project tools run from `npm run workspace:server`; `scripts/bioagent-tools.ts` is a compatibility shim over `scripts/workspace-runtime-gateway.ts`.
+- The gateway loads seed/workspace/installed skills, runs workspace-local task code, writes task inputs/results/logs/attempts under `<workspace>/.bioagent/`, and bridges task generation plus repair to AgentServer when configured.
+- Literature uses PubMed E-utilities; structure uses RCSB core entry and AlphaFold DB APIs; knowledge uses UniProt and ChEMBL; unsupported disease/clinical-trial connectors return explicit `failed-with-reason` units.
+- Omics reads workspace CSV matrix/metadata and can use Scanpy, DESeq2, edgeR, or the bounded Python CSV runner while recording requested/effective runner metadata.
 - AgentServer can be running at `http://127.0.0.1:18080` for generic fallback responses.
-- `ui/src/api/localAdapters.ts` provides explicit `record-only` adapters for all 4 agents as visible fallback drafts when AgentServer fails.
+- The old local record-only adapter path has been removed. If workspace runtime and AgentServer are unavailable, the UI shows a clear error instead of generating chart-driving draft artifacts.
 
-## Build
+## Verify
 
 ```bash
-npm run test
-npm run smoke:fixtures
-npm run typecheck
-npm run build
+npm run verify
 ```
+
+`npm run verify` runs typecheck, unit tests, all smoke checks, and the production build. The smoke suite includes fixture normalization, skill registry availability, real seed runtime tasks, unsupported connector semantics, repair-needed behavior, AgentServer task generation, AgentServer repair/rerun, workspace-server HTTP repair, view composition, omics runner selection, and UI unit coverage for execution bundle export policy.
 
 ## Kept Source
 
 ```text
 docs/
+scripts/
+skills/
 ui/
 package.json
 tsconfig.json

@@ -2,7 +2,7 @@ import type { AgentId, ClaimType, EvidenceLevel } from './data';
 
 export type MessageRole = 'user' | 'agent' | 'system';
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed';
-export type ExecutionUnitStatus = 'planned' | 'running' | 'done' | 'failed' | 'record-only';
+export type ExecutionUnitStatus = 'planned' | 'running' | 'done' | 'failed' | 'record-only' | 'repair-needed' | 'self-healed' | 'failed-with-reason';
 
 export interface BioAgentMessage {
   id: string;
@@ -36,7 +36,104 @@ export interface EvidenceClaim {
   evidenceLevel: EvidenceLevel;
   supportingRefs: string[];
   opposingRefs: string[];
+  dependencyRefs?: string[];
+  updateReason?: string;
   updatedAt: string;
+}
+
+export type BeliefNodeKind = 'claim' | 'evidence' | 'artifact' | 'assumption' | 'decision';
+export type BeliefEdgeKind = 'supports' | 'opposes' | 'depends-on' | 'derived-from' | 'supersedes';
+
+export interface BeliefGraphNode {
+  id: string;
+  kind: BeliefNodeKind;
+  label: string;
+  confidence?: number;
+  refs?: string[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface BeliefGraphEdge {
+  id: string;
+  kind: BeliefEdgeKind;
+  source: string;
+  target: string;
+  weight?: number;
+  updateReason?: string;
+  createdAt: string;
+}
+
+export interface BeliefDependencyGraph {
+  id: string;
+  schemaVersion: '1';
+  nodes: BeliefGraphNode[];
+  edges: BeliefGraphEdge[];
+  currentDecisionRefs?: string[];
+  updatedAt: string;
+}
+
+export type ResearcherDecisionStatus = 'supported' | 'not-supported' | 'inconclusive' | 'needs-repeat';
+export type DecisionRevisionStatus = 'original' | 'supersede' | 'retract' | 'amend' | 'reaffirm';
+
+export interface ResearcherDecisionRecord {
+  id: string;
+  status: ResearcherDecisionStatus;
+  revisionStatus: DecisionRevisionStatus;
+  subjectRef: string;
+  evidenceRefs: string[];
+  supersedesRef?: string;
+  confirmedBy: string;
+  confirmedAt: string;
+  rationale: string;
+}
+
+export interface WetLabEvidenceSummary {
+  qualityChecks: Array<{ key: string; status: 'pass' | 'warn' | 'fail' | 'unknown'; detail: string }>;
+  supports: string[];
+  opposes: string[];
+  uncertain: string[];
+  limitations: string[];
+  recommendedNextActions: string[];
+  researcherDecisionRefs?: string[];
+}
+
+export type TimelineVisibility = 'private-draft' | 'team-visible' | 'project-record' | 'restricted-sensitive';
+export type TimelineVariantKind = 'parameter' | 'method' | 'hypothesis';
+export type TimelineDecisionStatus = ResearcherDecisionStatus | 'not-a-decision';
+
+export interface TimelineEventRecord {
+  id: string;
+  actor: string;
+  action: string;
+  subject: string;
+  artifactRefs: string[];
+  executionUnitRefs: string[];
+  beliefRefs: string[];
+  branchId?: string;
+  visibility: TimelineVisibility;
+  decisionStatus: TimelineDecisionStatus;
+  createdAt: string;
+}
+
+export interface ResearchBranchRecord {
+  id: string;
+  variantKind: TimelineVariantKind;
+  parentBranchId?: string;
+  sourceContractVersion?: string;
+  sourceBeliefId?: string;
+  mergeFrom?: string[];
+  archivedAt?: string;
+  restoreReason?: string;
+}
+
+export interface CollaborationPolicy {
+  roles: string[];
+  visibility: TimelineVisibility;
+  audience: string[];
+  sensitiveDataFlags: string[];
+  exportPolicy: 'allowed' | 'restricted' | 'blocked';
+  decisionAuthority: string[];
 }
 
 export interface UIManifestSlot {
@@ -45,6 +142,54 @@ export interface UIManifestSlot {
   props?: Record<string, unknown>;
   artifactRef?: string;
   priority?: number;
+  encoding?: ViewEncoding;
+  layout?: ViewLayout;
+  selection?: ViewSelection;
+  sync?: ViewSync;
+  transform?: ViewTransform[];
+  compare?: ViewCompare;
+}
+
+export interface ViewEncoding {
+  colorBy?: string;
+  splitBy?: string;
+  overlayBy?: string;
+  facetBy?: string;
+  compareWith?: string | string[];
+  highlightSelection?: string | string[];
+  syncViewport?: boolean;
+  x?: string;
+  y?: string;
+  label?: string;
+}
+
+export interface ViewLayout {
+  mode?: 'single' | 'side-by-side' | 'stacked' | 'grid' | 'faceted';
+  columns?: number;
+  height?: number;
+}
+
+export interface ViewSelection {
+  id?: string;
+  field?: string;
+  values?: string[];
+}
+
+export interface ViewSync {
+  selectionIds?: string[];
+  viewportIds?: string[];
+}
+
+export interface ViewTransform {
+  type: 'filter' | 'sort' | 'limit' | 'group' | 'derive';
+  field?: string;
+  op?: string;
+  value?: unknown;
+}
+
+export interface ViewCompare {
+  artifactRefs?: string[];
+  mode?: 'overlay' | 'side-by-side' | 'diff';
 }
 
 export interface RuntimeArtifact {
@@ -55,6 +200,10 @@ export interface RuntimeArtifact {
   metadata?: Record<string, unknown>;
   data?: unknown;
   dataRef?: string;
+  visibility?: TimelineVisibility;
+  audience?: string[];
+  sensitiveDataFlags?: string[];
+  exportPolicy?: CollaborationPolicy['exportPolicy'];
 }
 
 export interface RuntimeExecutionUnit {
@@ -73,6 +222,9 @@ export interface RuntimeExecutionUnit {
   attempt?: number;
   parentAttempt?: number;
   selfHealReason?: string;
+  patchSummary?: string;
+  diffRef?: string;
+  failureReason?: string;
   seed?: number;
   time?: string;
   environment?: string;
@@ -91,6 +243,11 @@ export interface NotebookRecord {
   desc: string;
   claimType: ClaimType;
   confidence: number;
+  artifactRefs?: string[];
+  executionUnitRefs?: string[];
+  beliefRefs?: string[];
+  dependencyRefs?: string[];
+  updateReason?: string;
 }
 
 export interface BioAgentRun {
@@ -127,6 +284,11 @@ export interface BioAgentWorkspaceState {
   sessionsByAgent: Record<AgentId, BioAgentSession>;
   archivedSessions: BioAgentSession[];
   alignmentContracts: AlignmentContractRecord[];
+  beliefGraphs?: BeliefDependencyGraph[];
+  timelineEvents?: TimelineEventRecord[];
+  branches?: ResearchBranchRecord[];
+  researcherDecisions?: ResearcherDecisionRecord[];
+  collaborationPolicy?: CollaborationPolicy;
   updatedAt: string;
 }
 
@@ -139,6 +301,13 @@ export interface AlignmentContractRecord {
   updatedAt: string;
   reason: string;
   checksum: string;
+  sourceRefs: string[];
+  assumptionRefs: string[];
+  decisionAuthority: string;
+  confirmationStatus: 'draft' | 'user-confirmed' | 'needs-data';
+  confirmedBy?: string;
+  confirmedAt?: string;
+  sourceContractVersion?: string;
   data: {
     dataReality: string;
     aiAssessment: string;
@@ -149,6 +318,12 @@ export interface AlignmentContractRecord {
     successCriteria: string;
     knownRisks: string;
     recalibrationRecord: string;
+    dataAssetsChecklist: string;
+    sampleSizeChecklist: string;
+    labelQualityChecklist: string;
+    batchEffectChecklist: string;
+    experimentalConstraints: string;
+    feasibilitySourceNotes: string;
   };
 }
 

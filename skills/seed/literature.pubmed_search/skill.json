@@ -1,0 +1,35 @@
+{
+  "id": "literature.pubmed_search",
+  "kind": "seed",
+  "description": "Search PubMed E-utilities and return paper-list artifacts with evidence claims.",
+  "profiles": ["literature"],
+  "inputContract": {
+    "prompt": "Free text PubMed query or artifact-derived entity."
+  },
+  "outputArtifactSchema": {
+    "type": "paper-list",
+    "required": ["papers", "query", "sourceRefs"]
+  },
+  "entrypoint": {
+    "type": "workspace-task",
+    "command": "python",
+    "path": "../../../scripts/python_tasks/literature_pubmed_task.py"
+  },
+  "environment": {
+    "language": "python",
+    "dependencies": ["python>=3.10", "urllib.request", "json"],
+    "network": ["https://eutils.ncbi.nlm.nih.gov"],
+    "migrationStatus": "workspace task"
+  },
+  "validationSmoke": {
+    "mode": "workspace-task",
+    "prompt": "TP53 tumor suppressor reviews",
+    "expectedArtifactType": "paper-list"
+  },
+  "examplePrompts": [
+    "TP53 tumor suppressor reviews",
+    "KRAS G12D pancreatic cancer clinical trials",
+    "Find recent papers about EGFR resistance"
+  ],
+  "promotionHistory": []
+}

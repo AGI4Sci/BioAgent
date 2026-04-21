@@ -1,7 +1,7 @@
 import type { AgentId } from './data';
 import type { UIManifestSlot } from './domain';
 
-export type AgentMode = 'agent-server' | 'demo';
+export type AgentMode = 'agent-server';
 
 export interface AgentInputField {
   key: string;
@@ -26,6 +26,14 @@ export interface AgentArtifactSchema {
   consumers: AgentId[];
 }
 
+export interface AgentScopeDeclaration {
+  supportedTasks: string[];
+  requiredInputs: string[];
+  unsupportedTasks: string[];
+  handoffTargets: AgentId[];
+  phaseLimitations: string[];
+}
+
 export interface BioAgentProfileContract {
   id: AgentId;
   agentServerId: string;
@@ -34,6 +42,7 @@ export interface BioAgentProfileContract {
   fallbackTools: string[];
   inputContract: AgentInputField[];
   outputArtifacts: AgentArtifactSchema[];
+  scopeDeclaration: AgentScopeDeclaration;
   defaultSlots: UIManifestSlot[];
   executionDefaults: {
     environment: string;
@@ -65,6 +74,13 @@ export const BIOAGENT_PROFILES = {
       ],
       consumers: ['structure', 'knowledge'],
     }],
+    scopeDeclaration: {
+      supportedTasks: ['PubMed query', 'paper-list artifact', 'evidence claim extraction', 'handoff to structure or knowledge'],
+      requiredInputs: ['query or artifact-derived entity'],
+      unsupportedTasks: ['Systematic review final judgment', 'paywalled full-text extraction', 'clinical recommendation'],
+      handoffTargets: ['structure', 'knowledge'],
+      phaseLimitations: ['Phase 1 summarizes database evidence and cannot certify biological truth without researcher review.'],
+    },
     defaultSlots: [
       { componentId: 'paper-card-list', title: '文献卡片', artifactRef: 'paper-list', priority: 1 },
       { componentId: 'evidence-matrix', title: '证据矩阵', priority: 2 },
@@ -101,6 +117,13 @@ export const BIOAGENT_PROFILES = {
       ],
       consumers: ['knowledge'],
     }],
+    scopeDeclaration: {
+      supportedTasks: ['RCSB entry fetch', 'RCSB search', 'AlphaFold DB lookup', 'coordinate artifact generation', 'residue highlighting'],
+      requiredInputs: ['PDB id, UniProt accession, gene/protein name, or structure prompt'],
+      unsupportedTasks: ['Molecular dynamics', 'binding free energy calculation', 'de novo structure prediction', 'wet-lab validation'],
+      handoffTargets: ['knowledge'],
+      phaseLimitations: ['Phase 1 can retrieve and summarize structures but cannot infer mechanism beyond artifact-backed evidence.'],
+    },
     defaultSlots: [
       { componentId: 'molecule-viewer', title: '分子结构查看器', artifactRef: 'structure-summary', priority: 1 },
       { componentId: 'evidence-matrix', title: '结构证据', priority: 2 },
@@ -117,9 +140,9 @@ export const BIOAGENT_PROFILES = {
     agentServerId: 'bioagent-omics',
     mode: 'agent-server',
     nativeTools: ['DESeq2', 'Scanpy', 'clusterProfiler'],
-    fallbackTools: ['demo-expression-matrix'],
+    fallbackTools: ['workspace-csv-fixture', 'agentserver-task-generation'],
     inputContract: [
-      { key: 'matrixRef', label: '表达矩阵', type: 'text', required: true, defaultValue: 'demo:rna-seq' },
+      { key: 'matrixRef', label: '表达矩阵', type: 'text', required: true, defaultValue: 'matrix.csv' },
       { key: 'metadataRef', label: '样本 metadata', type: 'text' },
       { key: 'groupColumn', label: '分组列', type: 'text', defaultValue: 'condition' },
       { key: 'designFormula', label: 'Design formula', type: 'text', defaultValue: '~ condition' },
@@ -135,13 +158,20 @@ export const BIOAGENT_PROFILES = {
       ],
       consumers: ['literature', 'knowledge'],
     }],
+    scopeDeclaration: {
+      supportedTasks: ['CSV differential expression', 'volcano/heatmap/UMAP artifact generation', 'runner provenance capture'],
+      requiredInputs: ['matrixRef', 'metadataRef', 'groupColumn', 'caseGroup', 'controlGroup'],
+      unsupportedTasks: ['Unbounded raw FASTQ processing', 'publication-grade batch correction without explicit design', 'biological conclusion without researcher confirmation'],
+      handoffTargets: ['literature', 'knowledge'],
+      phaseLimitations: ['Phase 1 executes reproducible local statistics and flags limitations; interpretation remains evidence-scoped.'],
+    },
     defaultSlots: [
       { componentId: 'volcano-plot', title: '火山图', artifactRef: 'omics-differential-expression', priority: 1 },
       { componentId: 'heatmap-viewer', title: '热图', artifactRef: 'omics-differential-expression', priority: 2 },
       { componentId: 'umap-viewer', title: 'UMAP', artifactRef: 'omics-differential-expression', priority: 3 },
     ],
     executionDefaults: {
-      environment: 'bioagent-omics-record-only',
+      environment: 'bioagent-omics-runtime',
       status: 'planned',
       databaseVersions: ['Bioconductor current'],
     },
@@ -167,6 +197,13 @@ export const BIOAGENT_PROFILES = {
       ],
       consumers: ['literature', 'structure', 'omics'],
     }],
+    scopeDeclaration: {
+      supportedTasks: ['UniProt gene/protein lookup', 'ChEMBL compound mechanism lookup', 'knowledge-graph artifact', 'source-linked rows'],
+      requiredInputs: ['entity and optional entityType'],
+      unsupportedTasks: ['Unsupported disease connector claims', 'clinical trial synthesis without connector', 'causal pathway proof'],
+      handoffTargets: ['literature', 'structure', 'omics'],
+      phaseLimitations: ['Phase 1 returns database-backed graph facts and explicit unsupported states for missing connectors.'],
+    },
     defaultSlots: [
       { componentId: 'network-graph', title: '知识网络', artifactRef: 'knowledge-graph', priority: 1 },
       { componentId: 'data-table', title: '知识卡片', artifactRef: 'knowledge-graph', priority: 2 },
@@ -197,6 +234,7 @@ export function agentProtocolForPrompt(agentId: AgentId) {
     fallbackTools: profile.fallbackTools,
     inputContract: profile.inputContract,
     outputArtifacts: profile.outputArtifacts,
+    scopeDeclaration: profile.scopeDeclaration,
     defaultSlots: profile.defaultSlots,
     executionDefaults: profile.executionDefaults,
   }, null, 2);

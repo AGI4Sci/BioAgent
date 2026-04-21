@@ -182,7 +182,7 @@ BioAgent 的实现语言边界必须服务于科学可复现性，而不是被 W
 
 BioAgent 面向的生命科学工具空间几乎是无限的：数据库会更新，分析流程会变化，研究者会不断提出新的任务。如果把每个工具、每个数据库、每个分析分支都写进一个 TypeScript 文件，系统很快会变成不可维护的固定工具箱。因此 BioAgent 的长期目标不是“内置更多工具”，而是成为一个会发现、生成、复用和沉淀工具的科学工作台。
 
-当前的 `scripts/bioagent-tools.ts` 是过渡实现：它曾用于快速去 demo 化，让文献、结构、组学和知识库 Agent 能返回真实 artifact。但它不应该成为长期边界，文件名也不准确。迁移完成后，它应被删除，或重写/重命名为更薄的 runtime gateway，例如 `workspace-runtime-gateway.ts` / `skill-runtime.ts`。这个 gateway 只负责调度和审计，不承载具体科学逻辑。
+当前的 `scripts/bioagent-tools.ts` 已降级为兼容 shim，实际入口是 `scripts/workspace-runtime-gateway.ts`。文献、结构、组学和知识库 Agent 的可执行能力通过 seed skills 与 workspace-local task code 表达；gateway 只负责 skill matching、任务调度、artifact/log 收集、schema 校验和 AgentServer 自愈桥接，不承载具体科学逻辑。
 
 需要区分两类“无穷性”：
 

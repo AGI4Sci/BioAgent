@@ -13,12 +13,18 @@ The product shape is no longer "one page per agent". A user enters a research sc
 The UI renders structured runtime artifacts through a component registry. The LLM may choose components and View Composition parameters through JSON, but it does not generate arbitrary UI code.
 Workspace seed skills also pass through the same UIManifest composition layer: task-requested components and user-edited Scenario settings can reorder or replace the default slots before React renders the component registry.
 
+BioAgent separates extension capability into two families:
+
+- **Tools**: deterministic MCP tools, database connectors, workspace runners, and repair flows.
+- **Skills**: markdown or executable task knowledge. Executable seed skills live in `skills/seed`; installed SCP markdown skills live in `skills/installed/scp`, are indexed in the UI, and are discoverable by the runtime registry as `markdown-skill` entries.
+
 ## Repository
 
 - `ui/`: React + Vite Scenario workbench
 - `scripts/`: workspace runtime gateway, task runner, skill registry, smoke scripts
 - `scripts/python_tasks/`: Python-first scientific task templates
-- `skills/seed/`: built-in validated skills
+- `skills/seed/`: built-in validated executable skills with `skill.json`
+- `skills/installed/scp/`: installed SCP markdown skills copied from the SCP skill library
 - `docs/`: product and architecture documentation
 
 ## Product Model
@@ -75,7 +81,7 @@ The workbench first calls the BioAgent workspace runtime:
 POST http://127.0.0.1:5174/api/bioagent/tools/run
 ```
 
-Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain only to match seed/workspace skills and run scientific task code.
+Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain only to match seed/workspace skills, installed Markdown skills, and run scientific task code. Installed SCP Markdown skills run through the live SCP adapter when `SCP_HUB_API_KEY` or `SCPhub_api_key` is present: the adapter parses each `SKILL.md`, discovers MCP servers/tools, can execute selected tools with prompt-provided inputs, and returns explicit blockers instead of fake artifacts.
 
 If no validated local skill can satisfy the request, the runtime can ask AgentServer to generate or repair workspace-local task code:
 

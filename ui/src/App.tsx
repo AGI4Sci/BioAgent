@@ -60,6 +60,7 @@ import {
   type PageId,
 } from './data';
 import { SCENARIO_SPECS, SCENARIO_PRESETS, componentManifest } from './scenarioSpecs';
+import { scpMarkdownSkills } from './scpSkillCatalog';
 import { timeline } from './demoData';
 import { sendAgentMessageStream } from './api/agentClient';
 import { sendBioAgentToolMessage } from './api/bioagentToolsClient';
@@ -342,6 +343,14 @@ function findArtifact(session: BioAgentSession, ref?: string): RuntimeArtifact |
 
 function exportJsonFile(name: string, payload: unknown) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  exportBlob(name, blob);
+}
+
+function exportTextFile(name: string, content: string, contentType = 'text/plain') {
+  exportBlob(name, new Blob([content], { type: `${contentType};charset=utf-8` }));
+}
+
+function exportBlob(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -463,6 +472,26 @@ function exportExecutionBundle(session: BioAgentSession) {
   exportJsonFile(`execution-units-${session.scenarioId}-${session.sessionId}.json`, buildExecutionBundle(session, decision));
 }
 
+const extensionTools = [
+  { name: 'Workspace Runtime Gateway', detail: 'deterministic task dispatch / artifact JSON / ExecutionUnit', kind: 'runtime' },
+  { name: 'MCP Tool Adapters', detail: 'fixed remote tool flows and connector contracts', kind: 'mcp' },
+  { name: 'PubMed E-utilities', detail: 'literature search and paper-list artifacts', kind: 'database' },
+  { name: 'RCSB / AlphaFold DB', detail: 'structure metadata, coordinate download and parsing', kind: 'database' },
+  { name: 'UniProt / ChEMBL', detail: 'protein, compound and mechanism lookups', kind: 'database' },
+  { name: 'NCBI BLAST URL API', detail: 'BLASTP sequence-alignment artifacts', kind: 'database' },
+  { name: 'Python / R / Shell / CLI Runner', detail: 'workspace-local reproducible task execution', kind: 'runner' },
+  { name: 'AgentServer Repair Bridge', detail: 'task generation and self-heal fallback', kind: 'fallback' },
+];
+
+const executableSeedSkills = [
+  'literature.pubmed_search',
+  'structure.rcsb_latest_or_entry',
+  'omics.differential_expression',
+  'knowledge.uniprot_chembl_lookup',
+  'sequence.ncbi_blastp_search',
+  'inspector.generic_file_table_log',
+];
+
 function Sidebar({
   page,
   setPage,
@@ -511,8 +540,6 @@ function Sidebar({
     setActivePanel(panel);
     setCollapsed(false);
   }
-
-  const extensions = ['Python', 'Jupyter', 'Docker', 'GitLens', 'Error Lens'];
 
   useEffect(() => {
     if (activePanel !== 'workspace' || collapsed) return;
@@ -698,10 +725,51 @@ function Sidebar({
             ) : null}
             {activePanel === 'extensions' ? (
               <div className="sidebar-tree">
-                <div className="sidebar-label">已安装拓展</div>
-                {extensions.map((ext) => (
-                  <div key={ext} className="tree-item">◫ {ext}</div>
-                ))}
+                <div className="extension-section">
+                  <div className="sidebar-label">Tools</div>
+                  <p className="extension-note">确定性的 MCP tool、数据库 connector、runtime runner 和修复流程。</p>
+                  {extensionTools.map((tool) => (
+                    <div key={tool.name} className="extension-row" title={`${tool.name}: ${tool.detail}`}>
+                      <span className="extension-icon"><Settings size={13} /></span>
+                      <span className="extension-copy">
+                        <strong>{tool.name}</strong>
+                        <small>{tool.kind} · {tool.detail}</small>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="extension-section">
+                  <div className="sidebar-label">Skills</div>
+                  <p className="extension-note">Markdown skill 是可读、可安装、可沉淀的任务知识；seed skill 带可执行入口。</p>
+                  <div className="extension-subhead">
+                    <span>Seed executable skills</span>
+                    <code>{executableSeedSkills.length}</code>
+                  </div>
+                  {executableSeedSkills.map((skill) => (
+                    <div key={skill} className="extension-row compact" title={`skills/seed/${skill}/skill.json`}>
+                      <span className="extension-icon"><FileCode size={13} /></span>
+                      <span className="extension-copy">
+                        <strong>{skill}</strong>
+                        <small>skills/seed executable manifest</small>
+                      </span>
+                    </div>
+                  ))}
+                  <div className="extension-subhead">
+                    <span>SCP markdown skills</span>
+                    <code>{scpMarkdownSkills.length}</code>
+                  </div>
+                  <div className="skill-catalog-list">
+                    {scpMarkdownSkills.map((skill) => (
+                      <div key={skill.id} className="extension-row compact" title={`${skill.description}\n${skill.path}`}>
+                        <span className="extension-icon"><FileText size={13} /></span>
+                        <span className="extension-copy">
+                          <strong>{skill.name}</strong>
+                          <small>{skill.description}</small>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             ) : null}
           </div>
@@ -1879,12 +1947,18 @@ function DataTableSlot({ slot, artifact, session }: RegistryRendererProps) {
   const records = applyViewTransforms(arrayPayload(slot, 'rows', artifact), slot);
   const rows = records;
   if (!artifact || !rows.length) {
-    return <EmptyArtifactState title="等待真实 knowledge rows" detail="知识表格只展示 knowledge-graph artifact 中的 rows，不再填充 demo 药物或通路。" />;
+    return (
+      <div className="stack">
+        <ArtifactDownloads artifact={artifact} />
+        <EmptyArtifactState title="等待真实 knowledge rows" detail="知识表格只展示 knowledge-graph artifact 中的 rows，不再填充 demo 药物或通路。" />
+      </div>
+    );
   }
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row)))).slice(0, 5);
   return (
     <div className="stack">
       <ArtifactSourceBar artifact={artifact} session={session} />
+      <ArtifactDownloads artifact={artifact} />
       {viewCompositionSummary(slot) ? <div className="composition-strip"><code>{viewCompositionSummary(slot)}</code></div> : null}
       <div className="artifact-table">
         <div className="artifact-table-head" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}>
@@ -1919,6 +1993,7 @@ function UnknownArtifactInspector({ slot, artifact, session }: RegistryRendererP
   return (
     <div className="stack">
       <ArtifactSourceBar artifact={artifact} session={session} />
+      <ArtifactDownloads artifact={artifact} />
       <div className="slot-meta">
         <Badge variant="warning">inspector</Badge>
         {artifact ? <code>{artifact.type}</code> : null}
@@ -1947,6 +2022,41 @@ function UnknownArtifactInspector({ slot, artifact, session }: RegistryRendererP
       )}
     </div>
   );
+}
+
+function ArtifactDownloads({ artifact }: { artifact?: RuntimeArtifact }) {
+  const downloads = artifactDownloadItems(artifact);
+  if (!downloads.length) return null;
+  return (
+    <div className="artifact-downloads">
+      {downloads.map((item) => (
+        <ActionButton
+          key={`${item.name}-${item.path ?? item.key ?? ''}`}
+          icon={Download}
+          variant="secondary"
+          onClick={() => exportTextFile(item.name, item.content, item.contentType)}
+        >
+          {item.name}{typeof item.rowCount === 'number' ? ` · ${item.rowCount} rows` : ''}
+        </ActionButton>
+      ))}
+    </div>
+  );
+}
+
+function artifactDownloadItems(artifact?: RuntimeArtifact) {
+  const data = artifact?.data;
+  const raw = isRecord(data) && Array.isArray(data.downloads) ? data.downloads : [];
+  return raw
+    .filter(isRecord)
+    .map((item) => ({
+      key: asString(item.key),
+      name: asString(item.name) ?? asString(item.filename) ?? 'artifact-download.txt',
+      path: asString(item.path),
+      contentType: asString(item.contentType) ?? 'text/plain',
+      rowCount: asNumber(item.rowCount),
+      content: typeof item.content === 'string' ? item.content : '',
+    }))
+    .filter((item) => item.content.length > 0);
 }
 
 function EmptyArtifactState({ title, detail }: { title: string; detail: string }) {

@@ -29,6 +29,12 @@ export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>):
   if (skill.id === 'omics.differential_expression') {
     return runPythonWorkspaceSkill(request, skill, 'omics');
   }
+  if (isLiveScpSkill(skill.id)) {
+    return runLiveScpSkill(request, skill);
+  }
+  if (skill.manifest.entrypoint.type === 'markdown-skill') {
+    return runAgentServerGeneratedTask(request, skill, skills);
+  }
   return repairNeededPayload(request, skill, `Skill ${skill.id} is installed but has no gateway adapter yet.`);
 }
 
@@ -198,6 +204,8 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
       runId,
       attempt: 1,
       skillId: skill.id,
+      skillMarkdownRef: skill.manifest.entrypoint.path,
+      skillDescription: skill.manifest.description,
     },
     taskRel,
     outputRel,
@@ -305,6 +313,110 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
     const payload = failedTaskPayload(request, skill, run, failureReason);
     return payload;
   }
+}
+
+async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability): Promise<ToolPayload> {
+  const workspace = resolve(request.workspacePath || process.cwd());
+  const taskPrefix = 'scp-live';
+  const runId = sha1(`${skill.id}:${request.prompt}:${Date.now()}`).slice(0, 12);
+  const outputRel = `.bioagent/task-results/${taskPrefix}-${runId}.json`;
+  const inputRel = `.bioagent/task-inputs/${taskPrefix}-${runId}.json`;
+  const stdoutRel = `.bioagent/logs/${taskPrefix}-${runId}.stdout.log`;
+  const stderrRel = `.bioagent/logs/${taskPrefix}-${runId}.stderr.log`;
+  const taskRel = `.bioagent/tasks/${taskPrefix}-${runId}.py`;
+  const taskId = `${taskPrefix}-${runId}`;
+  const entrypointPath = resolve(process.cwd(), 'scripts', 'python_tasks', 'scp_live_adapter_task.py');
+  const run = await runWorkspaceTask(workspace, {
+    id: taskId,
+    language: 'python',
+    entrypoint: 'main',
+    codeTemplatePath: entrypointPath,
+    input: {
+      prompt: request.prompt,
+      runId,
+      attempt: 1,
+      skillId: skill.id,
+      skillMarkdownRef: skill.manifest.entrypoint.path,
+      skillDescription: skill.manifest.description,
+    },
+    taskRel,
+    outputRel,
+    stdoutRel,
+    stderrRel,
+    timeoutMs: 180000,
+  });
+  if (run.exitCode !== 0 && !await fileExists(join(workspace, outputRel))) {
+    const failureReason = run.stderr || 'Live SCP adapter failed before writing output.';
+    await appendTaskAttempt(workspace, {
+      id: taskId,
+      prompt: request.prompt,
+      skillDomain: request.skillDomain,
+      skillId: skill.id,
+      attempt: 1,
+      status: 'failed-with-reason',
+      codeRef: taskRel,
+      inputRef: inputRel,
+      outputRef: outputRel,
+      stdoutRef: stdoutRel,
+      stderrRef: stderrRel,
+      exitCode: run.exitCode,
+      failureReason,
+      createdAt: new Date().toISOString(),
+    });
+    return failedTaskPayload(request, skill, run, failureReason);
+  }
+  try {
+    const payload = JSON.parse(await readFile(join(workspace, outputRel), 'utf8')) as ToolPayload;
+    const normalized = validateAndNormalizePayload(payload, request, skill, {
+      taskRel,
+      outputRel,
+      stdoutRel,
+      stderrRel,
+      runtimeFingerprint: run.runtimeFingerprint,
+    });
+    const errors = schemaErrors(payload);
+    const unitStatus = String(normalized.executionUnits[0]?.status || '');
+    await appendTaskAttempt(workspace, {
+      id: taskId,
+      prompt: request.prompt,
+      skillDomain: request.skillDomain,
+      skillId: skill.id,
+      attempt: 1,
+      status: errors.length ? 'repair-needed' : unitStatus === 'failed-with-reason' ? 'failed-with-reason' : 'done',
+      codeRef: taskRel,
+      inputRef: inputRel,
+      outputRef: outputRel,
+      stdoutRef: stdoutRel,
+      stderrRef: stderrRel,
+      exitCode: run.exitCode,
+      schemaErrors: errors,
+      createdAt: new Date().toISOString(),
+    });
+    return normalized;
+  } catch (error) {
+    const failureReason = `Live SCP adapter output could not be parsed: ${errorMessage(error)}`;
+    await appendTaskAttempt(workspace, {
+      id: taskId,
+      prompt: request.prompt,
+      skillDomain: request.skillDomain,
+      skillId: skill.id,
+      attempt: 1,
+      status: 'failed-with-reason',
+      codeRef: taskRel,
+      inputRef: inputRel,
+      outputRef: outputRel,
+      stdoutRef: stdoutRel,
+      stderrRef: stderrRel,
+      exitCode: run.exitCode,
+      failureReason,
+      createdAt: new Date().toISOString(),
+    });
+    return failedTaskPayload(request, skill, run, failureReason);
+  }
+}
+
+function isLiveScpSkill(skillId: string) {
+  return skillId.startsWith('scp.');
 }
 
 async function tryAgentServerRepairAndRerun(params: {
@@ -505,6 +617,10 @@ async function requestAgentServerGeneration(params: {
         kind: skill.kind,
         available: skill.available,
         reason: skill.reason,
+        description: skill.manifest.description,
+        entrypointType: skill.manifest.entrypoint.type,
+        manifestPath: skill.manifestPath,
+        scopeDeclaration: skill.manifest.scopeDeclaration,
       })),
       artifactSchema: expectedArtifactSchema(params.request.skillDomain),
       uiManifestContract: { expectedKeys: ['componentId', 'artifactRef', 'encoding', 'layout', 'compare'] },
@@ -725,7 +841,16 @@ function buildAgentServerGenerationPrompt(request: {
   prompt: string;
   skillDomain: BioAgentSkillDomain;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
-  availableSkills: Array<{ id: string; kind: string; available: boolean; reason: string }>;
+  availableSkills: Array<{
+    id: string;
+    kind: string;
+    available: boolean;
+    reason: string;
+    description?: string;
+    entrypointType?: string;
+    manifestPath?: string;
+    scopeDeclaration?: Record<string, unknown>;
+  }>;
   artifactSchema: Record<string, unknown>;
   uiManifestContract: Record<string, unknown>;
   uiStateSummary?: Record<string, unknown>;
@@ -936,6 +1061,7 @@ export function composeRuntimeUiManifest(
     ...promptComponents,
     ...(overrideComponents.length || promptComponents.length ? [] : incomingComponents),
     ...(overrideComponents.length || promptComponents.length || incomingComponents.length ? [] : DOMAIN_DEFAULT_COMPONENTS[request.skillDomain] ?? []),
+    ...(componentNegated(request.prompt, 'execution-unit-table') ? [] : ['execution-unit-table']),
   ]).slice(0, 6);
   const sourceByComponent = new Map(incoming.map((slot) => [String(slot.componentId || ''), slot]));
   return componentIds.map((componentId, index) => {
@@ -976,8 +1102,8 @@ function componentNegated(prompt: string, componentId: string) {
   };
   return (labels[componentId] ?? []).some((label) => {
     const escaped = escapeRegExp(label);
-    return new RegExp(`(?:不需要|不要|无需|without|no)[^。；;,.，\\n]{0,32}${escaped}`, 'i').test(prompt)
-      || new RegExp(`${escaped}[^。；;,.，\\n]{0,16}(?:不需要|不要|无需|without|no)`, 'i').test(prompt);
+    return new RegExp(`(?:不需要|不要|无需|\\bwithout\\b|\\bno\\b)[^。；;,.，\\n]{0,32}${escaped}`, 'i').test(prompt)
+      || new RegExp(`${escaped}[^。；;,.，\\n]{0,16}(?:不需要|不要|无需|\\bwithout\\b|\\bno\\b)`, 'i').test(prompt);
   });
 }
 

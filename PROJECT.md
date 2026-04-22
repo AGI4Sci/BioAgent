@@ -1,6 +1,6 @@
 # BioAgent - PROJECT.md
 
-最后更新：2026-04-21
+最后更新：2026-04-22
 
 ## 使用约定
 - 本文档作为 BioAgent 工程任务板使用，正文只保留正在推进或待推进的任务；已完成任务压缩到归档摘要。
@@ -92,6 +92,23 @@
 
 #### TODO
 - [x] 定义 `.bioagent/skills/`、`skills/seed/`、`skills/installed/` 目录结构和 manifest schema。
+- [x] 将拓展目录拆分为 Tools 与 Skills：Tools 表示 MCP/database/runtime 等确定性工具流程；Skills 表示 Markdown 任务知识或可执行 seed skill。
+- [x] 安装 SCP Markdown skill library 到 `skills/installed/scp/`，保留 121 个 `SKILL.md` 与附带 `manifest.json/index.js`；`npm run smoke:scp-skills` 校验安装数量、frontmatter 与 manifest 可读性。
+- [x] runtime skill registry 已读取 installed `SKILL.md` 为 `markdown-skill`，并通过 matcher 区分 seed executable 主链与 SCP Markdown skill；`npm run smoke:tools-skills-diverse` 覆盖 PubMed、RCSB、UniProt、组学、BLASTP、protein properties、TCGA、molecular docking、biomedical web search 等多样化路由与 runtime 行为。
+
+### T027 SCP Hub Live Skill Adapters
+
+目标：把已安装 SCP Markdown skills 从“可发现/可匹配”推进到“可真实执行”，优先覆盖用户点名的 protein properties、TCGA expression、molecular docking、biomedical web search。
+
+- [x] 验证 SCP 认证边界：`scphub.intern-ai.org.cn/api/mcp/v1/invoke` 对当前 key 返回 `user token expired`；直连 `scp.intern-ai.org.cn/api/v1/mcp/...` + `SCP-HUB-API-KEY` 可连接部分 MCP servers。
+- [x] protein properties：文档中的 `VenusFactory` 后端连接失败；已改用可用的 `SciToolAgent-Bio` server 29，真实调用 `ComputeProtPara` / `ComputeHydrophilicity`。
+- [x] biomedical web search：文档中的 `BiomedicalSearch` endpoint 是占位/不可解析；已改用 `Origene-Search` server 7，真实调用 `pubmed_search` / `tavily_search`。
+- [x] TCGA expression：`Origene-TCGA` server 11 能列 tool 但远端内部服务 `47.101.156.188:80` refused；已设计 cBioPortal TCGA PanCancer Atlas fallback，记录 SCP failure 与 fallback source。
+- [x] 新增 live adapter：`scripts/python_tasks/scp_live_adapter_task.py`，runtime gateway 对四个点名 SCP skills 走真实 MCP/cBioPortal fallback adapter；`npm run smoke:scp-live-skills` 需要临时环境变量 `SCP_HUB_API_KEY` 或 `SCPhub_api_key`。
+- [x] 扩展为全量 SCP live adapter：所有 `scp.*` skill 都进入 live path。通用 adapter 会解析 `SKILL.md` 中的 MCP endpoint/tool，缺 endpoint 时按 skill id/description 推断候选 server，执行 `capability_probe=true` 时只做真实 MCP discovery，不触发重任务。
+- [x] 全量 capability smoke：`SCP_HUB_API_KEY=... npm run smoke:scp-live-capability` 已探测 121/121 SCP skills，结果为 121 live/discoverable、0 explicit blockers。
+- [x] 通用执行 smoke：`npm run smoke:scp-live-skills` 覆盖专用 adapter 与 generic adapter；其中 `scp.molecular-properties-calculation` 通过 `SMILESToWeight(smiles=CCO)` 真实执行。
+- [x] molecular docking：真实 docking tool 位于 `DrugSDA-Tool` server 2（`molecule_docking_quickvina_fullprocess`）；已新增 `base64_to_server_file` staging，把 RCSB PDB 内容转成 SCP server-side path 后再交给 docking/pocket 工具。若 staging 或远端工具失败，adapter 仍返回 `failed-with-reason`，不伪造 docking score。
 - [x] 把结构 Python task 提炼为 `structure.rcsb_latest_or_entry` seed skill。
 - [x] 把 PubMed、UniProt、ChEMBL、omics differential runner 迁移为 seed skill task/template，而不是 TS 分支；PubMed、UniProt/ChEMBL 和基础 omics CSV differential 已迁入 workspace Python task，Scanpy/DESeq2/edgeR 后续应作为 omics task 内部可选后端补强，而不是回到 TS gateway 分支。
 - [x] 实现 skill registry loader：读取 repo seed skills、workspace skills、user-installed skills，并输出 availability。
@@ -217,6 +234,32 @@
 - [x] 更新导出逻辑的权限约束：ExecutionUnit JSON Bundle 导出前会检查 artifact `exportPolicy`、`sensitiveDataFlags` 和 `audience`；`blocked` artifact 会阻止导出，`restricted` artifact 会在 bundle 中写入 warning 和敏感标记。设计约束见 `docs/TimelineDecisionCollaborationModel.md`，实现见 `ui/src/exportPolicy.ts`。
 
 ## P3 - 已开始但需并入新架构
+
+### T034 高通量虚拟筛选 Agent 系统真实场景压测
+
+#### 目标说明
+- 用真实药物发现工作流压测 BioAgent：蛋白/口袋输入 -> 类药性预筛 -> 对接打分 -> ADMET -> 相似性扩增 -> 下一轮对接，验证 agent routing、SCP live adapter、artifact/ExecutionUnit 诚实状态和失败边界。
+
+#### 本轮压测记录（2026-04-22）
+- [x] 已启动项目服务：Web UI `http://localhost:5173/`，workspace runtime `http://127.0.0.1:5174/`。
+- [x] Step 1 蛋白/口袋：通过 `structure.rcsb_latest_or_entry` 请求 `PDB 1A3N`，成功返回 `structure-summary`，下载 RCSB 坐标并写入 `.bioagent/structures/`。
+- [x] Step 2 类药性预筛：通过 `scp.drugsda-drug-likeness` 调用 `calculate_mol_drug_chemistry`，代表 SMILES 批次成功返回 QED 与 Lipinski violations。
+- [x] Step 3 对接：先通过 `scp.molecular-docking` 压测出 SCP DrugSDA docking 需要 server-side `pdb_file_path` 的真实边界；随后在 workflow adapter 中用 `base64_to_server_file` 完成 PDB 暂存，并通过 `molecule_docking_quickvina_fullprocess` 完成代表批次 docking attempt。
+- [x] Step 4 ADMET：通过 `scp.drugsda-admet` 调用 `pred_mol_admet`，代表 SMILES 批次成功返回 `json_content`，包含 physicochemical、druglikeness 和多项 ADMET predictions。
+- [x] Step 5 相似性扩增：通过 `scp.drugsda-mol-similarity` 映射到当前 DrugSDA MCP 实际工具 `calculate_morgan_fingerprint_similarity`，成功返回 candidate Tanimoto-like similarity scores。
+- [x] 压测发现并修复 live adapter 参数问题：数组参数支持 `key="A|B|C"` 解析，复杂 SMILES 支持引号值，optional file/path 参数不再被 `smiles` 默认值污染。
+- [x] 压测发现并修复 MCP error 诚实状态问题：generic SCP adapter 现在识别 MCP `isError` 和 structured `status=error/failed/failure`，返回 `failed-with-reason` 而不是误标 `done`。
+- [x] 按用户要求用 Safari 网页端聊天真实回放虚拟筛选场景；第一次运行暴露 `inspector.generic_file_table_log` 抢路由导致 gateway adapter 缺失，已收紧 inspector/knowledge matcher，并为虚拟筛选 prompt 强化 `scp.drug-screening-docking` 路由。
+- [x] 新增 `scp.drug-screening-docking` workflow adapter：同一次请求内串联 `calculate_mol_drug_chemistry`、`pred_mol_admet`、RCSB PDB 下载、`base64_to_server_file`、`pred_pocket_prank`、`molecule_docking_quickvina_fullprocess`、`calculate_morgan_fingerprint_similarity`，输出 `virtual-screening-workflow` artifact、data-table、unknown-artifact-inspector 和 execution-unit-table。
+- [x] Safari 二次网页聊天压测成功：页面显示 `Virtual-screening workflow status: done.`，完成 4 个 Lipinski-pass molecule、4 行 ADMET、4 次 docking attempt，并生成 workflow artifact；第一次失败记录仍作为真实回归证据保留。
+- [x] 补齐通用下载契约：任何 artifact 只要在 `data.downloads[]` 中提供 `{name, contentType, content, rowCount}`，DataTable/UnknownArtifactInspector 都会展示下载按钮；虚拟筛选 workflow 通过该契约提供 `prescreen.csv`、`docking_top1000.csv`、`admet_top100.csv`、`similarity_expansion.csv`，同时落盘到 `.bioagent/virtual-screening/<runId>/`。
+- [x] 验证：`npm run typecheck` 通过；`SCPhub_api_key=... npm run smoke:scp-live-skills` 通过；补充 workflow smoke 返回 `virtual-screening-workflow`，完成 4 个 Lipinski-pass molecules、4 行 ADMET、4 次 docking attempt，并生成 4 个 CSV 下载项。当前代表批次只有 4 个输入 SMILES，因此 `docking_top1000.csv` 包含全部可用排序结果，不伪造到 1000 行。
+
+#### 后续 TODO
+- [x] 增加 SCP server-side file staging adapter：把 BioAgent 下载的 PDB 通过 `base64_to_server_file` 暂存到 SCP DrugSDA 可访问路径，再把该路径交给 `pred_pocket_prank` / `molecule_docking_quickvina_fullprocess`。
+- [ ] 明确 StarBind 与当前 QuickVina/DrugSDA docking 的关系：若必须使用 StarBind，需要新增 StarBind skill/tool connector；若 QuickVina 可作为替代，需要在 Scenario contract 中标明。
+- [ ] 将代表批次扩展为 CSV/SDF 大库流式任务：当前 CSV artifact/download schema 已落地；下一步需要接入真实百万库分页/队列化执行，而不是在同步网页请求中一次性 docking 1000+ 分子。
+- [x] 为“1-5 完整工作流”新增 workflow-level ExecutionUnit，把每个 step 的 artifactRef/状态串成同一个可恢复 run，而不是仅靠多次独立 runtime 请求。
 
 ### T021 Python-first 科学任务运行时与 AgentServer 自愈闭环
 

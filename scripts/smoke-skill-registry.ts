@@ -37,6 +37,18 @@ for (const id of [
   assert.equal(byId.get(id)?.available, true, `${id} should be available`);
 }
 
+const scpMarkdownSkills = skills.filter((skill) => skill.id.startsWith('scp.') && skill.manifest.entrypoint.type === 'markdown-skill');
+assert.equal(scpMarkdownSkills.length, 121, 'SCP Markdown skills should be available to the runtime registry');
+for (const id of [
+  'scp.protein-blast-search',
+  'scp.protein-properties-calculation',
+  'scp.tcga-gene-expression',
+  'scp.biomedical-web-search',
+]) {
+  assert.equal(byId.get(id)?.available, true, `${id} should be available`);
+  assert.equal(byId.get(id)?.manifest.entrypoint.type, 'markdown-skill');
+}
+
 const broken = byId.get('broken.skill');
 assert.equal(broken?.available, false);
 assert.match(String(broken?.reason), /Entrypoint not found/);
@@ -65,6 +77,22 @@ const blastMatched = matchSkill({
   artifacts: [],
 }, skills);
 assert.equal(blastMatched?.id, 'sequence.ncbi_blastp_search', 'BLAST protein sequence prompts should route to the sequence BLASTP seed skill');
+
+const proteinPropertiesMatched = matchSkill({
+  skillDomain: 'knowledge',
+  prompt: 'Calculate protein physicochemical properties molecular weight isoelectric point and instability index for sequence MKWVTFISLLFLFSSAYSRGVFRRDTHKSEIAHRFKDLGE',
+  workspacePath: workspace,
+  artifacts: [],
+}, skills);
+assert.equal(proteinPropertiesMatched?.id, 'scp.protein-properties-calculation', 'SCP protein properties Markdown skill should be matchable');
+
+const tcgaMatched = matchSkill({
+  skillDomain: 'omics',
+  prompt: 'Query TCGA gene expression for EGFR in LUAD tumor versus normal and include survival context',
+  workspacePath: workspace,
+  artifacts: [],
+}, skills);
+assert.equal(tcgaMatched?.id, 'scp.tcga-gene-expression', 'SCP TCGA Markdown skill should be matchable in omics');
 
 const status = JSON.parse(await readFile(join(workspace, '.bioagent', 'skills', 'status.json'), 'utf8')) as {
   skills: Array<Pick<SkillAvailability, 'id' | 'available' | 'reason'>>;

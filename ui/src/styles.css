@@ -209,6 +209,104 @@ button {
   padding: 12px 10px;
 }
 
+.extension-section {
+  padding: 2px 0 14px;
+  border-bottom: 1px solid rgba(46, 61, 85, 0.36);
+}
+
+.extension-section:last-child {
+  border-bottom: 0;
+}
+
+.extension-note {
+  margin: 0 12px 10px;
+  color: var(--bio-300);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.extension-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 12px 6px;
+  color: var(--bio-200);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.extension-subhead code {
+  padding: 2px 6px;
+  color: var(--teal);
+  background: rgba(0, 229, 160, 0.08);
+  border: 1px solid rgba(0, 229, 160, 0.2);
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.extension-row {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 4px;
+  padding: 7px 8px;
+  color: var(--bio-100);
+  border-radius: 8px;
+}
+
+.extension-row.compact {
+  min-height: 38px;
+  padding-block: 5px;
+}
+
+.extension-row:hover {
+  background: rgba(26, 35, 50, 0.82);
+}
+
+.extension-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--teal);
+  background: rgba(0, 229, 160, 0.08);
+  border: 1px solid rgba(0, 229, 160, 0.16);
+  border-radius: 7px;
+}
+
+.extension-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.extension-copy strong,
+.extension-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-copy strong {
+  color: var(--bio-50);
+  font-size: 12px;
+}
+
+.extension-copy small {
+  color: var(--bio-300);
+  font-size: 10px;
+}
+
+.skill-catalog-list {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
 .workspace-path-editor {
   width: calc(100% - 20px);
   min-height: 32px;
@@ -1578,6 +1676,25 @@ code,
   padding: 3px 7px;
   border-radius: 5px;
   background: rgba(123, 147, 176, 0.09);
+}
+
+.artifact-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(46, 61, 85, 0.56);
+  border-radius: 8px;
+  background: rgba(0, 229, 160, 0.05);
+}
+
+.artifact-downloads .action-button {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workbench-grid {

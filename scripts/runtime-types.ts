@@ -68,7 +68,7 @@ export interface SkillManifest {
   inputContract: Record<string, unknown>;
   outputArtifactSchema: Record<string, unknown>;
   entrypoint: {
-    type: 'workspace-task' | 'inspector' | 'agentserver-generation';
+    type: 'workspace-task' | 'inspector' | 'agentserver-generation' | 'markdown-skill';
     command?: string;
     path?: string;
   };
@@ -122,7 +122,11 @@ export interface AgentServerGenerationRequest {
   prompt: string;
   skillDomain: BioAgentSkillDomain;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
-  availableSkills: Array<Pick<SkillAvailability, 'id' | 'kind' | 'available' | 'reason'>>;
+  availableSkills: Array<Pick<SkillAvailability, 'id' | 'kind' | 'available' | 'reason' | 'manifestPath'> & {
+    description?: string;
+    entrypointType?: SkillManifest['entrypoint']['type'];
+    scopeDeclaration?: Record<string, unknown>;
+  }>;
   artifactSchema: Record<string, unknown>;
   uiManifestContract: Record<string, unknown>;
   uiStateSummary?: Record<string, unknown>;

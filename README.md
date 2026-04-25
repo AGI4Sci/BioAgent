@@ -64,7 +64,13 @@ Open:
 http://localhost:5173/
 ```
 
-For workspace-backed runs and persisted chat records, also start:
+`npm run dev` starts both the Vite UI and the workspace runtime used by scenario chat. To run only the UI, use:
+
+```bash
+npm run dev:ui
+```
+
+If you started the UI separately and need workspace-backed runs or persisted chat records, also start:
 
 ```bash
 npm run workspace:server

@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "tsx tools/dev.ts",
+    "dev:ui": "vite --host 0.0.0.0",
     "build": "vite build",
     "test": "node --import tsx --test \"src/ui/src/**/*.test.ts\"",
     "verify": "npm run typecheck && npm run test && npm run smoke:all && npm run build",

@@ -8,6 +8,7 @@ import {
   type NormalizedAgentResponse,
   type RuntimeArtifact,
   type RuntimeExecutionUnit,
+  type ScenarioInstanceId,
   type SendAgentMessageInput,
 } from '../domain';
 import { agentProtocolForPrompt, SCENARIO_SPECS } from '../scenarioSpecs';
@@ -46,8 +47,9 @@ function pickClaimType(value: unknown): ClaimType {
 }
 
 function agentSystemPrompt(input: SendAgentMessageInput) {
-  const protocol = agentProtocolForPrompt(input.scenarioId);
-  const scenario = SCENARIO_SPECS[input.scenarioId];
+  const builtInScenarioId = builtInScenarioIdForInput(input);
+  const protocol = agentProtocolForPrompt(builtInScenarioId);
+  const scenario = SCENARIO_SPECS[builtInScenarioId];
   const runtimeScenario = input.scenarioOverride;
   return [
     `你运行在 BioAgent 的场景工作台中，当前 Scenario 是「${runtimeScenario?.title ?? scenario.title}」，skill domain 是 ${runtimeScenario?.skillDomain ?? scenario.skillDomain}，领域是 ${input.agentDomain}。`,
@@ -65,6 +67,7 @@ function agentSystemPrompt(input: SendAgentMessageInput) {
 }
 
 function buildPrompt(input: SendAgentMessageInput) {
+  const builtInScenarioId = builtInScenarioIdForInput(input);
   const recentHistory = input.messages.slice(-8).map((message) => ({
     role: message.role,
     content: message.content,
@@ -72,7 +75,7 @@ function buildPrompt(input: SendAgentMessageInput) {
   const artifactContext = summarizeArtifacts(input.artifacts ?? []);
   return [
     `当前 BioAgent scenario: ${input.scenarioId}`,
-    `internal skill domain: ${input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain}`,
+    `internal skill domain: ${input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain}`,
     input.scenarioOverride ? `用户编辑 Scenario markdown:\n${input.scenarioOverride.scenarioMarkdown}` : '',
     `当前角色视图: ${input.roleView}`,
     '近期对话:',
@@ -81,7 +84,7 @@ function buildPrompt(input: SendAgentMessageInput) {
     artifactContext.length ? JSON.stringify(artifactContext, null, 2) : '',
     '',
     'Scope check metadata:',
-    JSON.stringify(scopeCheck(input.scenarioId, input.prompt), null, 2),
+    JSON.stringify(scopeCheck(builtInScenarioId, input.prompt), null, 2),
     '',
     '用户问题:',
     input.prompt,
@@ -90,10 +93,12 @@ function buildPrompt(input: SendAgentMessageInput) {
 
 function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
   const runtime = buildRuntimeConfig(input);
+  const builtInScenarioId = builtInScenarioIdForInput(input);
+  const scenario = SCENARIO_SPECS[builtInScenarioId];
   return {
     agent: {
-      id: SCENARIO_SPECS[input.scenarioId].runtimeId,
-      name: SCENARIO_SPECS[input.scenarioId].title,
+      id: scenario.runtimeId,
+      name: input.scenarioOverride?.title ?? scenario.title,
       backend: 'codex',
       workspace: input.config.workspacePath,
       workingDirectory: input.config.workspacePath,
@@ -101,10 +106,13 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
       reconcileExisting: true,
       metadata: {
         bioAgentScenario: input.scenarioId,
-        skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain,
+        scenarioPackageRef: input.scenarioPackageRef,
+        skillPlanRef: input.skillPlanRef,
+        uiPlanRef: input.uiPlanRef,
+        skillDomain: input.scenarioOverride?.skillDomain ?? scenario.skillDomain,
         domain: input.agentDomain,
-        nativeTools: SCENARIO_SPECS[input.scenarioId].nativeTools,
-        fallbackTools: SCENARIO_SPECS[input.scenarioId].fallbackTools,
+        nativeTools: scenario.nativeTools,
+        fallbackTools: scenario.fallbackTools,
       },
     },
     input: {
@@ -113,11 +121,14 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         rawUserPrompt: input.prompt,
         roleView: input.roleView,
         messageCount: input.messages.length,
-        inputContract: SCENARIO_SPECS[input.scenarioId].inputContract,
-        expectedArtifacts: SCENARIO_SPECS[input.scenarioId].outputArtifacts.map((artifact) => artifact.type),
+        inputContract: scenario.inputContract,
+        expectedArtifacts: scenario.outputArtifacts.map((artifact) => artifact.type),
+        scenarioPackageRef: input.scenarioPackageRef,
+        skillPlanRef: input.skillPlanRef,
+        uiPlanRef: input.uiPlanRef,
         scenarioOverride: input.scenarioOverride,
         artifacts: summarizeArtifacts(input.artifacts ?? []),
-        scopeCheck: scopeCheck(input.scenarioId, input.prompt),
+        scopeCheck: scopeCheck(builtInScenarioId, input.prompt),
       },
     },
     runtime,
@@ -162,6 +173,7 @@ function previewArtifactData(data: unknown): unknown {
 }
 
 function buildRuntimeConfig(input: SendAgentMessageInput): AgentServerRunPayload['runtime'] {
+  const builtInScenarioId = builtInScenarioIdForInput(input);
   const provider = input.config.modelProvider.trim();
   const modelName = input.config.modelName.trim();
   const modelBaseUrl = input.config.modelBaseUrl.trim().replace(/\/+$/, '');
@@ -171,7 +183,10 @@ function buildRuntimeConfig(input: SendAgentMessageInput): AgentServerRunPayload
     cwd: input.config.workspacePath,
     metadata: {
       bioAgentScenario: input.scenarioId,
-      skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain,
+      scenarioPackageRef: input.scenarioPackageRef,
+      skillPlanRef: input.skillPlanRef,
+      uiPlanRef: input.uiPlanRef,
+      skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain,
       nativeToolFirst: true,
       autoApprove: true,
       sandbox: 'danger-full-access',
@@ -280,9 +295,34 @@ function normalizeExecutionUnits(value: unknown, fallback: RuntimeExecutionUnit)
       databaseVersions: asStringArray(record.databaseVersions),
       artifacts: asStringArray(record.artifacts),
       outputArtifacts: asStringArray(record.outputArtifacts),
+      scenarioPackageRef: isScenarioPackageRef(record.scenarioPackageRef) ? record.scenarioPackageRef : undefined,
+      skillPlanRef: asString(record.skillPlanRef),
+      uiPlanRef: asString(record.uiPlanRef),
+      runtimeProfileId: asString(record.runtimeProfileId),
+      routeDecision: normalizeRouteDecision(record.routeDecision),
+      requiredInputs: asStringArray(record.requiredInputs),
+      recoverActions: asStringArray(record.recoverActions),
+      nextStep: asString(record.nextStep),
     } satisfies RuntimeExecutionUnit;
   });
   return units.length ? units : [fallback];
+}
+
+function isScenarioPackageRef(value: unknown): value is RuntimeExecutionUnit['scenarioPackageRef'] {
+  if (!isRecord(value)) return false;
+  return typeof value.id === 'string'
+    && typeof value.version === 'string'
+    && (value.source === 'built-in' || value.source === 'workspace' || value.source === 'generated');
+}
+
+function normalizeRouteDecision(value: unknown): RuntimeExecutionUnit['routeDecision'] {
+  if (!isRecord(value)) return undefined;
+  return {
+    selectedSkill: asString(value.selectedSkill),
+    selectedRuntime: asString(value.selectedRuntime),
+    fallbackReason: asString(value.fallbackReason),
+    selectedAt: asString(value.selectedAt) || nowIso(),
+  };
 }
 
 function isExecutionUnitStatus(value: unknown) {
@@ -297,7 +337,7 @@ function isExecutionUnitStatus(value: unknown) {
 }
 
 export function normalizeAgentResponse(
-  scenarioId: ScenarioId,
+  scenarioId: ScenarioInstanceId,
   prompt: string,
   raw: unknown,
 ): NormalizedAgentResponse {
@@ -416,8 +456,8 @@ export function normalizeAgentResponse(
 
 function normalizeNotebookRecords(
   value: unknown,
-  fallback: {
-    scenarioId: ScenarioId;
+    fallback: {
+    scenarioId: ScenarioInstanceId;
     prompt: string;
     messageText: string;
     claimType: ClaimType;
@@ -446,7 +486,7 @@ function normalizeNotebookRecords(
   const records = value.filter(isRecord).map((record) => ({
     id: asString(record.id) || makeId('note'),
     time: asString(record.time) || new Date(fallback.now).toLocaleString('zh-CN', { hour12: false }),
-    scenario: isScenarioId(record.scenario) ? record.scenario : fallback.scenarioId,
+    scenario: asString(record.scenario) || fallback.scenarioId,
     title: asString(record.title) || fallback.prompt.slice(0, 32) || 'Scenario 对话',
     desc: asString(record.desc) || asString(record.description) || fallback.messageText.slice(0, 96),
     claimType: pickClaimType(record.claimType),
@@ -458,6 +498,15 @@ function normalizeNotebookRecords(
     updateReason: asString(record.updateReason),
   }));
   return records.length ? records : [defaultRecord];
+}
+
+function builtInScenarioIdForInput(input: SendAgentMessageInput): ScenarioId {
+  if (isScenarioId(input.scenarioId)) return input.scenarioId;
+  const skillDomain = input.scenarioOverride?.skillDomain;
+  if (skillDomain === 'structure') return 'structure-exploration';
+  if (skillDomain === 'omics') return 'omics-differential-exploration';
+  if (skillDomain === 'knowledge') return 'biomedical-knowledge-graph';
+  return 'literature-evidence-review';
 }
 
 function isScenarioId(value: unknown): value is ScenarioId {

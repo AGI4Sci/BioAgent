@@ -4,6 +4,22 @@
 
 ---
 
+## 当前实现状态（2026-04-25）
+
+BioAgent 已完成从“内置 Scenario preset + runtime override”到可组合 Scenario Package 系统的第一阶段迁移：
+
+- Element Registry 已覆盖 skills、tools、artifact schemas、UI components、view presets、role policies 和 failure policies。
+- Scenario/Skill/UI Compiler 已能从描述或手动 selection 生成 `ScenarioIR`、`SkillPlan`、`UIPlan`。
+- Validation Gate、runtime smoke hook、Scenario Quality Report 和 workspace package API 已接入。
+- Scenario Builder 可在 workbench 内选择 elements、预览 JSON contract、保存 draft、发布 workspace package。
+- Scenario Library 可列出、打开、复制和归档 workspace packages。
+- 官方预编译 packages 已作为 Package Catalog 暴露，默认不导入 workspace；用户按需导入后才进入 Scenario Library，也可直接导出为可分发 package JSON。
+- 每次运行可记录 `scenarioPackageRef`、`skillPlanRef`、`uiPlanRef`、`runtimeProfileId` 和 route decision。
+
+下一阶段重点是产品化硬化：浏览器端到端 smoke、workspace scenario 原生路由、build/code splitting、3Dmol 风险治理、quality gate UI 和 runtime diagnostics。
+
+---
+
 ## 一、我们要解决什么问题
 
 生命科学正在经历数据爆炸。PubMed 上有超过 3800 万篇论文，UniProt 收录了超过 2.5 亿条蛋白质序列，单细胞测序一次实验就能产生数十 GB 的数据。与此同时，研究者的时间和认知带宽并没有同步增长。
@@ -79,7 +95,7 @@ scenario/
   versions.json        # 发布历史、兼容性和迁移说明
 ```
 
-这意味着 BioAgent 的可扩展性来自“编译出稳定契约”，而不是为每个新场景写一套页面。内置四个 Scenario 只是官方预编译 package；用户自定义 Scenario、团队共享 Scenario 和未来 marketplace 中的 Scenario 都应遵守同一套 package contract。
+这意味着 BioAgent 的可扩展性来自“编译出稳定契约”，而不是为每个新场景写一套页面。内置四个 Scenario 只是官方预编译 package catalog 中的示例包；它们不应该默认占用用户 workspace，而应像真实 package 一样支持按需导入、导出、复制、版本化和归档。用户自定义 Scenario、团队共享 Scenario 和未来 marketplace 中的 Scenario 都应遵守同一套 package contract。
 
 编译链路应明确分层：
 

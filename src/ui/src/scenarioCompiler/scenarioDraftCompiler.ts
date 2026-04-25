@@ -1,0 +1,59 @@
+import type { ScenarioId } from '../data';
+import type { ScenarioRuntimeOverride } from '../domain';
+import { SCENARIO_SPECS } from '../scenarioSpecs';
+
+export type ScenarioBuilderDraft = ScenarioRuntimeOverride & {
+  baseScenarioId: ScenarioId;
+  confidence: number;
+  summary: string;
+};
+
+export const scenarioIdBySkillDomain: Record<ScenarioRuntimeOverride['skillDomain'], ScenarioId> = {
+  literature: 'literature-evidence-review',
+  structure: 'structure-exploration',
+  omics: 'omics-differential-exploration',
+  knowledge: 'biomedical-knowledge-graph',
+};
+
+export function compileScenarioDraft(description: string): ScenarioBuilderDraft {
+  const text = description.trim();
+  const normalized = text.toLowerCase();
+  const skillDomain: ScenarioRuntimeOverride['skillDomain'] = /chembl|opentargets|drug|compound|disease|pathway|target priorit|target network|knowledge graph|知识图谱|疾病|化合物|药物|靶点|优先级/.test(normalized)
+    ? 'knowledge'
+    : /rna|scrna|omics|matrix|deseq|scanpy|umap|表达|差异|组学|单细胞/.test(normalized)
+      ? 'omics'
+      : /pdb|protein structure|structure|alphafold|ligand|residue|pocket|蛋白结构|结构|口袋|配体|残基/.test(normalized)
+        ? 'structure'
+        : /pubmed|paper|literature|review|evidence|文献|论文|综述|证据/.test(normalized)
+          ? 'literature'
+          : 'literature';
+  const baseScenarioId = scenarioIdBySkillDomain[skillDomain];
+  const base = SCENARIO_SPECS[baseScenarioId];
+  const titleSeed = text.replace(/[。.!?？\n].*$/s, '').trim().slice(0, 24);
+  const defaultComponents = base.componentPolicy.defaultComponents;
+  return {
+    baseScenarioId,
+    confidence: text.length > 18 ? 0.82 : 0.62,
+    summary: `${base.title} · ${defaultComponents.join(' / ')}`,
+    title: titleSeed ? `${titleSeed}场景` : base.title,
+    description: text || base.description,
+    skillDomain,
+    defaultComponents,
+    allowedComponents: base.componentPolicy.allowedComponents,
+    fallbackComponent: base.componentPolicy.fallbackComponent,
+    scenarioMarkdown: [
+      `# ${titleSeed || base.title}`,
+      '',
+      `用户目标：${text || base.description}`,
+      '',
+      `默认展示：${defaultComponents.join('、')}。`,
+      '',
+      `输入线索：${base.inputContract.map((item) => item.key).join('、')}。`,
+      '',
+      `输出 artifact：${base.outputArtifacts.map((item) => item.type).join('、')}。`,
+      '',
+      `边界：${base.scopeDeclaration.unsupportedTasks.slice(0, 3).join('；')}。`,
+    ].join('\n'),
+  };
+}
+

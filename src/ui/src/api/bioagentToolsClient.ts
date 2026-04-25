@@ -1,4 +1,5 @@
 import type { AgentStreamEvent, NormalizedAgentResponse, SendAgentMessageInput } from '../domain';
+import type { ScenarioId } from '../data';
 import { makeId, nowIso } from '../domain';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
 import { normalizeAgentResponse } from './agentClient';
@@ -17,21 +18,28 @@ export async function sendBioAgentToolMessage(
   callbacks: { onEvent?: (event: AgentStreamEvent) => void } = {},
   signal?: AbortSignal,
 ): Promise<NormalizedAgentResponse> {
+  const builtInScenarioId = builtInScenarioIdForInput(input);
   callbacks.onEvent?.(toolEvent('project-tool-start', `BioAgent ${input.scenarioId} project tool started`));
   const response = await fetch(`${input.config.workspaceWriterBaseUrl}/api/bioagent/tools/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       scenarioId: input.scenarioId,
-      skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[input.scenarioId].skillDomain,
+      scenarioPackageRef: input.scenarioPackageRef,
+      skillPlanRef: input.skillPlanRef,
+      uiPlanRef: input.uiPlanRef,
+      skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain,
       prompt: input.prompt,
       workspacePath: input.config.workspacePath,
       agentServerBaseUrl: input.config.agentServerBaseUrl,
       roleView: input.roleView,
       artifacts: summarizeArtifacts(input),
       uiState: {
-        scopeCheck: scopeCheck(input.scenarioId, input.prompt),
+        scopeCheck: scopeCheck(builtInScenarioId, input.prompt),
         scenarioOverride: input.scenarioOverride,
+        scenarioPackageRef: input.scenarioPackageRef,
+        skillPlanRef: input.skillPlanRef,
+        uiPlanRef: input.uiPlanRef,
         freshTaskGeneration: true,
       },
     }),
@@ -64,6 +72,18 @@ export async function sendBioAgentToolMessage(
       },
     },
   });
+}
+
+function builtInScenarioIdForInput(input: SendAgentMessageInput): ScenarioId {
+  if (input.scenarioId === 'structure-exploration'
+    || input.scenarioId === 'omics-differential-exploration'
+    || input.scenarioId === 'biomedical-knowledge-graph'
+    || input.scenarioId === 'literature-evidence-review') return input.scenarioId as ScenarioId;
+  const skillDomain = input.scenarioOverride?.skillDomain;
+  if (skillDomain === 'structure') return 'structure-exploration';
+  if (skillDomain === 'omics') return 'omics-differential-exploration';
+  if (skillDomain === 'knowledge') return 'biomedical-knowledge-graph';
+  return 'literature-evidence-review';
 }
 
 function summarizeArtifacts(input: SendAgentMessageInput) {

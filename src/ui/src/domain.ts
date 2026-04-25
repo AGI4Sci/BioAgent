@@ -1,4 +1,7 @@
-import type { ScenarioId, ClaimType, EvidenceLevel } from './data';
+import type { ClaimType, EvidenceLevel, ScenarioId } from './data';
+
+export type BuiltInScenarioId = ScenarioId;
+export type ScenarioInstanceId = ScenarioId | (string & {});
 
 export type MessageRole = 'user' | 'scenario' | 'system';
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed';
@@ -195,7 +198,8 @@ export interface ViewCompare {
 export interface RuntimeArtifact {
   id: string;
   type: string;
-  producerScenario: ScenarioId;
+  producerScenario: ScenarioInstanceId;
+  scenarioPackageRef?: ScenarioPackageRef;
   schemaVersion: string;
   metadata?: Record<string, unknown>;
   data?: unknown;
@@ -233,12 +237,25 @@ export interface RuntimeExecutionUnit {
   databaseVersions?: string[];
   artifacts?: string[];
   outputArtifacts?: string[];
+  scenarioPackageRef?: ScenarioPackageRef;
+  skillPlanRef?: string;
+  uiPlanRef?: string;
+  runtimeProfileId?: string;
+  routeDecision?: {
+    selectedSkill?: string;
+    selectedRuntime?: string;
+    fallbackReason?: string;
+    selectedAt: string;
+  };
+  requiredInputs?: string[];
+  recoverActions?: string[];
+  nextStep?: string;
 }
 
 export interface NotebookRecord {
   id: string;
   time: string;
-  scenario: ScenarioId;
+  scenario: ScenarioInstanceId;
   title: string;
   desc: string;
   claimType: ClaimType;
@@ -252,7 +269,10 @@ export interface NotebookRecord {
 
 export interface BioAgentRun {
   id: string;
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioInstanceId;
+  scenarioPackageRef?: ScenarioPackageRef;
+  skillPlanRef?: string;
+  uiPlanRef?: string;
   status: RunStatus;
   prompt: string;
   response: string;
@@ -264,7 +284,7 @@ export interface BioAgentRun {
 export interface BioAgentSession {
   schemaVersion: 2;
   sessionId: string;
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioInstanceId;
   title: string;
   createdAt: string;
   messages: BioAgentMessage[];
@@ -281,7 +301,7 @@ export interface BioAgentSession {
 export interface BioAgentWorkspaceState {
   schemaVersion: 2;
   workspacePath: string;
-  sessionsByScenario: Record<ScenarioId, BioAgentSession>;
+  sessionsByScenario: Record<ScenarioInstanceId, BioAgentSession>;
   archivedSessions: BioAgentSession[];
   alignmentContracts: AlignmentContractRecord[];
   beliefGraphs?: BeliefDependencyGraph[];
@@ -341,7 +361,7 @@ export interface BioAgentConfig {
 }
 
 export interface SendAgentMessageInput {
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioInstanceId;
   agentName: string;
   agentDomain: string;
   prompt: string;
@@ -350,6 +370,15 @@ export interface SendAgentMessageInput {
   artifacts?: RuntimeArtifact[];
   config: BioAgentConfig;
   scenarioOverride?: ScenarioRuntimeOverride;
+  scenarioPackageRef?: ScenarioPackageRef;
+  skillPlanRef?: string;
+  uiPlanRef?: string;
+}
+
+export interface ScenarioPackageRef {
+  id: string;
+  version: string;
+  source: 'built-in' | 'workspace' | 'generated';
 }
 
 export interface ScenarioRuntimeOverride {
@@ -360,6 +389,9 @@ export interface ScenarioRuntimeOverride {
   defaultComponents: string[];
   allowedComponents: string[];
   fallbackComponent: string;
+  scenarioPackageRef?: ScenarioPackageRef;
+  skillPlanRef?: string;
+  uiPlanRef?: string;
 }
 
 export interface NormalizedAgentResponse {

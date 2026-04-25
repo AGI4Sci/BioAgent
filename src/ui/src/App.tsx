@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   FileCode,
   FilePlus,
   FileText,
+  FileUp,
   Folder,
   FolderPlus,
   Lock,
@@ -29,25 +30,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import {
   scenarios,
   feasibilityRows,
   navItems,
@@ -60,6 +42,13 @@ import {
   type PageId,
 } from './data';
 import { SCENARIO_SPECS, SCENARIO_PRESETS, componentManifest } from './scenarioSpecs';
+import { compileScenarioDraft, scenarioIdBySkillDomain, type ScenarioBuilderDraft } from './scenarioCompiler/scenarioDraftCompiler';
+import { compileScenarioIRFromSelection, type ScenarioElementSelection } from './scenarioCompiler/scenarioElementCompiler';
+import { elementRegistry } from './scenarioCompiler/elementRegistry';
+import { runScenarioRuntimeSmoke } from './scenarioCompiler/runtimeSmoke';
+import { buildScenarioQualityReport } from './scenarioCompiler/scenarioQualityGate';
+import { buildBuiltInScenarioPackage, builtInScenarioPackageRef, type ScenarioPackage } from './scenarioCompiler/scenarioPackage';
+import { compileSlotsForScenario } from './scenarioCompiler/uiPlanCompiler';
 import { scpMarkdownSkills } from './scpSkillCatalog';
 import { timeline } from './demoData';
 import { sendAgentMessageStream } from './api/agentClient';
@@ -79,12 +68,14 @@ import {
   type NormalizedAgentResponse,
   type RuntimeArtifact,
   type RuntimeExecutionUnit,
+  type ScenarioInstanceId,
   type ScenarioRuntimeOverride,
   type UIManifestSlot,
 } from './domain';
+import type { VolcanoPoint } from './charts';
 import { createSession, loadWorkspaceState, resetSession, saveWorkspaceState, versionSession } from './sessionStore';
 import { loadBioAgentConfig, saveBioAgentConfig, updateConfig } from './config';
-import { listWorkspace, loadPersistedWorkspaceState, mutateWorkspaceFile, persistWorkspaceState, type WorkspaceEntry } from './api/workspaceClient';
+import { archiveWorkspaceScenario, listWorkspace, loadPersistedWorkspaceState, loadScenarioLibrary, loadWorkspaceScenario, mutateWorkspaceFile, persistWorkspaceState, publishWorkspaceScenario, saveWorkspaceScenario, type WorkspaceEntry } from './api/workspaceClient';
 import { HeatmapViewer, MoleculeViewer, NetworkGraph, UmapViewer } from './visualizations';
 
 const chartTheme = {
@@ -100,6 +91,15 @@ const chartTheme = {
   amber: '#FFD54F',
 };
 
+const ActivityAreaChart = lazy(async () => ({ default: (await import('./charts')).ActivityAreaChart }));
+const VolcanoChart = lazy(async () => ({ default: (await import('./charts')).VolcanoChart }));
+const CapabilityRadarChart = lazy(async () => ({ default: (await import('./charts')).CapabilityRadarChart }));
+
+const officialScenarioPackages = scenarios.map((scenario) => ({
+  scenario,
+  package: buildBuiltInScenarioPackage(scenario.id, '2026-04-25T00:00:00.000Z'),
+}));
+
 function cx(...values: Array<string | false | undefined>) {
   return values.filter(Boolean).join(' ');
 }
@@ -110,6 +110,19 @@ function checksumText(text: string) {
     hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
   }
   return hash.toString(16).padStart(8, '0');
+}
+
+function isBuiltInScenarioId(value: string): value is ScenarioId {
+  return Object.prototype.hasOwnProperty.call(SCENARIO_SPECS, value);
+}
+
+function builtInScenarioIdForInstance(scenarioId: ScenarioInstanceId, scenarioOverride?: ScenarioRuntimeOverride): ScenarioId {
+  if (typeof scenarioId === 'string' && isBuiltInScenarioId(scenarioId)) return scenarioId;
+  const skillDomain = scenarioOverride?.skillDomain;
+  if (skillDomain === 'structure') return 'structure-exploration';
+  if (skillDomain === 'omics') return 'omics-differential-exploration';
+  if (skillDomain === 'knowledge') return 'biomedical-knowledge-graph';
+  return 'literature-evidence-review';
 }
 
 function Card({ children, className = '', onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
@@ -166,59 +179,13 @@ function ActionButton({
   );
 }
 
-type ScenarioBuilderDraft = ScenarioRuntimeOverride & {
-  baseScenarioId: ScenarioId;
-  confidence: number;
-  summary: string;
-};
-
-const scenarioIdBySkillDomain: Record<ScenarioRuntimeOverride['skillDomain'], ScenarioId> = {
-  literature: 'literature-evidence-review',
-  structure: 'structure-exploration',
-  omics: 'omics-differential-exploration',
-  knowledge: 'biomedical-knowledge-graph',
-};
-
-function inferScenarioDraft(description: string): ScenarioBuilderDraft {
-  const text = description.trim();
-  const normalized = text.toLowerCase();
-  const skillDomain: ScenarioRuntimeOverride['skillDomain'] = /chembl|opentargets|drug|compound|disease|pathway|target priorit|target network|knowledge graph|知识图谱|疾病|化合物|药物|靶点|优先级/.test(normalized)
-    ? 'knowledge'
-    : /rna|scrna|omics|matrix|deseq|scanpy|umap|表达|差异|组学|单细胞/.test(normalized)
-      ? 'omics'
-      : /pdb|protein structure|structure|alphafold|ligand|residue|pocket|蛋白结构|结构|口袋|配体|残基/.test(normalized)
-        ? 'structure'
-        : /pubmed|paper|literature|review|evidence|文献|论文|综述|证据/.test(normalized)
-          ? 'literature'
-          : 'literature';
-  const baseScenarioId = scenarioIdBySkillDomain[skillDomain];
-  const base = SCENARIO_SPECS[baseScenarioId];
-  const titleSeed = text.replace(/[。.!?？\n].*$/s, '').trim().slice(0, 24);
-  const defaultComponents = base.componentPolicy.defaultComponents;
-  return {
-    baseScenarioId,
-    confidence: text.length > 18 ? 0.82 : 0.62,
-    summary: `${base.title} · ${defaultComponents.join(' / ')}`,
-    title: titleSeed ? `${titleSeed}场景` : base.title,
-    description: text || base.description,
-    skillDomain,
-    defaultComponents,
-    allowedComponents: base.componentPolicy.allowedComponents,
-    fallbackComponent: base.componentPolicy.fallbackComponent,
-    scenarioMarkdown: [
-      `# ${titleSeed || base.title}`,
-      '',
-      `用户目标：${text || base.description}`,
-      '',
-      `默认展示：${defaultComponents.join('、')}。`,
-      '',
-      `输入线索：${base.inputContract.map((item) => item.key).join('、')}。`,
-      '',
-      `输出 artifact：${base.outputArtifacts.map((item) => item.type).join('、')}。`,
-      '',
-      `边界：${base.scopeDeclaration.unsupportedTasks.slice(0, 3).join('；')}。`,
-    ].join('\n'),
-  };
+function ChartLoadingFallback({ label }: { label: string }) {
+  return (
+    <div className="empty-runtime-state compact chart-loading-state">
+      <Badge variant="muted">loading</Badge>
+      <strong>{label}</strong>
+    </div>
+  );
 }
 
 function SectionHeader({
@@ -344,6 +311,23 @@ function findArtifact(session: BioAgentSession, ref?: string): RuntimeArtifact |
 function exportJsonFile(name: string, payload: unknown) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   exportBlob(name, blob);
+}
+
+function parseScenarioPackageJson(value: unknown): ScenarioPackage {
+  if (!isRecord(value)) throw new Error('Package JSON 必须是对象。');
+  if (value.schemaVersion !== '1') throw new Error('只支持 schemaVersion=1 的 Scenario Package。');
+  if (!asString(value.id)) throw new Error('Package 缺少 id。');
+  if (!asString(value.version)) throw new Error('Package 缺少 version。');
+  if (!['draft', 'validated', 'published', 'archived'].includes(String(value.status))) throw new Error('Package status 无效。');
+  if (!isRecord(value.scenario)) throw new Error('Package 缺少 scenario。');
+  if (!asString(value.scenario.id)) throw new Error('scenario.id 缺失。');
+  if (!asString(value.scenario.title)) throw new Error('scenario.title 缺失。');
+  if (!asString(value.scenario.skillDomain)) throw new Error('scenario.skillDomain 缺失。');
+  if (!isRecord(value.skillPlan)) throw new Error('Package 缺少 skillPlan。');
+  if (!isRecord(value.uiPlan)) throw new Error('Package 缺少 uiPlan。');
+  if (!Array.isArray(value.tests)) throw new Error('Package tests 必须是数组。');
+  if (!Array.isArray(value.versions)) throw new Error('Package versions 必须是数组。');
+  return value as unknown as ScenarioPackage;
 }
 
 function exportTextFile(name: string, content: string, contentType = 'text/plain') {
@@ -503,7 +487,7 @@ function Sidebar({
 }: {
   page: PageId;
   setPage: (page: PageId) => void;
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioInstanceId;
   setScenarioId: (id: ScenarioId) => void;
   config: BioAgentConfig;
   workspaceStatus: string;
@@ -654,25 +638,21 @@ function Sidebar({
                   ))}
                 </nav>
                 <div className="scenario-list">
-                  <div className="sidebar-label">场景模板</div>
-                  {scenarios.map((scenario) => (
-                    <button
-                      key={scenario.id}
-                      className={cx('scenario-nav', scenarioId === scenario.id && page === 'workbench' && 'active')}
-                      onClick={() => {
-                        setScenarioId(scenario.id);
-                        setPage('workbench');
-                      }}
-                    >
-                      <span className="scenario-nav-icon" style={{ color: scenario.color, background: `${scenario.color}16` }}>
-                        <scenario.icon size={15} />
-                      </span>
-                      <span className="scenario-nav-copy">
-                        <strong>{scenario.name}</strong>
-                        <small>{SCENARIO_PRESETS[scenario.id].skillDomain} · {scenario.defaultResult}</small>
-                      </span>
-                    </button>
-                  ))}
+                  <div className="sidebar-label">场景编译</div>
+                  <button
+                    className="scenario-compile-card"
+                    onClick={() => setPage('dashboard')}
+                  >
+                    <Sparkles size={15} />
+                    <span>
+                      <strong>描述需求并编译新场景</strong>
+                      <small>选择 skills / tools / UI 组件后发布稳定 workspace package</small>
+                    </span>
+                  </button>
+                  <div className="sidebar-package-note">
+                    <strong>官方 packages 默认不导入</strong>
+                    <span>在研究概览的 Package Catalog 中按需导入、导出，然后从 Scenario Library 打开。</span>
+                  </div>
                 </div>
               </>
             ) : null}
@@ -901,14 +881,136 @@ function SettingsDialog({
 function Dashboard({
   setPage,
   setScenarioId,
+  config,
   onApplyScenarioDraft,
 }: {
   setPage: (page: PageId) => void;
-  setScenarioId: (id: ScenarioId) => void;
-  onApplyScenarioDraft: (scenarioId: ScenarioId, draft: ScenarioRuntimeOverride) => void;
+  setScenarioId: (id: ScenarioInstanceId) => void;
+  config: BioAgentConfig;
+  onApplyScenarioDraft: (scenarioId: ScenarioInstanceId, draft: ScenarioRuntimeOverride) => void;
 }) {
   const [scenarioPrompt, setScenarioPrompt] = useState('我想比较KRAS G12D突变相关文献证据，并在需要时联动蛋白结构和知识图谱。');
-  const [scenarioDraft, setScenarioDraft] = useState<ScenarioBuilderDraft>(() => inferScenarioDraft('我想比较KRAS G12D突变相关文献证据，并在需要时联动蛋白结构和知识图谱。'));
+  const [scenarioDraft, setScenarioDraft] = useState<ScenarioBuilderDraft>(() => compileScenarioDraft('我想比较KRAS G12D突变相关文献证据，并在需要时联动蛋白结构和知识图谱。'));
+  const [libraryItems, setLibraryItems] = useState<Array<{ id: string; title: string; description: string; version: string; status: string; source?: string }>>([]);
+  const [libraryStatus, setLibraryStatus] = useState('');
+  const packageImportInputRef = useRef<HTMLInputElement>(null);
+  const importedPackageIds = useMemo(() => new Set(libraryItems.map((item) => item.id)), [libraryItems]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!config.workspacePath.trim()) {
+      setLibraryItems([]);
+      return;
+    }
+    refreshScenarioLibrary()
+      .catch((error) => {
+        if (!cancelled) setLibraryStatus(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.workspacePath, config.workspaceWriterBaseUrl]);
+
+  async function refreshScenarioLibrary() {
+    const library = await loadScenarioLibrary(config);
+    setLibraryItems(library?.items ?? []);
+  }
+
+  function openScenarioPackage(pkg: ScenarioPackage) {
+    onApplyScenarioDraft(pkg.id, scenarioPackageToOverride(pkg));
+    setScenarioId(pkg.id);
+    setPage('workbench');
+  }
+
+  async function openWorkspaceScenario(id: string) {
+    try {
+      const pkg = await loadWorkspaceScenario(config, id);
+      if (!pkg) {
+        setLibraryStatus(`打开失败：workspace 中找不到 package ${id}。`);
+        return;
+      }
+      openScenarioPackage(pkg);
+    } catch (error) {
+      setLibraryStatus(error instanceof Error ? `打开 package 失败：${error.message}` : `打开 package 失败：${String(error)}`);
+    }
+  }
+
+  async function copyWorkspaceScenario(id: string) {
+    const pkg = await loadWorkspaceScenario(config, id);
+    if (!pkg) return;
+    const copyId = `${pkg.id}-copy-${Date.now().toString(36)}`;
+    await saveWorkspaceScenario(config, {
+      ...pkg,
+      id: copyId,
+      version: '1.0.0',
+      status: 'draft',
+      scenario: {
+        ...pkg.scenario,
+        id: copyId,
+        title: `${pkg.scenario.title} copy`,
+      },
+    });
+    await refreshScenarioLibrary();
+    setLibraryStatus('已复制为 draft。');
+  }
+
+  async function archiveWorkspaceScenarioFromLibrary(id: string) {
+    await archiveWorkspaceScenario(config, id);
+    await refreshScenarioLibrary();
+    setLibraryStatus('已归档。');
+  }
+
+  async function importScenarioPackageFile(event: FormEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const json = JSON.parse(await file.text()) as unknown;
+      const pkg = parseScenarioPackageJson(json);
+      await saveWorkspaceScenario(config, pkg);
+      await refreshScenarioLibrary();
+      setLibraryStatus(`已导入 package ${pkg.scenario.title} (${pkg.id}@${pkg.version})，正在打开工作台。`);
+      openScenarioPackage(pkg);
+    } catch (error) {
+      setLibraryStatus(error instanceof Error ? `导入 package 失败：${error.message}` : `导入 package 失败：${String(error)}`);
+    }
+  }
+
+  async function exportWorkspacePackage(id: string) {
+    const pkg = await loadWorkspaceScenario(config, id);
+    if (!pkg) {
+      setLibraryStatus(`导出失败：找不到 package ${id}。`);
+      return;
+    }
+    exportJsonFile(`${pkg.id}-${pkg.version}.scenario-package.json`, pkg);
+    setLibraryStatus(`已导出 ${pkg.scenario.title || pkg.id} package JSON。`);
+  }
+
+  async function importOfficialPackage(id: ScenarioId) {
+    try {
+      const builtInPackage = buildBuiltInScenarioPackage(id);
+      const pkg: ScenarioPackage = {
+        ...builtInPackage,
+        status: 'published',
+        scenario: {
+          ...builtInPackage.scenario,
+          source: 'built-in',
+        },
+      };
+      await saveWorkspaceScenario(config, pkg);
+      await refreshScenarioLibrary();
+      setLibraryStatus(`已导入 ${pkg.scenario.title}，正在打开工作台。`);
+      openScenarioPackage(pkg);
+    } catch (error) {
+      setLibraryStatus(error instanceof Error ? `导入失败：${error.message}` : `导入失败：${String(error)}`);
+    }
+  }
+
+  function exportOfficialPackage(id: ScenarioId) {
+    const pkg = buildBuiltInScenarioPackage(id);
+    exportJsonFile(`${pkg.id}-${pkg.version}.scenario-package.json`, pkg);
+    setLibraryStatus(`已导出 ${pkg.scenario.title} package JSON。`);
+  }
   const activityData = [
     { day: 'Mon', papers: 28, eus: 4 },
     { day: 'Tue', papers: 36, eus: 7 },
@@ -953,7 +1055,7 @@ function Dashboard({
             placeholder="例如：帮我构建一个场景，读取单细胞表达矩阵，比较处理组和对照组，并展示火山图、热图和UMAP。"
           />
           <div className="scenario-builder-actions">
-            <ActionButton icon={Sparkles} onClick={() => setScenarioDraft(inferScenarioDraft(scenarioPrompt))}>生成场景设置</ActionButton>
+            <ActionButton icon={Sparkles} onClick={() => setScenarioDraft(compileScenarioDraft(scenarioPrompt))}>生成场景设置</ActionButton>
             <ActionButton
               icon={Play}
               variant="secondary"
@@ -1004,58 +1106,94 @@ function Dashboard({
         <Card>
           <SectionHeader icon={Target} title="最近活跃度" subtitle="workspace runtime events" />
           <div className="chart-220">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <AreaChart data={activityData}>
-                <defs>
-                  <linearGradient id="bioArea" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#00E5A0" stopOpacity={0.42} />
-                    <stop offset="100%" stopColor="#00E5A0" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#243044" strokeDasharray="3 3" />
-                <XAxis dataKey="day" tick={{ fill: '#7B93B0', fontSize: 11 }} />
-                <YAxis tick={{ fill: '#7B93B0', fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: '#1A2332', border: '1px solid #243044', borderRadius: 8 }} />
-                <Area dataKey="papers" stroke="#00E5A0" fill="url(#bioArea)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<ChartLoadingFallback label="加载活跃度图表" />}>
+              <ActivityAreaChart data={activityData} />
+            </Suspense>
           </div>
         </Card>
       </div>
 
       <section>
-        <SectionHeader title="模板库" subtitle="从稳定模板开始，也可以进入后继续编辑 Scenario 设置" />
+        <SectionHeader title="Official Package Catalog" subtitle="官方预编译 packages 默认不进入 workspace；按需导入后才会成为可运行场景" />
         <div className="scenario-grid">
-          {scenarios.map((scenario) => (
+          {officialScenarioPackages.map(({ scenario, package: pkg }) => (
             <Card
-              key={scenario.id}
+              key={pkg.id}
               className="scenario-card"
-              onClick={() => {
-                setScenarioId(scenario.id);
-                setPage('workbench');
-              }}
             >
               <div className="scenario-card-top">
                 <div className="scenario-card-icon" style={{ color: scenario.color, background: `${scenario.color}18` }}>
                   <scenario.icon size={23} />
                 </div>
-                <Badge variant="muted">{SCENARIO_PRESETS[scenario.id].skillDomain}</Badge>
+                <Badge variant={importedPackageIds.has(pkg.id) ? 'success' : 'muted'}>{importedPackageIds.has(pkg.id) ? 'imported' : 'not imported'}</Badge>
               </div>
-              <h3 style={{ color: scenario.color }}>{SCENARIO_PRESETS[scenario.id].title}</h3>
-              <p>{SCENARIO_PRESETS[scenario.id].description}</p>
+              <h3 style={{ color: scenario.color }}>{pkg.scenario.title}</h3>
+              <p>{pkg.scenario.description}</p>
               <div className="tool-chips">
-                {scenario.tools.map((tool) => (
-                  <span key={tool}>{tool}</span>
+                {pkg.scenario.selectedSkillIds.slice(0, 3).map((skillId) => (
+                  <span key={skillId}>{skillId}</span>
                 ))}
               </div>
               <div className="scenario-note">
-                <code>{SCENARIO_PRESETS[scenario.id].id}</code>
-                <span>{componentManifest[scenario.id].length} UI modules</span>
+                <code>{pkg.id}@{pkg.version}</code>
+                <span>{pkg.uiPlan.slots.length} UI slots</span>
               </div>
               <div className="manifest-strip">
-                {componentManifest[scenario.id].map((component) => (
+                {pkg.uiPlan.compiledFrom.componentIds.map((component) => (
                   <i key={component} title={component} />
                 ))}
+              </div>
+              <div className="scenario-builder-actions">
+                <ActionButton
+                  icon={importedPackageIds.has(pkg.id) ? Play : FilePlus}
+                  onClick={() => void (importedPackageIds.has(pkg.id) ? openWorkspaceScenario(pkg.id) : importOfficialPackage(scenario.id))}
+                >
+                  {importedPackageIds.has(pkg.id) ? '打开' : '导入并打开'}
+                </ActionButton>
+                <ActionButton icon={Download} variant="secondary" onClick={() => exportOfficialPackage(scenario.id)}>导出</ActionButton>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <SectionHeader
+          title="Scenario Library"
+          subtitle="workspace 中已导入、保存、发布或归档的可复用场景"
+          action={(
+            <div className="scenario-builder-actions">
+              <input
+                ref={packageImportInputRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(event) => void importScenarioPackageFile(event)}
+              />
+              <ActionButton icon={FileUp} variant="secondary" onClick={() => packageImportInputRef.current?.click()}>导入 package</ActionButton>
+              <ActionButton icon={RefreshCw} variant="ghost" onClick={() => void refreshScenarioLibrary()}>刷新</ActionButton>
+            </div>
+          )}
+        />
+        {libraryStatus ? <p className="empty-state">{libraryStatus}</p> : null}
+        <div className="scenario-grid">
+          {libraryItems.slice(0, 8).map((item) => (
+            <Card key={`${item.id}-${item.version}`} className="scenario-card">
+              <div className="scenario-card-top">
+                <Badge variant={item.status === 'published' ? 'success' : item.status === 'archived' ? 'muted' : 'warning'}>{item.status}</Badge>
+                <code>{item.version}</code>
+              </div>
+              <h3>{item.title || item.id}</h3>
+              <p>{item.description || item.id}</p>
+              <div className="scenario-note">
+                <code>{item.id}</code>
+                <span>{item.source ?? 'workspace'}</span>
+              </div>
+              <div className="scenario-builder-actions">
+                <ActionButton icon={Play} onClick={() => void openWorkspaceScenario(item.id)}>打开</ActionButton>
+                <ActionButton icon={FilePlus} variant="secondary" onClick={() => void copyWorkspaceScenario(item.id)}>复制</ActionButton>
+                <ActionButton icon={Download} variant="secondary" onClick={() => void exportWorkspacePackage(item.id)}>导出</ActionButton>
+                <ActionButton icon={Trash2} variant="ghost" onClick={() => void archiveWorkspaceScenarioFromLibrary(item.id)}>归档</ActionButton>
               </div>
             </Card>
           ))}
@@ -1086,7 +1224,7 @@ function ChatPanel({
   onAutoRunConsumed,
   scenarioOverride,
 }: {
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioInstanceId;
   role: string;
   config: BioAgentConfig;
   session: BioAgentSession;
@@ -1122,7 +1260,11 @@ function ChatPanel({
   const autoScrollRef = useRef(true);
   const resizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const messages = session.messages;
-  const scenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
+  const baseScenarioId = builtInScenarioIdForInstance(scenarioId, scenarioOverride);
+  const scenario = scenarios.find((item) => item.id === baseScenarioId) ?? scenarios[0];
+  const scenarioPackageRef = scenarioOverride?.scenarioPackageRef ?? builtInScenarioPackageRef(baseScenarioId);
+  const skillPlanRef = scenarioOverride?.skillPlanRef ?? `skill-plan.${baseScenarioId}.default`;
+  const uiPlanRef = scenarioOverride?.uiPlanRef ?? `ui-plan.${baseScenarioId}.default`;
 
   useEffect(() => {
     activeSessionRef.current = session;
@@ -1212,6 +1354,9 @@ function ChatPanel({
         artifacts: optimisticSession.artifacts,
         config,
         scenarioOverride,
+        scenarioPackageRef,
+        skillPlanRef,
+        uiPlanRef,
       };
       let response: NormalizedAgentResponse;
       try {
@@ -1259,6 +1404,9 @@ function ChatPanel({
           {
             id: makeId('run'),
             scenarioId,
+            scenarioPackageRef,
+            skillPlanRef,
+            uiPlanRef,
             status: 'failed',
             prompt,
             response: message,
@@ -1332,10 +1480,16 @@ function ChatPanel({
   }
 
   function mergeAgentResponse(baseSession: BioAgentSession, response: NormalizedAgentResponse): BioAgentSession {
+    const versionedRun = {
+      ...response.run,
+      scenarioPackageRef: response.run.scenarioPackageRef ?? scenarioPackageRef,
+      skillPlanRef: response.run.skillPlanRef ?? skillPlanRef,
+      uiPlanRef: response.run.uiPlanRef ?? uiPlanRef,
+    };
     return {
       ...baseSession,
       messages: [...baseSession.messages, response.message],
-      runs: [...baseSession.runs, response.run],
+      runs: [...baseSession.runs, versionedRun],
       uiManifest: response.uiManifest.length ? response.uiManifest : baseSession.uiManifest,
       claims: [...response.claims, ...baseSession.claims].slice(0, 24),
       executionUnits: [...response.executionUnits, ...baseSession.executionUnits].slice(0, 24),
@@ -1562,14 +1716,6 @@ function formatSessionTime(value: string) {
   return new Date(time).toLocaleString('zh-CN', { hour12: false });
 }
 
-type VolcanoPoint = {
-  gene: string;
-  logFC: number;
-  negLogP: number;
-  sig: boolean;
-  category?: string;
-};
-
 function volcanoPointsFromPayload(payload: Record<string, unknown>, colorField?: string): VolcanoPoint[] | undefined {
   const records = toRecordList(payload.points);
   const points = records.flatMap((record, index) => {
@@ -1585,30 +1731,6 @@ function volcanoPointsFromPayload(payload: Record<string, unknown>, colorField?:
     }];
   });
   return points.length ? points : undefined;
-}
-
-function VolcanoChart({ points }: { points?: VolcanoPoint[] }) {
-  const data = useMemo(() => points ?? [], [points]);
-  if (!data.length) return <EmptyArtifactState title="没有 volcano points" detail="火山图需要 artifact.data.points，不会绘制 demo 基因点。" />;
-  const categories = Array.from(new Set(data.map((point) => point.category).filter(Boolean)));
-  const palette = ['#00E5A0', '#FF7043', '#4ECDC4', '#FFD54F', '#3D7AED'];
-  return (
-    <div className="chart-300">
-        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-        <ScatterChart margin={{ top: 10, right: 14, bottom: 24, left: 8 }}>
-          <CartesianGrid stroke="#243044" strokeDasharray="3 3" />
-          <XAxis dataKey="logFC" type="number" tick={{ fill: '#7B93B0', fontSize: 10 }} label={{ value: 'log2FC', position: 'bottom', fill: '#7B93B0' }} />
-          <YAxis dataKey="negLogP" type="number" tick={{ fill: '#7B93B0', fontSize: 10 }} label={{ value: '-log10(p)', angle: -90, position: 'insideLeft', fill: '#7B93B0' }} />
-          <Tooltip contentStyle={{ background: '#1A2332', border: '1px solid #243044', borderRadius: 8 }} />
-          <Scatter data={data}>
-            {data.map((entry) => (
-              <Cell key={entry.gene} fill={entry.category ? palette[Math.max(0, categories.indexOf(entry.category)) % palette.length] : entry.sig ? (entry.logFC > 0 ? '#FF7043' : '#4ECDC4') : 'rgba(123,147,176,0.35)'} />
-            ))}
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
-    </div>
-  );
 }
 
 function ResultsRenderer({
@@ -1689,29 +1811,30 @@ function Workbench({
   scenarioOverride,
   onScenarioOverrideChange,
 }: {
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioInstanceId;
   config: BioAgentConfig;
   session: BioAgentSession;
   draft: string;
   savedScrollTop: number;
-  onDraftChange: (scenarioId: ScenarioId, value: string) => void;
-  onScrollTopChange: (scenarioId: ScenarioId, value: number) => void;
+  onDraftChange: (scenarioId: ScenarioInstanceId, value: string) => void;
+  onScrollTopChange: (scenarioId: ScenarioInstanceId, value: number) => void;
   onSessionChange: (session: BioAgentSession) => void;
-  onNewChat: (scenarioId: ScenarioId) => void;
-  onDeleteChat: (scenarioId: ScenarioId) => void;
+  onNewChat: (scenarioId: ScenarioInstanceId) => void;
+  onDeleteChat: (scenarioId: ScenarioInstanceId) => void;
   archivedSessions: BioAgentSession[];
-  onRestoreArchivedSession: (scenarioId: ScenarioId, sessionId: string) => void;
-  onEditMessage: (scenarioId: ScenarioId, messageId: string, content: string) => void;
-  onDeleteMessage: (scenarioId: ScenarioId, messageId: string) => void;
+  onRestoreArchivedSession: (scenarioId: ScenarioInstanceId, sessionId: string) => void;
+  onEditMessage: (scenarioId: ScenarioInstanceId, messageId: string, content: string) => void;
+  onDeleteMessage: (scenarioId: ScenarioInstanceId, messageId: string) => void;
   archivedCount: number;
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
   autoRunRequest?: HandoffAutoRunRequest;
   onAutoRunConsumed: (requestId: string) => void;
   scenarioOverride?: ScenarioRuntimeOverride;
-  onScenarioOverrideChange: (scenarioId: ScenarioId, override: ScenarioRuntimeOverride) => void;
+  onScenarioOverrideChange: (scenarioId: ScenarioInstanceId, override: ScenarioRuntimeOverride) => void;
 }) {
-  const scenarioView = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
-  const scenarioSpec = SCENARIO_PRESETS[scenarioId];
+  const baseScenarioId = builtInScenarioIdForInstance(scenarioId, scenarioOverride);
+  const scenarioView = scenarios.find((item) => item.id === baseScenarioId) ?? scenarios[0];
+  const scenarioSpec = SCENARIO_PRESETS[baseScenarioId];
   const runtimeScenario = scenarioOverride ?? {
     title: scenarioSpec.title,
     description: scenarioSpec.description,
@@ -1741,9 +1864,10 @@ function Workbench({
           <TabBar tabs={roleTabs} active={role} onChange={setRole} />
         </div>
       </div>
-      <ScenarioSettingsPanel
-        scenarioId={scenarioId}
+      <ScenarioBuilderPanel
+        scenarioId={baseScenarioId}
         scenario={runtimeScenario}
+        config={config}
         expanded={settingsExpanded}
         onToggle={() => setSettingsExpanded((value) => !value)}
         onChange={(override) => onScenarioOverrideChange(scenarioId, override)}
@@ -1778,7 +1902,7 @@ function Workbench({
           scenarioOverride={scenarioOverride}
         />
         <ResultsRenderer
-          scenarioId={scenarioId}
+          scenarioId={baseScenarioId}
           session={session}
           onArtifactHandoff={onArtifactHandoff}
           collapsed={resultsCollapsed}
@@ -1789,48 +1913,134 @@ function Workbench({
   );
 }
 
-function ScenarioSettingsPanel({
+function ScenarioBuilderPanel({
   scenarioId,
   scenario,
+  config,
   expanded,
   onToggle,
   onChange,
 }: {
   scenarioId: ScenarioId;
   scenario: ScenarioRuntimeOverride;
+  config: BioAgentConfig;
   expanded: boolean;
   onToggle: () => void;
   onChange: (override: ScenarioRuntimeOverride) => void;
 }) {
   const builtin = SCENARIO_SPECS[scenarioId];
+  const initialSelection = useMemo(() => defaultElementSelectionForScenario(scenarioId, scenario), [scenarioId]);
+  const [selection, setSelection] = useState<ScenarioElementSelection>(initialSelection);
+  const [previewTab, setPreviewTab] = useState<'scenario' | 'skill' | 'ui' | 'validation'>('scenario');
+  const [publishStatus, setPublishStatus] = useState('');
+  useEffect(() => {
+    setSelection(initialSelection);
+  }, [initialSelection]);
   const componentOptions = Array.from(new Set([...builtin.componentPolicy.allowedComponents, ...scenario.allowedComponents]));
+  const compileResult = useMemo(() => compileScenarioIRFromSelection(selection), [selection]);
+  const qualityReport = useMemo(() => buildScenarioQualityReport({
+    package: compileResult.package,
+    validationReport: compileResult.validationReport,
+  }), [compileResult]);
+  const qualityCounts = useMemo(() => ({
+    blocking: qualityReport.items.filter((item) => item.severity === 'blocking').length,
+    warning: qualityReport.items.filter((item) => item.severity === 'warning').length,
+    note: qualityReport.items.filter((item) => item.severity === 'note').length,
+  }), [qualityReport]);
+  const skillOptions = elementRegistry.skills.filter((skill) => skill.skillDomains.includes(selection.skillDomain ?? scenario.skillDomain));
+  const artifactOptions = elementRegistry.artifacts.filter((artifact) => (
+    artifact.tags?.includes(selection.skillDomain ?? scenario.skillDomain)
+    || artifact.producerSkillIds.some((skillId) => selection.selectedSkillIds.includes(skillId))
+    || selection.selectedArtifactTypes.includes(artifact.artifactType)
+  ));
+  const toolOptions = elementRegistry.tools.filter((tool) => tool.skillDomains.includes(selection.skillDomain ?? scenario.skillDomain));
   function patch(patchValue: Partial<ScenarioRuntimeOverride>) {
     onChange({ ...scenario, ...patchValue });
+  }
+  function patchSelection(patchValue: Partial<ScenarioElementSelection>) {
+    setSelection((current) => ({ ...current, ...patchValue }));
   }
   function toggleComponent(component: string) {
     const next = scenario.defaultComponents.includes(component)
       ? scenario.defaultComponents.filter((item) => item !== component)
       : [...scenario.defaultComponents, component];
+    patchSelection({ selectedComponentIds: toggleList(selection.selectedComponentIds ?? [], component) });
     patch({ defaultComponents: next.length ? next : [scenario.fallbackComponent] });
   }
+  function toggleSelectionList(key: 'selectedSkillIds' | 'selectedToolIds' | 'selectedArtifactTypes' | 'selectedFailurePolicyIds', value: string) {
+    setSelection((current) => ({
+      ...current,
+      [key]: toggleList((current[key] ?? []) as string[], value),
+    }));
+  }
+  async function saveCompiled(status: 'draft' | 'published') {
+    try {
+      setPublishStatus(status === 'draft' ? '保存中...' : '发布中...');
+      const smoke = await runScenarioRuntimeSmoke({ package: compileResult.package, mode: 'dry-run' });
+      const quality = buildScenarioQualityReport({
+        package: compileResult.package,
+        validationReport: smoke.validationReport,
+        runtimeSmoke: smoke,
+      });
+      const pkg = {
+        ...compileResult.package,
+        status,
+        validationReport: smoke.validationReport,
+        qualityReport: quality,
+      };
+      if (status === 'published') {
+        if (!quality.ok) {
+          setPublishStatus('quality gate blocking errors，已保持为 draft。');
+          await saveWorkspaceScenario(config, { ...pkg, status: 'draft' });
+          return;
+        }
+        await publishWorkspaceScenario(config, pkg);
+      } else {
+        await saveWorkspaceScenario(config, pkg);
+      }
+      setPublishStatus(status === 'draft' ? '已保存 draft 到 workspace。' : '已发布到 workspace scenario library。');
+    } catch (error) {
+      setPublishStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+  const previewJson = previewTab === 'scenario'
+    ? compileResult.scenario
+    : previewTab === 'skill'
+      ? compileResult.skillPlan
+      : previewTab === 'ui'
+        ? compileResult.uiPlan
+        : compileResult.validationReport;
   return (
     <section className={cx('scenario-settings', expanded && 'expanded')}>
       <button className="scenario-settings-summary" onClick={onToggle}>
         <FileCode size={16} />
-        <span>场景设置</span>
+        <span>Scenario Builder</span>
         <strong>{scenario.skillDomain}</strong>
-        <em>{scenario.defaultComponents.join(' / ')}</em>
+        <em>{compileResult.package.id}@{compileResult.package.version} · {compileResult.validationReport.ok ? 'valid' : 'needs fixes'}</em>
         {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
       {expanded ? (
         <div className="scenario-settings-body">
           <label>
             <span>场景名称</span>
-            <input value={scenario.title} onChange={(event) => patch({ title: event.target.value })} />
+            <input
+              value={scenario.title}
+              onChange={(event) => {
+                patch({ title: event.target.value });
+                patchSelection({ title: event.target.value });
+              }}
+            />
           </label>
           <label>
             <span>Skill domain</span>
-            <select value={scenario.skillDomain} onChange={(event) => patch({ skillDomain: event.target.value as ScenarioRuntimeOverride['skillDomain'] })}>
+            <select
+              value={scenario.skillDomain}
+              onChange={(event) => {
+                const skillDomain = event.target.value as ScenarioRuntimeOverride['skillDomain'];
+                patch({ skillDomain });
+                patchSelection({ skillDomain });
+              }}
+            >
               <option value="literature">literature</option>
               <option value="structure">structure</option>
               <option value="omics">omics</option>
@@ -1839,11 +2049,23 @@ function ScenarioSettingsPanel({
           </label>
           <label className="wide">
             <span>场景描述</span>
-            <input value={scenario.description} onChange={(event) => patch({ description: event.target.value })} />
+            <input
+              value={scenario.description}
+              onChange={(event) => {
+                patch({ description: event.target.value });
+                patchSelection({ description: event.target.value });
+              }}
+            />
           </label>
           <label className="wide">
             <span>Scenario markdown</span>
-            <textarea value={scenario.scenarioMarkdown} onChange={(event) => patch({ scenarioMarkdown: event.target.value })} />
+            <textarea
+              value={scenario.scenarioMarkdown}
+              onChange={(event) => {
+                patch({ scenarioMarkdown: event.target.value });
+                patchSelection({ scenarioMarkdown: event.target.value });
+              }}
+            />
           </label>
           <div className="component-selector">
             <span>默认组件集合</span>
@@ -1859,9 +2081,134 @@ function ScenarioSettingsPanel({
               ))}
             </div>
           </div>
+          <ElementSelector
+            title="Skills"
+            options={skillOptions.map((skill) => ({ id: skill.id, label: skill.label }))}
+            selected={selection.selectedSkillIds}
+            onToggle={(id) => toggleSelectionList('selectedSkillIds', id)}
+          />
+          <ElementSelector
+            title="Tools"
+            options={toolOptions.map((tool) => ({ id: tool.id, label: tool.label }))}
+            selected={selection.selectedToolIds ?? []}
+            onToggle={(id) => toggleSelectionList('selectedToolIds', id)}
+          />
+          <ElementSelector
+            title="Artifacts"
+            options={artifactOptions.map((artifact) => ({ id: artifact.artifactType, label: artifact.label }))}
+            selected={selection.selectedArtifactTypes}
+            onToggle={(id) => toggleSelectionList('selectedArtifactTypes', id)}
+          />
+          <ElementSelector
+            title="Failure policies"
+            options={elementRegistry.failurePolicies.map((policy) => ({ id: policy.id, label: policy.label }))}
+            selected={selection.selectedFailurePolicyIds ?? []}
+            onToggle={(id) => toggleSelectionList('selectedFailurePolicyIds', id)}
+          />
+          <div className="scenario-preview-panel">
+            <div className="scenario-preview-tabs">
+              {(['scenario', 'skill', 'ui', 'validation'] as const).map((tab) => (
+                <button key={tab} className={cx(previewTab === tab && 'active')} onClick={() => setPreviewTab(tab)}>{tab}</button>
+              ))}
+            </div>
+            <pre className="inspector-json">{JSON.stringify(previewJson, null, 2)}</pre>
+          </div>
+          <div className="manifest-diagnostics">
+            <strong>Quality gate</strong>
+            <span><Badge variant={qualityCounts.blocking ? 'danger' : 'success'}>{qualityCounts.blocking} blocking</Badge></span>
+            <span><Badge variant={qualityCounts.warning ? 'warning' : 'muted'}>{qualityCounts.warning} warning</Badge></span>
+            <span><Badge variant="info">{qualityCounts.note} note</Badge></span>
+            <code>{qualityReport.items.slice(0, 3).map((item) => `${item.severity}:${item.code}`).join(' · ') || 'ready'}</code>
+          </div>
+          <div className="scenario-publish-row">
+            <div>
+              <Badge variant={compileResult.validationReport.ok ? 'success' : 'warning'}>
+                {compileResult.validationReport.ok ? 'validation ok' : `${compileResult.validationReport.issues.length} issues`}
+              </Badge>
+              {publishStatus ? <span>{publishStatus}</span> : null}
+            </div>
+            <div>
+              <ActionButton icon={FilePlus} variant="secondary" onClick={() => void saveCompiled('draft')}>保存 draft</ActionButton>
+              <ActionButton icon={Play} disabled={!compileResult.validationReport.ok} onClick={() => void saveCompiled('published')}>发布</ActionButton>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>
+  );
+}
+
+function defaultElementSelectionForScenario(scenarioId: ScenarioId, scenario: ScenarioRuntimeOverride): ScenarioElementSelection {
+  const spec = SCENARIO_SPECS[scenarioId];
+  const artifactTypes = spec.outputArtifacts.map((artifact) => artifact.type);
+  const selectedSkillIds = elementRegistry.skills
+    .filter((skill) => skill.skillDomains.includes(scenario.skillDomain) && skill.outputArtifactTypes.some((artifactType) => artifactTypes.includes(artifactType)))
+    .slice(0, 3)
+    .map((skill) => skill.id);
+  const selectedToolIds = elementRegistry.tools
+    .filter((tool) => tool.skillDomains.includes(scenario.skillDomain))
+    .slice(0, 5)
+    .map((tool) => tool.id);
+  return {
+    id: `${scenarioId}-workspace-draft`,
+    title: scenario.title,
+    description: scenario.description,
+    skillDomain: scenario.skillDomain,
+    scenarioMarkdown: scenario.scenarioMarkdown,
+    selectedSkillIds,
+    selectedToolIds,
+    selectedArtifactTypes: artifactTypes,
+    selectedComponentIds: scenario.defaultComponents,
+    selectedFailurePolicyIds: ['failure.missing-input', 'failure.schema-mismatch', 'failure.backend-unavailable'],
+    fallbackComponentId: scenario.fallbackComponent,
+    status: 'draft',
+  };
+}
+
+function scenarioPackageToOverride(pkg: { scenario: { title: string; description: string; skillDomain: ScenarioRuntimeOverride['skillDomain']; scenarioMarkdown: string; selectedComponentIds: string[]; fallbackComponentId: string } }): ScenarioRuntimeOverride {
+  const base = SCENARIO_SPECS[scenarioIdBySkillDomain[pkg.scenario.skillDomain]];
+  const defaultComponents = pkg.scenario.selectedComponentIds.length ? pkg.scenario.selectedComponentIds : base.componentPolicy.defaultComponents;
+  const packageLike = pkg as { id?: string; version?: string; skillPlan?: { id?: string }; uiPlan?: { id?: string } };
+  return {
+    title: pkg.scenario.title,
+    description: pkg.scenario.description,
+    skillDomain: pkg.scenario.skillDomain,
+    scenarioMarkdown: pkg.scenario.scenarioMarkdown,
+    defaultComponents,
+    allowedComponents: Array.from(new Set([...base.componentPolicy.allowedComponents, ...defaultComponents])),
+    fallbackComponent: pkg.scenario.fallbackComponentId || base.componentPolicy.fallbackComponent,
+    scenarioPackageRef: packageLike.id && packageLike.version ? { id: packageLike.id, version: packageLike.version, source: 'workspace' } : undefined,
+    skillPlanRef: packageLike.skillPlan?.id,
+    uiPlanRef: packageLike.uiPlan?.id,
+  };
+}
+
+function toggleList(values: string[], value: string) {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}
+
+function ElementSelector({
+  title,
+  options,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  options: Array<{ id: string; label: string }>;
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="component-selector">
+      <span>{title}</span>
+      <div>
+        {options.slice(0, 24).map((option) => (
+          <button key={option.id} className={cx(selected.includes(option.id) && 'active')} onClick={() => onToggle(option.id)} title={option.label}>
+            {option.id}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1884,7 +2231,7 @@ interface HandoffAutoRunRequest {
 }
 
 function defaultSlotsForAgent(scenarioId: ScenarioId): UIManifestSlot[] {
-  return SCENARIO_SPECS[scenarioId].defaultSlots;
+  return compileSlotsForScenario(scenarioId);
 }
 
 function PaperCardList({ slot, artifact, session }: RegistryRendererProps) {
@@ -2032,7 +2379,11 @@ function CanvasSlot({ slot, artifact, session, kind }: RegistryRendererProps & {
       </div>
       <Card className="viz-card">
         {kind === 'volcano' ? (
-          <VolcanoChart points={volcanoPoints} />
+          <div className="chart-300">
+            <Suspense fallback={<ChartLoadingFallback label="加载火山图" />}>
+              <VolcanoChart points={volcanoPoints} />
+            </Suspense>
+          </div>
         ) : kind === 'heatmap' ? (
           <HeatmapViewer matrix={heatmap} label={[asString(payload.label) || asString(isRecord(payload.heatmap) ? payload.heatmap.label : undefined), splitField ? `splitBy=${splitField}` : undefined].filter(Boolean).join(' · ') || undefined} />
         ) : kind === 'umap' ? (
@@ -2253,12 +2604,7 @@ function RegistrySlot({
 }) {
   const artifact = findArtifact(session, slot.artifactRef);
   const entry = componentRegistry[slot.componentId];
-  const artifactSchema = artifact
-    ? SCENARIO_SPECS[artifact.producerScenario].outputArtifacts.find((schema) => schema.type === artifact.type)
-    : undefined;
-  const handoffTargets = artifact && artifactSchema
-    ? artifactSchema.consumers.filter((consumer) => consumer !== scenarioId)
-    : [];
+  const handoffTargets = artifact ? handoffTargetsForArtifact(artifact, scenarioId) : [];
   if (!entry) {
     return (
       <Card className="registry-slot">
@@ -2290,6 +2636,20 @@ function RegistrySlot({
       ) : null}
     </Card>
   );
+}
+
+function handoffTargetsForArtifact(artifact: RuntimeArtifact, currentScenarioId: ScenarioId): ScenarioId[] {
+  const declaredTargets = asStringList(isRecord(artifact.metadata) ? artifact.metadata.handoffTargets : undefined)
+    .filter(isBuiltInScenarioId);
+  const schemaTargets = isBuiltInScenarioId(artifact.producerScenario)
+    ? SCENARIO_SPECS[artifact.producerScenario].outputArtifacts
+      .find((schema) => schema.type === artifact.type)
+      ?.consumers ?? []
+    : scenarios.flatMap((scenario) => SCENARIO_SPECS[scenario.id].outputArtifacts
+      .filter((schema) => schema.type === artifact.type)
+      .flatMap((schema) => schema.consumers));
+  return Array.from(new Set([...declaredTargets, ...schemaTargets]))
+    .filter((target) => target !== currentScenarioId);
 }
 
 function ManifestDiagnostics({ slots }: { slots: Array<{ componentId: string; title?: string; artifactRef?: string }> }) {
@@ -2442,8 +2802,18 @@ function executionStatusDetail(unit: RuntimeExecutionUnit) {
   const lines = [
     unit.attempt ? `attempt=${unit.attempt}` : undefined,
     unit.parentAttempt ? `parentAttempt=${unit.parentAttempt}` : undefined,
+    unit.runtimeProfileId ? `runtimeProfile=${unit.runtimeProfileId}` : undefined,
+    unit.routeDecision?.selectedSkill ? `selectedSkill=${unit.routeDecision.selectedSkill}` : undefined,
+    unit.routeDecision?.selectedRuntime ? `selectedRuntime=${unit.routeDecision.selectedRuntime}` : undefined,
+    unit.routeDecision?.fallbackReason ? `fallback=${unit.routeDecision.fallbackReason}` : undefined,
+    unit.scenarioPackageRef ? `package=${unit.scenarioPackageRef.id}@${unit.scenarioPackageRef.version}` : undefined,
+    unit.skillPlanRef ? `skillPlan=${unit.skillPlanRef}` : undefined,
+    unit.uiPlanRef ? `uiPlan=${unit.uiPlanRef}` : undefined,
     unit.selfHealReason ? `selfHealReason=${unit.selfHealReason}` : undefined,
     unit.failureReason ? `failureReason=${unit.failureReason}` : undefined,
+    unit.requiredInputs?.length ? `requiredInputs=${unit.requiredInputs.join(', ')}` : undefined,
+    unit.recoverActions?.length ? `recover=${unit.recoverActions.join(' | ')}` : undefined,
+    unit.nextStep ? `nextStep=${unit.nextStep}` : undefined,
     unit.patchSummary ? `patchSummary=${unit.patchSummary}` : undefined,
     unit.diffRef ? `diffRef=${unit.diffRef}` : undefined,
     unit.stdoutRef ? `stdout=${unit.stdoutRef}` : undefined,
@@ -2465,12 +2835,22 @@ function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
     `stdoutRef: ${unit.stdoutRef || 'n/a'}`,
     `stderrRef: ${unit.stderrRef || 'n/a'}`,
     `outputRef: ${unit.outputRef || 'n/a'}`,
+    `runtimeProfileId: ${unit.runtimeProfileId || 'n/a'}`,
+    `selectedSkill: ${unit.routeDecision?.selectedSkill || 'n/a'}`,
+    `selectedRuntime: ${unit.routeDecision?.selectedRuntime || 'n/a'}`,
+    `fallbackReason: ${unit.routeDecision?.fallbackReason || 'n/a'}`,
+    `scenarioPackageRef: ${unit.scenarioPackageRef ? `${unit.scenarioPackageRef.id}@${unit.scenarioPackageRef.version}:${unit.scenarioPackageRef.source}` : 'n/a'}`,
+    `skillPlanRef: ${unit.skillPlanRef || 'n/a'}`,
+    `uiPlanRef: ${unit.uiPlanRef || 'n/a'}`,
     `attempt: ${unit.attempt || 'n/a'}`,
     `parentAttempt: ${unit.parentAttempt || 'n/a'}`,
     `selfHealReason: ${unit.selfHealReason || 'n/a'}`,
     `failureReason: ${unit.failureReason || 'n/a'}`,
     `patchSummary: ${unit.patchSummary || 'n/a'}`,
     `diffRef: ${unit.diffRef || 'n/a'}`,
+    `requiredInputs: ${(unit.requiredInputs ?? []).join(', ') || 'n/a'}`,
+    `recoverActions: ${(unit.recoverActions ?? []).join(' | ') || 'n/a'}`,
+    `nextStep: ${unit.nextStep || 'n/a'}`,
     `databases: ${(unit.databaseVersions ?? []).join(', ') || 'n/a'}`,
   ].join('\n')).join('\n\n');
 }
@@ -2679,16 +3059,9 @@ function Feasibility({
       <Card>
         <SectionHeader title="双视角能力雷达" subtitle="AI vs Bio assessment" />
         <div className="chart-300">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-            <RadarChart data={radarData}>
-              <PolarGrid stroke="#243044" />
-              <PolarAngleAxis dataKey="subject" tick={{ fill: '#7B93B0', fontSize: 10 }} />
-              <PolarRadiusAxis tick={{ fill: '#7B93B0', fontSize: 9 }} />
-              <Radar dataKey="ai" name="AI" stroke="#4ECDC4" fill="#4ECDC4" fillOpacity={0.2} />
-              <Radar dataKey="bio" name="Bio" stroke="#FF7043" fill="#FF7043" fillOpacity={0.18} />
-              <Tooltip contentStyle={{ background: '#1A2332', border: '1px solid #243044', borderRadius: 8 }} />
-            </RadarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<ChartLoadingFallback label="加载能力雷达" />}>
+            <CapabilityRadarChart data={radarData} />
+          </Suspense>
         </div>
       </Card>
     </div>
@@ -2908,9 +3281,13 @@ function sessionActivityScore(session: BioAgentSession) {
     + session.notebook.length;
 }
 
+function scenarioLabelForInstance(scenarioId: ScenarioInstanceId) {
+  return scenarios.find((item) => item.id === scenarioId)?.name ?? String(scenarioId);
+}
+
 export function BioAgentApp() {
   const [page, setPage] = useState<PageId>('dashboard');
-  const [scenarioId, setScenarioId] = useState<ScenarioId>('literature-evidence-review');
+  const [scenarioId, setScenarioId] = useState<ScenarioInstanceId>('literature-evidence-review');
   const [config, setConfig] = useState<BioAgentConfig>(() => loadBioAgentConfig());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceState, setWorkspaceState] = useState<BioAgentWorkspaceState>(() => {
@@ -2921,14 +3298,14 @@ export function BioAgentApp() {
   const [workspaceStatus, setWorkspaceStatus] = useState('');
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [handoffAutoRun, setHandoffAutoRun] = useState<HandoffAutoRunRequest | undefined>();
-  const [scenarioOverrides, setScenarioOverrides] = useState<Partial<Record<ScenarioId, ScenarioRuntimeOverride>>>({});
-  const [drafts, setDrafts] = useState<Record<ScenarioId, string>>({
+  const [scenarioOverrides, setScenarioOverrides] = useState<Partial<Record<ScenarioInstanceId, ScenarioRuntimeOverride>>>({});
+  const [drafts, setDrafts] = useState<Record<ScenarioInstanceId, string>>({
     'literature-evidence-review': '',
     'structure-exploration': '',
     'omics-differential-exploration': '',
     'biomedical-knowledge-graph': '',
   });
-  const [messageScrollTops, setMessageScrollTops] = useState<Record<ScenarioId, number>>({
+  const [messageScrollTops, setMessageScrollTops] = useState<Record<ScenarioInstanceId, number>>({
     'literature-evidence-review': 0,
     'structure-exploration': 0,
     'omics-differential-exploration': 0,
@@ -2936,16 +3313,24 @@ export function BioAgentApp() {
   });
 
   const sessions = workspaceState.sessionsByScenario;
-  const archivedSessionsByAgent = useMemo(() => scenarios.reduce((acc, scenario) => {
-    acc[scenario.id] = workspaceState.archivedSessions
+  const archivedSessionsByAgent = useMemo(() => {
+    const acc = scenarios.reduce((memo, scenario) => {
+      memo[scenario.id] = workspaceState.archivedSessions
       .filter((session) => session.scenarioId === scenario.id)
       .sort((left, right) => Date.parse(right.updatedAt || right.createdAt) - Date.parse(left.updatedAt || left.createdAt));
+      return memo;
+    }, {} as Record<ScenarioInstanceId, BioAgentSession[]>);
+    for (const session of workspaceState.archivedSessions) {
+      if (acc[session.scenarioId]) continue;
+      acc[session.scenarioId] = workspaceState.archivedSessions
+        .filter((item) => item.scenarioId === session.scenarioId)
+        .sort((left, right) => Date.parse(right.updatedAt || right.createdAt) - Date.parse(left.updatedAt || left.createdAt));
+    }
     return acc;
-  }, {} as Record<ScenarioId, BioAgentSession[]>), [workspaceState.archivedSessions]);
-  const archivedCountByAgent = useMemo(() => scenarios.reduce((acc, scenario) => {
-    acc[scenario.id] = archivedSessionsByAgent[scenario.id].length;
-    return acc;
-  }, {} as Record<ScenarioId, number>), [archivedSessionsByAgent]);
+  }, [workspaceState.archivedSessions]);
+  const archivedCountByAgent = useMemo(() => Object.fromEntries(
+    Object.entries(archivedSessionsByAgent).map(([key, value]) => [key, value.length]),
+  ) as Record<ScenarioInstanceId, number>, [archivedSessionsByAgent]);
 
   async function hydrateWorkspaceSnapshot(path: string, runtimeConfig: BioAgentConfig, mode: 'prefer-newer' | 'force' = 'prefer-newer') {
     const requestedPath = path.trim();
@@ -3064,35 +3449,39 @@ export function BioAgentApp() {
     });
   }
 
-  function updateDraft(nextScenarioId: ScenarioId, value: string) {
+  function updateDraft(nextScenarioId: ScenarioInstanceId, value: string) {
     setDrafts((current) => ({ ...current, [nextScenarioId]: value }));
   }
 
-  function updateMessageScrollTop(nextScenarioId: ScenarioId, value: number) {
+  function updateMessageScrollTop(nextScenarioId: ScenarioInstanceId, value: number) {
     setMessageScrollTops((current) => ({ ...current, [nextScenarioId]: value }));
   }
 
-  function applyScenarioOverride(nextScenarioId: ScenarioId, override: ScenarioRuntimeOverride) {
+  function applyScenarioOverride(nextScenarioId: ScenarioInstanceId, override: ScenarioRuntimeOverride) {
     setScenarioOverrides((current) => ({ ...current, [nextScenarioId]: override }));
   }
 
-  function newChat(nextScenarioId: ScenarioId) {
+  function activeSessionFor(state: BioAgentWorkspaceState, nextScenarioId: ScenarioInstanceId) {
+    return state.sessionsByScenario[nextScenarioId] ?? createSession(nextScenarioId, `${scenarioLabelForInstance(nextScenarioId)} 新聊天`);
+  }
+
+  function newChat(nextScenarioId: ScenarioInstanceId) {
     updateWorkspace((current) => {
-      const currentSession = versionSession(current.sessionsByScenario[nextScenarioId], 'new chat archived previous session');
+      const currentSession = versionSession(activeSessionFor(current, nextScenarioId), 'new chat archived previous session');
       return {
         ...current,
         archivedSessions: [currentSession, ...current.archivedSessions].slice(0, 80),
         sessionsByScenario: {
           ...current.sessionsByScenario,
-          [nextScenarioId]: createSession(nextScenarioId, `${scenarios.find((item) => item.id === nextScenarioId)?.name ?? nextScenarioId} 新聊天`),
+          [nextScenarioId]: createSession(nextScenarioId, `${scenarioLabelForInstance(nextScenarioId)} 新聊天`),
         },
       };
     });
   }
 
-  function deleteChat(nextScenarioId: ScenarioId) {
+  function deleteChat(nextScenarioId: ScenarioInstanceId) {
     updateWorkspace((current) => {
-      const deleted = versionSession(current.sessionsByScenario[nextScenarioId], 'deleted current chat');
+      const deleted = versionSession(activeSessionFor(current, nextScenarioId), 'deleted current chat');
       return {
         ...current,
         archivedSessions: [{ ...deleted, title: `${deleted.title}（已删除）` }, ...current.archivedSessions].slice(0, 80),
@@ -3104,11 +3493,11 @@ export function BioAgentApp() {
     });
   }
 
-  function restoreArchivedSession(nextScenarioId: ScenarioId, sessionId: string) {
+  function restoreArchivedSession(nextScenarioId: ScenarioInstanceId, sessionId: string) {
     updateWorkspace((current) => {
       const restored = current.archivedSessions.find((session) => session.scenarioId === nextScenarioId && session.sessionId === sessionId);
       if (!restored) return current;
-      const active = current.sessionsByScenario[nextScenarioId];
+      const active = activeSessionFor(current, nextScenarioId);
       const nextArchived = current.archivedSessions.filter((session) => session.sessionId !== sessionId);
       const archivedActive = sessionActivityScore(active) > 0
         ? [versionSession(active, `restored archived session ${sessionId}`), ...nextArchived]
@@ -3127,8 +3516,8 @@ export function BioAgentApp() {
     });
   }
 
-  function editMessage(nextScenarioId: ScenarioId, messageId: string, content: string) {
-    const session = workspaceState.sessionsByScenario[nextScenarioId];
+  function editMessage(nextScenarioId: ScenarioInstanceId, messageId: string, content: string) {
+    const session = workspaceState.sessionsByScenario[nextScenarioId] ?? createSession(nextScenarioId);
     const nextSession: BioAgentSession = {
       ...session,
       messages: session.messages.map((message) => message.id === messageId ? { ...message, content, updatedAt: nowIso() } as BioAgentMessage : message),
@@ -3137,8 +3526,8 @@ export function BioAgentApp() {
     updateSession(nextSession, `edit message ${messageId}`);
   }
 
-  function deleteMessage(nextScenarioId: ScenarioId, messageId: string) {
-    const session = workspaceState.sessionsByScenario[nextScenarioId];
+  function deleteMessage(nextScenarioId: ScenarioInstanceId, messageId: string) {
+    const session = workspaceState.sessionsByScenario[nextScenarioId] ?? createSession(nextScenarioId);
     const nextSession: BioAgentSession = {
       ...session,
       messages: session.messages.filter((message) => message.id !== messageId),
@@ -3261,6 +3650,10 @@ export function BioAgentApp() {
     }));
   }
 
+  const activeScenarioOverride = scenarioOverrides[scenarioId];
+  const activeBuiltInScenarioId = builtInScenarioIdForInstance(scenarioId, activeScenarioOverride);
+  const activeSession = sessions[scenarioId] ?? createSession(scenarioId, `${scenarioLabelForInstance(scenarioId)} 新聊天`);
+
   return (
     <div className="app-shell">
       <div className="ambient ambient-a" />
@@ -3268,7 +3661,7 @@ export function BioAgentApp() {
       <Sidebar
         page={page}
         setPage={setPage}
-        scenarioId={scenarioId}
+        scenarioId={activeBuiltInScenarioId}
         setScenarioId={setScenarioId}
         config={config}
         workspaceStatus={workspaceStatus}
@@ -3278,28 +3671,28 @@ export function BioAgentApp() {
         <TopBar onSearch={handleSearch} onSettingsOpen={() => setSettingsOpen(true)} />
         <div className="content-shell">
           {page === 'dashboard' ? (
-            <Dashboard setPage={setPage} setScenarioId={setScenarioId} onApplyScenarioDraft={applyScenarioOverride} />
+            <Dashboard setPage={setPage} setScenarioId={setScenarioId} config={config} onApplyScenarioDraft={applyScenarioOverride} />
           ) : page === 'workbench' ? (
             <Workbench
               scenarioId={scenarioId}
               config={config}
-              session={sessions[scenarioId]}
-              draft={drafts[scenarioId]}
-              savedScrollTop={messageScrollTops[scenarioId]}
+              session={activeSession}
+              draft={drafts[scenarioId] ?? ''}
+              savedScrollTop={messageScrollTops[scenarioId] ?? 0}
               onDraftChange={updateDraft}
               onScrollTopChange={updateMessageScrollTop}
               onSessionChange={updateSession}
               onNewChat={newChat}
               onDeleteChat={deleteChat}
-              archivedSessions={archivedSessionsByAgent[scenarioId]}
+              archivedSessions={archivedSessionsByAgent[scenarioId] ?? []}
               onRestoreArchivedSession={restoreArchivedSession}
               onEditMessage={editMessage}
               onDeleteMessage={deleteMessage}
-              archivedCount={archivedCountByAgent[scenarioId]}
+              archivedCount={archivedCountByAgent[scenarioId] ?? 0}
               onArtifactHandoff={handleArtifactHandoff}
               autoRunRequest={handoffAutoRun}
               onAutoRunConsumed={consumeHandoffAutoRun}
-              scenarioOverride={scenarioOverrides[scenarioId]}
+              scenarioOverride={activeScenarioOverride}
               onScenarioOverrideChange={applyScenarioOverride}
             />
           ) : page === 'alignment' ? (

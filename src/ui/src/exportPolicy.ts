@@ -49,6 +49,9 @@ export function buildExecutionBundle(session: BioAgentSession, decision = evalua
     runs: session.runs.map((run) => ({
       id: run.id,
       scenarioId: run.scenarioId,
+      scenarioPackageRef: run.scenarioPackageRef,
+      skillPlanRef: run.skillPlanRef,
+      uiPlanRef: run.uiPlanRef,
       status: run.status,
       prompt: run.prompt,
       createdAt: run.createdAt,
@@ -62,6 +65,7 @@ function summarizeArtifactForExport(artifact: RuntimeArtifact) {
     id: artifact.id,
     type: artifact.type,
     producerScenario: artifact.producerScenario,
+    scenarioPackageRef: artifact.scenarioPackageRef,
     schemaVersion: artifact.schemaVersion,
     metadata: artifact.metadata,
     dataRef: artifact.dataRef,

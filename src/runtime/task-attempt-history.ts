@@ -16,6 +16,10 @@ export async function appendTaskAttempt(workspacePath: string, record: TaskAttem
     id: record.id,
     prompt: record.prompt,
     skillDomain: record.skillDomain,
+    scenarioPackageRef: record.scenarioPackageRef,
+    skillPlanRef: record.skillPlanRef,
+    uiPlanRef: record.uiPlanRef,
+    routeDecision: record.routeDecision,
     updatedAt: new Date().toISOString(),
     attempts,
   }, null, 2));

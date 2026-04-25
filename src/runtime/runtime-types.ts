@@ -15,9 +15,18 @@ export interface GatewayRequest {
   prompt: string;
   workspacePath?: string;
   agentServerBaseUrl?: string;
+  scenarioPackageRef?: ScenarioPackageRef;
+  skillPlanRef?: string;
+  uiPlanRef?: string;
   artifacts: Array<Record<string, unknown>>;
   uiState?: Record<string, unknown>;
   availableSkills?: string[];
+}
+
+export interface ScenarioPackageRef {
+  id: string;
+  version: string;
+  source: 'built-in' | 'workspace' | 'generated';
 }
 
 export interface ToolPayload {
@@ -172,6 +181,16 @@ export interface TaskAttemptRecord {
   prompt: string;
   skillDomain: BioAgentSkillDomain;
   skillId?: string;
+  scenarioPackageRef?: ScenarioPackageRef;
+  skillPlanRef?: string;
+  uiPlanRef?: string;
+  runtimeProfileId?: string;
+  routeDecision?: {
+    selectedSkill?: string;
+    selectedRuntime?: string;
+    fallbackReason?: string;
+    selectedAt: string;
+  };
   attempt: number;
   parentAttempt?: number;
   selfHealReason?: string;

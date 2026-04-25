@@ -8,6 +8,7 @@ import {
   type BioAgentMessage,
   type BioAgentSession,
   type BioAgentWorkspaceState,
+  type ScenarioInstanceId,
   type SessionVersionRecord,
 } from './domain';
 
@@ -32,7 +33,7 @@ function seedMessages(scenarioId: ScenarioId): BioAgentMessage[] {
   }));
 }
 
-export function createSession(scenarioId: ScenarioId, title = '新聊天', options: { seed?: boolean } = {}): BioAgentSession {
+export function createSession(scenarioId: ScenarioInstanceId, title = '新聊天', options: { seed?: boolean } = {}): BioAgentSession {
   const now = nowIso();
   return {
     schemaVersion: 2,
@@ -40,7 +41,7 @@ export function createSession(scenarioId: ScenarioId, title = '新聊天', optio
     scenarioId,
     title,
     createdAt: now,
-    messages: options.seed ? seedMessages(scenarioId) : [],
+    messages: options.seed && isScenarioId(scenarioId) ? seedMessages(scenarioId) : [],
     runs: [],
     uiManifest: [],
     claims: [],
@@ -52,7 +53,7 @@ export function createSession(scenarioId: ScenarioId, title = '新聊天', optio
   };
 }
 
-function migrateSession(value: unknown, scenarioId: ScenarioId): BioAgentSession {
+function migrateSession(value: unknown, scenarioId: ScenarioInstanceId): BioAgentSession {
   if (isSessionV2(value, scenarioId)) return value;
   if (typeof value === 'object' && value !== null && (value as { scenarioId?: unknown }).scenarioId === scenarioId) {
     const raw = value as Partial<BioAgentSession> & { schemaVersion?: number };
@@ -63,7 +64,7 @@ function migrateSession(value: unknown, scenarioId: ScenarioId): BioAgentSession
       scenarioId,
       title: typeof raw.title === 'string' ? raw.title : '迁移聊天',
       createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now,
-      messages: Array.isArray(raw.messages) ? raw.messages : seedMessages(scenarioId),
+      messages: Array.isArray(raw.messages) ? raw.messages : isScenarioId(scenarioId) ? seedMessages(scenarioId) : [],
       runs: Array.isArray(raw.runs) ? raw.runs : [],
       uiManifest: Array.isArray(raw.uiManifest) ? raw.uiManifest : [],
       claims: Array.isArray(raw.claims) ? raw.claims : [],
@@ -77,7 +78,7 @@ function migrateSession(value: unknown, scenarioId: ScenarioId): BioAgentSession
   return createSession(scenarioId);
 }
 
-function isSessionV2(value: unknown, scenarioId: ScenarioId): value is BioAgentSession {
+function isSessionV2(value: unknown, scenarioId: ScenarioInstanceId): value is BioAgentSession {
   return typeof value === 'object'
     && value !== null
     && (value as BioAgentSession).schemaVersion === 2
@@ -94,7 +95,7 @@ export function createInitialWorkspaceState(): BioAgentWorkspaceState {
     sessionsByScenario: scenarioIds.reduce((acc, scenarioId) => {
       acc[scenarioId] = createSession(scenarioId, `${scenarioLabel(scenarioId)} 默认聊天`, { seed: true });
       return acc;
-    }, {} as Record<ScenarioId, BioAgentSession>),
+    }, {} as Record<ScenarioInstanceId, BioAgentSession>),
     archivedSessions: [],
     alignmentContracts: [],
     updatedAt: now,
@@ -119,14 +120,14 @@ export function parseWorkspaceState(value: unknown): BioAgentWorkspaceState {
   return {
     schemaVersion: 2,
     workspacePath: typeof raw.workspacePath === 'string' ? raw.workspacePath : '',
-    sessionsByScenario: scenarioIds.reduce((acc, scenarioId) => {
+    sessionsByScenario: preserveWorkspaceSessions(raw.sessionsByScenario, scenarioIds.reduce((acc, scenarioId) => {
       acc[scenarioId] = migrateSession(raw.sessionsByScenario?.[scenarioId], scenarioId);
       return acc;
-    }, {} as Record<ScenarioId, BioAgentSession>),
+    }, {} as Record<ScenarioInstanceId, BioAgentSession>)),
     archivedSessions: Array.isArray(raw.archivedSessions)
       ? raw.archivedSessions.flatMap((session) => {
         const scenarioId = typeof session === 'object' && session !== null ? (session as { scenarioId?: unknown }).scenarioId : undefined;
-        return isScenarioId(scenarioId) ? [migrateSession(session, scenarioId)] : [];
+        return typeof scenarioId === 'string' && scenarioId.trim() ? [migrateSession(session, scenarioId)] : [];
       })
       : [],
     alignmentContracts: Array.isArray(raw.alignmentContracts)
@@ -153,7 +154,7 @@ export function saveWorkspaceState(state: BioAgentWorkspaceState) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-export function resetSession(scenarioId: ScenarioId): BioAgentSession {
+export function resetSession(scenarioId: ScenarioInstanceId): BioAgentSession {
   return createSession(scenarioId, `${scenarioLabel(scenarioId)} 新聊天`);
 }
 
@@ -189,6 +190,18 @@ function checksum(text: string) {
   return hash.toString(16).padStart(8, '0');
 }
 
-function scenarioLabel(scenarioId: ScenarioId) {
+function preserveWorkspaceSessions(
+  rawSessions: BioAgentWorkspaceState['sessionsByScenario'] | undefined,
+  base: Record<ScenarioInstanceId, BioAgentSession>,
+) {
+  if (!rawSessions || typeof rawSessions !== 'object') return base;
+  for (const [scenarioId, session] of Object.entries(rawSessions)) {
+    if (!scenarioId || isScenarioId(scenarioId)) continue;
+    base[scenarioId] = migrateSession(session, scenarioId);
+  }
+  return base;
+}
+
+function scenarioLabel(scenarioId: ScenarioInstanceId) {
   return scenarios.find((scenario) => scenario.id === scenarioId)?.name ?? scenarioId;
 }

@@ -51,6 +51,38 @@ Built-in Scenario presets currently include:
 
 They live in `src/ui/src/scenarioSpecs.ts`. Each preset declares its `skillDomain`, input contract, output artifacts, scope declaration, default UIManifest slots, and component policy. These presets are not separate pages; they are contracts loaded into the same Scenario workbench.
 
+## Scenario Builder And Library
+
+BioAgent can now compile composable Scenario Packages. In the workbench, Scenario Builder lets a user select skills, tools, artifact schemas, UI components, and failure policies, then preview:
+
+- `ScenarioIR`
+- `SkillPlan`
+- `UIPlan`
+- validation / quality reports
+
+Draft and published packages are written under:
+
+```text
+<workspace>/.bioagent/scenarios/<scenario-id>/
+```
+
+The split package files are:
+
+```text
+scenario.json
+skill-plan.json
+ui-plan.json
+validation-report.json
+quality-report.json
+tests.json
+versions.json
+package.json
+```
+
+Dashboard Scenario Library lists workspace packages and supports open, copy, and archive flows. Published runs keep `scenarioPackageRef`, `skillPlanRef`, `uiPlanRef`, runtime profile, and route decision so old results remain reproducible after a package changes.
+
+An authoring reference lives at `docs/ScenarioPackageAuthoring.md`; a minimal fixture lives at `docs/examples/workspace-scenario/`.
+
 ## Run The UI
 
 ```bash

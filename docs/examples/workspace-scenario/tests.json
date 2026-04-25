@@ -1,0 +1,9 @@
+{
+  "tests": [
+    {
+      "id": "smoke.example-literature-service.default",
+      "prompt": "TP53 review",
+      "expectedArtifactTypes": ["paper-list"]
+    }
+  ]
+}

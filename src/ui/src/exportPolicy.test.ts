@@ -37,6 +37,9 @@ describe('execution bundle export policy', () => {
     assert.match(bundle.exportPolicy.warnings.join('\n'), /restricted artifact artifact-team/);
     assert.equal(bundle.artifacts[0].exportPolicy, 'restricted');
     assert.deepEqual(bundle.artifacts[0].audience, ['team-a']);
+    assert.deepEqual(bundle.runs[0].scenarioPackageRef, { id: 'omics-differential-exploration', version: '1.0.0', source: 'built-in' });
+    assert.equal(bundle.runs[0].skillPlanRef, 'skill-plan.omics-differential-exploration.default');
+    assert.deepEqual(bundle.artifacts[0].scenarioPackageRef, { id: 'omics-differential-exploration', version: '1.0.0', source: 'built-in' });
   });
 });
 
@@ -52,6 +55,9 @@ function fixtureSession(artifact: Pick<RuntimeArtifact, 'id'> & Partial<RuntimeA
     runs: [{
       id: 'run-1',
       scenarioId: 'omics-differential-exploration',
+      scenarioPackageRef: { id: 'omics-differential-exploration', version: '1.0.0', source: 'built-in' },
+      skillPlanRef: 'skill-plan.omics-differential-exploration.default',
+      uiPlanRef: 'ui-plan.omics-differential-exploration.default',
       status: 'completed',
       prompt: 'export',
       response: 'done',
@@ -72,6 +78,7 @@ function fixtureSession(artifact: Pick<RuntimeArtifact, 'id'> & Partial<RuntimeA
       ...artifact,
       type: 'omics-differential-expression',
       producerScenario: 'omics-differential-exploration',
+      scenarioPackageRef: { id: 'omics-differential-exploration', version: '1.0.0', source: 'built-in' },
       schemaVersion: '1',
     }],
     notebook: [],

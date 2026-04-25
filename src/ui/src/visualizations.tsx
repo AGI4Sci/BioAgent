@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
-import { createViewer, SurfaceType, type GLViewer } from '3dmol';
+import type { GLViewer } from '3dmol';
 
 export interface NetworkNodeInput {
   id?: string;
@@ -55,6 +55,7 @@ export interface UmapViewerProps {
 
 type MoleculeStyle = 'cartoon' | 'sticks' | 'spheres' | 'surface';
 type ResidueRange = `${number}-${number}`;
+type ThreeDmolModule = typeof import('3dmol');
 
 function cx(...values: Array<string | false | undefined>) {
   return values.filter(Boolean).join(' ');
@@ -130,7 +131,7 @@ function browserCanUseWebGL() {
   }
 }
 
-function applyMoleculeStyle(viewer: GLViewer, style: MoleculeStyle, highlightResidues: string[]) {
+function applyMoleculeStyle(viewer: GLViewer, surfaceType: ThreeDmolModule['SurfaceType'], style: MoleculeStyle, highlightResidues: string[]) {
   viewer.setStyle({}, {});
   viewer.removeAllSurfaces();
   if (style === 'cartoon') {
@@ -146,7 +147,7 @@ function applyMoleculeStyle(viewer: GLViewer, style: MoleculeStyle, highlightRes
   if (style === 'surface') {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: 'spectrum', opacity: 0.55 } });
     viewer.setStyle({ hetflag: true }, { stick: { radius: 0.24, colorscheme: 'orangeCarbon' } });
-    viewer.addSurface(SurfaceType.VDW, { opacity: 0.58, color: '#4ECDC4' }, { hetflag: false });
+    viewer.addSurface(surfaceType.VDW, { opacity: 0.58, color: '#4ECDC4' }, { hetflag: false });
   }
   const selection = residueSelection(highlightResidues);
   if (selection) {
@@ -335,6 +336,7 @@ export function MoleculeViewer({
 }: MoleculeViewerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<GLViewer | null>(null);
+  const moleculeRuntimeRef = useRef<ThreeDmolModule | null>(null);
   const [style, setStyle] = useState<MoleculeStyle>('cartoon');
   const [spinning, setSpinning] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -346,37 +348,35 @@ export function MoleculeViewer({
   useEffect(() => {
     const container = ref.current;
     if (!container || webglUnavailable) return undefined;
+    const containerEl = container;
     let cancelled = false;
-    let viewer: GLViewer;
+    let viewer: GLViewer | undefined;
     if (!browserCanUseWebGL()) {
       setWebglUnavailable(true);
       setStatus(runtimeAtoms.length ? 'ready' : 'error');
       setError('WebGL unavailable');
       return undefined;
     }
-    try {
-      viewer = createViewer(container, {
-        backgroundColor: '#0A0F1A',
-        antialias: true,
-        cartoonQuality: 10,
-      });
-    } catch (viewerError) {
-      setWebglUnavailable(true);
-      setStatus(runtimeAtoms.length ? 'ready' : 'error');
-      setError(viewerError instanceof Error ? `WebGL unavailable: ${viewerError.message}` : 'WebGL unavailable');
-      return undefined;
-    }
-    viewerRef.current = viewer;
-    const resizeObserver = new ResizeObserver(() => {
-      viewer.resize();
-      viewer.render();
-    });
-    resizeObserver.observe(container);
+    let resizeObserver: ResizeObserver | undefined;
 
     async function loadStructure() {
       setStatus('loading');
       setError('');
       try {
+        const moleculeRuntime = moleculeRuntimeRef.current ?? await import('3dmol');
+        moleculeRuntimeRef.current = moleculeRuntime;
+        if (cancelled) return;
+          viewer = moleculeRuntime.createViewer(containerEl, {
+          backgroundColor: '#0A0F1A',
+          antialias: true,
+          cartoonQuality: 10,
+        });
+        viewerRef.current = viewer;
+        resizeObserver = new ResizeObserver(() => {
+          viewer?.resize();
+          viewer?.render();
+        });
+        resizeObserver.observe(containerEl);
         let structureText = '';
         let format = 'pdb';
         if (structureUrl) {
@@ -391,16 +391,17 @@ export function MoleculeViewer({
         if (cancelled) return;
         viewer.clear();
         viewer.addModel(structureText, format);
-        applyMoleculeStyle(viewer, style, highlightResidues);
+        applyMoleculeStyle(viewer, moleculeRuntime.SurfaceType, style, highlightResidues);
         viewer.zoomTo();
         viewer.render();
         setStatus('ready');
       } catch (loadError) {
         if (cancelled) return;
-        if (localPdb) {
+        const moleculeRuntime = moleculeRuntimeRef.current;
+        if (localPdb && viewer && moleculeRuntime) {
           viewer.clear();
           viewer.addModel(localPdb, 'pdb');
-          applyMoleculeStyle(viewer, style, highlightResidues);
+          applyMoleculeStyle(viewer, moleculeRuntime.SurfaceType, style, highlightResidues);
           viewer.zoomTo();
           viewer.render();
           setStatus('ready');
@@ -415,9 +416,9 @@ export function MoleculeViewer({
     void loadStructure();
     return () => {
       cancelled = true;
-      resizeObserver.disconnect();
-      viewer.spin(false);
-      viewer.clear();
+      resizeObserver?.disconnect();
+      viewer?.spin(false);
+      viewer?.clear();
       viewerRef.current = null;
     };
   }, [highlightResidues, localPdb, structureUrl]);
@@ -425,7 +426,9 @@ export function MoleculeViewer({
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || status !== 'ready' || webglUnavailable) return;
-    applyMoleculeStyle(viewer, style, highlightResidues);
+    const moleculeRuntime = moleculeRuntimeRef.current;
+    if (!moleculeRuntime) return;
+    applyMoleculeStyle(viewer, moleculeRuntime.SurfaceType, style, highlightResidues);
     viewer.spin(spinning ? 'y' : false, 0.7);
   }, [highlightResidues, spinning, status, style, webglUnavailable]);
 

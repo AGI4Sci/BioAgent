@@ -102,6 +102,7 @@ async function runAgentServerGeneratedTask(
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -141,6 +142,7 @@ async function runAgentServerGeneratedTask(
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: errors.length ? 'repair-needed' : 'done',
@@ -174,6 +176,7 @@ async function runAgentServerGeneratedTask(
       ].filter(Boolean).join('\n'),
       executionUnits: normalized.executionUnits.map((unit) => isRecord(unit) ? {
         ...unit,
+        ...attemptPlanRefs(request, skill),
         agentServerGenerated: true,
         agentServerRunId: generation.runId,
         patchSummary: generation.response.patchSummary,
@@ -185,6 +188,7 @@ async function runAgentServerGeneratedTask(
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -219,10 +223,52 @@ function normalizeGatewayRequest(body: Record<string, unknown>): GatewayRequest 
     prompt: String(body.prompt || ''),
     workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
     agentServerBaseUrl: typeof body.agentServerBaseUrl === 'string' ? cleanUrl(body.agentServerBaseUrl) : undefined,
+    scenarioPackageRef: normalizeScenarioPackageRef(body.scenarioPackageRef),
+    skillPlanRef: typeof body.skillPlanRef === 'string' ? body.skillPlanRef : undefined,
+    uiPlanRef: typeof body.uiPlanRef === 'string' ? body.uiPlanRef : undefined,
     artifacts: Array.isArray(body.artifacts) ? body.artifacts.filter(isRecord) : [],
     uiState: isRecord(body.uiState) ? body.uiState : undefined,
     availableSkills: Array.isArray(body.availableSkills) ? body.availableSkills.map(String) : undefined,
   };
+}
+
+function normalizeScenarioPackageRef(value: unknown): GatewayRequest['scenarioPackageRef'] {
+  if (!isRecord(value)) return undefined;
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  const version = typeof value.version === 'string' ? value.version.trim() : '';
+  const source = value.source === 'built-in' || value.source === 'workspace' || value.source === 'generated' ? value.source : undefined;
+  return id && version && source ? { id, version, source } : undefined;
+}
+
+function attemptPlanRefs(request: GatewayRequest, skill?: SkillAvailability, fallbackReason?: string) {
+  return {
+    scenarioPackageRef: request.scenarioPackageRef,
+    skillPlanRef: request.skillPlanRef,
+    uiPlanRef: request.uiPlanRef,
+    runtimeProfileId: runtimeProfileIdForRequest(request, skill),
+    routeDecision: {
+      selectedSkill: skill?.id,
+      selectedRuntime: selectedRuntimeForSkill(skill),
+      fallbackReason,
+      selectedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function runtimeProfileIdForRequest(request: GatewayRequest, skill?: SkillAvailability) {
+  if (skill?.manifest.entrypoint.type === 'agentserver-generation') return 'agentserver-codex';
+  if (skill && isLiveScpSkill(skill.id)) return 'scp-hub';
+  if (skill?.manifest.entrypoint.type === 'workspace-task') return 'workspace-python';
+  return request.scenarioPackageRef?.source === 'built-in' ? 'seed-skill' : undefined;
+}
+
+function selectedRuntimeForSkill(skill?: SkillAvailability) {
+  if (!skill) return undefined;
+  if (skill.manifest.entrypoint.type === 'agentserver-generation') return 'agentserver-generation';
+  if (skill.manifest.entrypoint.type === 'markdown-skill') return 'agentserver-markdown-skill';
+  if (skill.manifest.entrypoint.type === 'workspace-task') return 'workspace-python';
+  if (isLiveScpSkill(skill.id)) return 'scp-live-adapter';
+  return skill.manifest.entrypoint.type;
 }
 
 async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvailability, taskPrefix: string): Promise<ToolPayload> {
@@ -260,6 +306,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -299,6 +346,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: errors.length ? 'repair-needed' : 'done',
@@ -330,6 +378,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -393,6 +442,7 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -433,6 +483,7 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: errors.length || requiresGeneration || unitStatus === 'repair-needed' ? 'repair-needed' : unitStatus === 'failed-with-reason' ? 'failed-with-reason' : 'done',
@@ -467,6 +518,7 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
+      ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
@@ -554,6 +606,7 @@ async function tryAgentServerRepairAndRerun(params: {
       prompt: params.request.prompt,
       skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
+      ...attemptPlanRefs(params.request, params.skill, params.failureReason),
       attempt: 2,
       parentAttempt: 1,
       selfHealReason: params.failureReason,
@@ -598,6 +651,7 @@ async function tryAgentServerRepairAndRerun(params: {
       prompt: params.request.prompt,
       skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
+      ...attemptPlanRefs(params.request, params.skill, params.failureReason),
       attempt: 2,
       parentAttempt: 1,
       selfHealReason: params.failureReason,
@@ -631,6 +685,7 @@ async function tryAgentServerRepairAndRerun(params: {
       prompt: params.request.prompt,
       skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
+      ...attemptPlanRefs(params.request, params.skill, params.failureReason),
       attempt: 2,
       parentAttempt: 1,
       selfHealReason: params.failureReason,
@@ -657,6 +712,7 @@ async function tryAgentServerRepairAndRerun(params: {
       ].filter(Boolean).join('\n'),
       executionUnits: normalized.executionUnits.map((unit) => isRecord(unit) ? {
         ...unit,
+        ...attemptPlanRefs(params.request, params.skill, params.failureReason),
         status: 'self-healed',
         attempt: 2,
         parentAttempt: 1,
@@ -676,6 +732,7 @@ async function tryAgentServerRepairAndRerun(params: {
       prompt: params.request.prompt,
       skillDomain: params.request.skillDomain,
       skillId: params.skill.id,
+      ...attemptPlanRefs(params.request, params.skill, params.failureReason),
       attempt: 2,
       parentAttempt: 1,
       selfHealReason: params.failureReason,
@@ -1115,6 +1172,7 @@ function validateAndNormalizePayload(
       outputRef: refs.outputRel,
       runtimeFingerprint: refs.runtimeFingerprint,
       skillId: skill.id,
+      ...attemptPlanRefs(request, skill),
       ...unit,
     } : unit),
     artifacts: Array.isArray(payload.artifacts) ? payload.artifacts : [],
@@ -1339,10 +1397,48 @@ function repairNeededPayload(
       stdoutRef: refs.stdoutRel,
       stderrRef: refs.stderrRel,
       failureReason: reason,
+      ...attemptPlanRefs(request, skill, reason),
+      requiredInputs: requiredInputsForRepair(request, reason),
+      recoverActions: recoverActionsForRepair(reason),
+      nextStep: nextStepForRepair(reason),
       attempt: 1,
     }],
     artifacts: [],
   };
+}
+
+function requiredInputsForRepair(request: GatewayRequest, reason: string) {
+  const inputs = ['workspacePath', 'prompt', 'skillDomain'];
+  if (/agentserver|base url/i.test(reason)) inputs.push('agentServerBaseUrl');
+  if (/credential|token|api key/i.test(reason)) inputs.push('credentials');
+  if (/file|path|input/i.test(reason)) inputs.push('input artifacts or workspace files');
+  if (request.scenarioPackageRef) inputs.push(`scenarioPackage:${request.scenarioPackageRef.id}@${request.scenarioPackageRef.version}`);
+  return Array.from(new Set(inputs));
+}
+
+function recoverActionsForRepair(reason: string) {
+  if (/AgentServer|base URL|fetch|ECONNREFUSED/i.test(reason)) {
+    return [
+      'Start or configure AgentServer, then retry the same prompt.',
+      'If a local seed skill should handle this task, verify the skill registry match before using AgentServer fallback.',
+    ];
+  }
+  if (/schema|payload|parsed|validation/i.test(reason)) {
+    return [
+      'Open stdoutRef, stderrRef, and outputRef to inspect the generated task result.',
+      'Retry after the task returns message, claims, uiManifest, executionUnits, and artifacts.',
+    ];
+  }
+  return [
+    'Inspect stdoutRef, stderrRef, and outputRef when present.',
+    'Attach required inputs or choose a compatible skill/runtime before retrying.',
+  ];
+}
+
+function nextStepForRepair(reason: string) {
+  if (/AgentServer|base URL|fetch|ECONNREFUSED/i.test(reason)) return 'Start AgentServer or choose a local skill/runtime, then retry.';
+  if (/schema|payload|parsed|validation/i.test(reason)) return 'Repair the task output contract and rerun validation.';
+  return 'Review diagnostics, provide missing inputs, and rerun.';
 }
 
 function failedTaskPayload(

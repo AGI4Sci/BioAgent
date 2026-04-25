@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-repair-needed-'));
 const result = await runWorkspaceRuntimeGateway({

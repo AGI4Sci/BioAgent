@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-knowledge-unsupported-'));
 const result = await runWorkspaceRuntimeGateway({

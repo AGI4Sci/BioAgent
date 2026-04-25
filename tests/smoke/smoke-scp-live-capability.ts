@@ -3,9 +3,9 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { loadSkillRegistry } from './skill-registry.js';
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain } from './runtime-types.js';
+import { loadSkillRegistry } from '../../src/runtime/skill-registry.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
+import type { BioAgentSkillDomain } from '../../src/runtime/runtime-types.js';
 
 if (!process.env.SCP_HUB_API_KEY && !process.env.SCPhub_api_key && !process.env.SCPHUB_API_KEY) {
   throw new Error('Set SCP_HUB_API_KEY or SCPhub_api_key to run live SCP capability smoke tests.');

@@ -6,7 +6,7 @@ export const defaultBioAgentConfig: BioAgentConfig = {
   schemaVersion: 1,
   agentServerBaseUrl: 'http://127.0.0.1:18080',
   workspaceWriterBaseUrl: 'http://127.0.0.1:5174',
-  workspacePath: '/Applications/workspace/ailab/research/app/BioAgent',
+  workspacePath: '/Applications/workspace/ailab/research/app/BioAgent/workspace',
   modelProvider: 'native',
   modelBaseUrl: '',
   modelName: '',

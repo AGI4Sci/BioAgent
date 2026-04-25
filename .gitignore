@@ -4,4 +4,8 @@ dist-ui/
 .DS_Store
 *.log
 .bioagent/
+config.local.json
+workspace/*
+!workspace/.gitkeep
+!workspace/README.md
 skills/installed/

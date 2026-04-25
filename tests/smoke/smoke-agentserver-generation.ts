@@ -4,8 +4,8 @@ import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
-import { appendTaskAttempt } from './task-attempt-history.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
+import { appendTaskAttempt } from '../../src/runtime/task-attempt-history.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-generation-'));
 let sawGenerationRequest = false;

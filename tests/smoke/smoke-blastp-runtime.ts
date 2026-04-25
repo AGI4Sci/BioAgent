@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
 const result = await runWorkspaceRuntimeGateway({
   skillDomain: 'knowledge',

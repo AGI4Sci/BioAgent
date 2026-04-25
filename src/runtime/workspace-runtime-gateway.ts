@@ -367,7 +367,7 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
   const stderrRel = `.bioagent/logs/${taskPrefix}-${runId}.stderr.log`;
   const taskRel = `.bioagent/tasks/${taskPrefix}-${runId}.py`;
   const taskId = `${taskPrefix}-${runId}`;
-  const entrypointPath = resolve(process.cwd(), 'scripts', 'python_tasks', 'scp_live_adapter_task.py');
+  const entrypointPath = resolve(process.cwd(), 'src', 'runtime', 'python_tasks', 'scp_live_adapter_task.py');
   const run = await runWorkspaceTask(workspace, {
     id: taskId,
     language: 'python',

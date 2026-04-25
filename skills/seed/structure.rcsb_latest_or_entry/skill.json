@@ -14,7 +14,7 @@
   "entrypoint": {
     "type": "workspace-task",
     "command": "python",
-    "path": "../../../scripts/python_tasks/structure_task.py"
+    "path": "../../../src/runtime/python_tasks/structure_task.py"
   },
   "environment": {
     "language": "python",

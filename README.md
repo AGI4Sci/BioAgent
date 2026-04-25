@@ -20,12 +20,15 @@ BioAgent separates extension capability into two families:
 
 ## Repository
 
-- `ui/`: React + Vite Scenario workbench
-- `scripts/`: workspace runtime gateway, task runner, skill registry, smoke scripts
-- `scripts/python_tasks/`: Python-first scientific task templates
+- `src/ui/`: React + Vite Scenario workbench
+- `src/runtime/`: workspace server, runtime gateway, task runner, skill registry, and shared runtime types
+- `src/runtime/python_tasks/`: Python-first scientific task templates
+- `tests/smoke/`: end-to-end and contract smoke scripts
 - `skills/seed/`: built-in validated executable skills with `skill.json`
 - `skills/installed/scp/`: installed SCP markdown skills copied from the SCP skill library
 - `docs/`: product and architecture documentation
+- `docs/templates/scenario.md`: template for proposing new scenario cases
+- `workspace/`: default ignored runtime workspace; BioAgent writes generated files to `workspace/.bioagent/`
 
 ## Product Model
 
@@ -46,7 +49,7 @@ Built-in Scenario presets currently include:
 - `omics-differential-exploration`
 - `biomedical-knowledge-graph`
 
-They live in `ui/src/scenarioSpecs.ts`. Each preset declares its `skillDomain`, input contract, output artifacts, scope declaration, default UIManifest slots, and component policy. These presets are not separate pages; they are contracts loaded into the same Scenario workbench.
+They live in `src/ui/src/scenarioSpecs.ts`. Each preset declares its `skillDomain`, input contract, output artifacts, scope declaration, default UIManifest slots, and component policy. These presets are not separate pages; they are contracts loaded into the same Scenario workbench.
 
 ## Run The UI
 
@@ -71,6 +74,12 @@ The selected workspace is configured in the Resource Explorer or Settings dialog
 
 ```text
 <workspace>/.bioagent/
+```
+
+By default this repository now points at:
+
+```text
+./workspace/
 ```
 
 ## Runtime
@@ -125,11 +134,11 @@ For workspace-backed runs, BioAgent normalizes returned `uiManifest` with the cu
 Chat state is stored in localStorage and mirrored to the workspace when the writer is available:
 
 ```text
-.bioagent/workspace-state.json
-.bioagent/sessions/*.json
-.bioagent/artifacts/*.json
-.bioagent/versions/*.json
-.bioagent/config.json
+workspace/.bioagent/workspace-state.json
+workspace/.bioagent/sessions/*.json
+workspace/.bioagent/artifacts/*.json
+workspace/.bioagent/versions/*.json
+workspace/.bioagent/config.json
 ```
 
 The state model stores sessions by Scenario, archived sessions, artifacts, ExecutionUnits, alignment contracts, timeline records, and collaboration/export policy fields.

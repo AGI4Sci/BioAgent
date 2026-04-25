@@ -13,7 +13,7 @@
   "entrypoint": {
     "type": "workspace-task",
     "command": "python",
-    "path": "../../../scripts/python_tasks/knowledge_lookup_task.py"
+    "path": "../../../src/runtime/python_tasks/knowledge_lookup_task.py"
   },
   "environment": {
     "language": "python",

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 
-import { SCENARIO_SPECS } from '../ui/src/scenarioSpecs';
-import type { ScenarioId } from '../ui/src/data';
-import { normalizeAgentResponse } from '../ui/src/api/agentClient';
+import { SCENARIO_SPECS } from '../../src/ui/src/scenarioSpecs';
+import type { ScenarioId } from '../../src/ui/src/data';
+import { normalizeAgentResponse } from '../../src/ui/src/api/agentClient';
 
 const scenarioIds = Object.keys(SCENARIO_SPECS) as ScenarioId[];
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { composeRuntimeUiManifest } from './workspace-runtime-gateway.js';
+import { composeRuntimeUiManifest } from '../../src/runtime/workspace-runtime-gateway.js';
 
 const artifacts = [{
   id: 'knowledge-graph',

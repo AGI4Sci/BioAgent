@@ -41,7 +41,7 @@
 
 #### 成功标准
 - 前端协议、工作台入口、session state、dashboard 文案都以 Scenario 为主语。
-- `ui/src/scenarioSpecs.ts` 是前端场景契约唯一入口，声明 `skillDomain`、input/output artifact schema、scope declaration、default UIManifest slots 和 component policy。
+- `src/ui/src/scenarioSpecs.ts` 是前端场景契约唯一入口，声明 `skillDomain`、input/output artifact schema、scope declaration、default UIManifest slots 和 component policy。
 - LLM/AgentServer prompt 只允许生成结构化 artifact、ExecutionUnit、claims 和 UIManifest；UI 不执行生成代码。
 - workspace runtime 接收 `scenarioId + skillDomain`，skillDomain 只作为内部 skill matching 维度。
 - README 与产品设计文档明确最终链路：`scenario.md -> ScenarioSpec -> skill/runtime -> artifact -> UIManifest -> component registry`。
@@ -60,18 +60,18 @@
 ### T025 Workspace Runtime Gateway 与 `bioagent-tools.ts` 退场
 
 #### 目标说明
-- 将当前过渡性的 `scripts/bioagent-tools.ts` 拆分为薄的 runtime gateway，让 BioAgent 后端只负责 skill discovery、task 实例化、进程执行、artifact/log 收集、schema 校验和 AgentServer 自愈桥接；不再承载 PubMed/RCSB/ChEMBL/Scanpy 等具体科学逻辑。
+- 将当前过渡性的 `src/runtime/bioagent-tools.ts` 拆分为薄的 runtime gateway，让 BioAgent 后端只负责 skill discovery、task 实例化、进程执行、artifact/log 收集、schema 校验和 AgentServer 自愈桥接；不再承载 PubMed/RCSB/ChEMBL/Scanpy 等具体科学逻辑。
 
 #### 成功标准
-- 新增更合适的入口文件，例如 `scripts/workspace-runtime-gateway.ts` 或 `scripts/skill-runtime.ts`，并让 `workspace-server.ts` 调用新入口。
-- `scripts/bioagent-tools.ts` 只作为薄入口，不承载科学逻辑；新增功能不得继续写入该文件。
+- 新增更合适的入口文件，例如 `src/runtime/workspace-runtime-gateway.ts` 或 `src/runtime/skill-runtime.ts`，并让 `workspace-server.ts` 调用新入口。
+- `src/runtime/bioagent-tools.ts` 只作为薄入口，不承载科学逻辑；新增功能不得继续写入该文件。
 - gateway 接口输入统一为 `skillDomain`、`prompt`、`workspacePath`、`artifacts`、`uiState`、`availableSkills`；输出统一为 `ToolPayload` / `Artifact` / `ExecutionUnit` / logs。
 - gateway 不包含数据库字段解析、科学算法、可视化逻辑；这些能力必须在 seed skills、workspace task code 或 AgentServer 生成代码中实现。
 - 失败时返回 failed state、日志引用和修复入口，不返回 demo/default/record-only 成功态。
 
 #### TODO
-- [x] 新增 runtime gateway 文件和类型定义：`scripts/bioagent-tools.ts` 是薄入口，实际入口为 `scripts/workspace-runtime-gateway.ts`。
-- [x] 抽出通用 task runner：`scripts/workspace-task-runner.ts` 支持 Python/R/Shell/CLI task，捕获 stdout/stderr、exitCode、output JSON、artifact refs、runtime fingerprint。
+- [x] 新增 runtime gateway 文件和类型定义：`src/runtime/bioagent-tools.ts` 是薄入口，实际入口为 `src/runtime/workspace-runtime-gateway.ts`。
+- [x] 抽出通用 task runner：`src/runtime/workspace-task-runner.ts` 支持 Python/R/Shell/CLI task，捕获 stdout/stderr、exitCode、output JSON、artifact refs、runtime fingerprint。
 - [x] 把结构探索 Scenario 当前 Python task 执行路径迁入 gateway，作为第一个非 TS 科学逻辑样板：`structure.rcsb_latest_or_entry` seed skill 已通过 gateway 运行真实 RCSB task。
 - [x] 删除旧 TS 科学逻辑分支；PubMed、UniProt/ChEMBL、RCSB 和基础 omics CSV differential 均通过 seed workspace task 运行。
 - [x] 为 gateway 增加 schema validation：`message`、`claims`、`uiManifest`、`executionUnits`、`artifacts` 缺失或类型错误时返回 `repair-needed`，不生成 demo/default 成功态。
@@ -104,7 +104,7 @@
 - [x] protein properties：文档中的 `VenusFactory` 后端连接失败；已改用可用的 `SciToolAgent-Bio` server 29，真实调用 `ComputeProtPara` / `ComputeHydrophilicity`。
 - [x] biomedical web search：文档中的 `BiomedicalSearch` endpoint 是占位/不可解析；已改用 `Origene-Search` server 7，真实调用 `pubmed_search` / `tavily_search`。
 - [x] TCGA expression：`Origene-TCGA` server 11 能列 tool 但远端内部服务 `47.101.156.188:80` refused；已设计 cBioPortal TCGA PanCancer Atlas fallback，记录 SCP failure 与 fallback source。
-- [x] 新增 live adapter：`scripts/python_tasks/scp_live_adapter_task.py`，runtime gateway 对四个点名 SCP skills 走真实 MCP/cBioPortal fallback adapter；`npm run smoke:scp-live-skills` 需要临时环境变量 `SCP_HUB_API_KEY` 或 `SCPhub_api_key`。
+- [x] 新增 live adapter：`src/runtime/python_tasks/scp_live_adapter_task.py`，runtime gateway 对四个点名 SCP skills 走真实 MCP/cBioPortal fallback adapter；`npm run smoke:scp-live-skills` 需要临时环境变量 `SCP_HUB_API_KEY` 或 `SCPhub_api_key`。
 - [x] 扩展为全量 SCP live adapter：所有 `scp.*` skill 都进入 live path。通用 adapter 会解析 `SKILL.md` 中的 MCP endpoint/tool，缺 endpoint 时按 skill id/description 推断候选 server，执行 `capability_probe=true` 时只做真实 MCP discovery，不触发重任务。
 - [x] 全量 capability smoke：`SCP_HUB_API_KEY=... npm run smoke:scp-live-capability` 已探测 121/121 SCP skills，结果为 121 live/discoverable、0 explicit blockers。
 - [x] 通用执行 smoke：`npm run smoke:scp-live-skills` 覆盖专用 adapter 与 generic adapter；其中 `scp.molecular-properties-calculation` 通过 `SMILESToWeight(smiles=CCO)` 真实执行。
@@ -114,7 +114,7 @@
 - [x] 实现 skill registry loader：读取 repo seed skills、workspace skills、user-installed skills，并输出 availability。
 - [x] 实现 skill matcher MVP：prompt + skillDomain + artifact contract + validation status。
 - [x] 实现 validation smoke runner，并把结果写入 `.bioagent/skills/status.json`；`npm run smoke:skill-registry` 会验证 seed skills 可用、坏 workspace skill 被标记 unavailable，且 unavailable skill 即使被显式 allow 也不会被匹配；`npm run smoke:seed-runtime` 通过 gateway 真实运行 PubMed、RCSB、UniProt、ChEMBL compound 和 omics workspace seed tasks。
-- [x] 设计 skill promotion 草案格式：已在 `scripts/runtime-types.ts` 定义 `SkillPromotionProposal`，并在 `docs/SkillPromotionProposal.md` 记录待用户确认的 proposal 结构与 promotion 规则。
+- [x] 设计 skill promotion 草案格式：已在 `src/runtime/runtime-types.ts` 定义 `SkillPromotionProposal`，并在 `docs/SkillPromotionProposal.md` 记录待用户确认的 proposal 结构与 promotion 规则。
 
 ### T027 AgentServer Task Generation 与自愈协议
 
@@ -231,7 +231,7 @@
 - [x] 设计分支时间线模型：`variantKind=parameter|method|hypothesis`、branchId、parentBranchId、sourceContractVersion、sourceBeliefId、mergeFrom、archivedAt、restoreReason；参数级变体不得默认创建 branch；新增 `ResearchBranchRecord`。
 - [x] 设计 decision revision sequence：currentDecisionRef 指向最新裁决，历史裁决保持只读归档，belief graph 更新通过 revision event 传播；`BeliefDependencyGraph.currentDecisionRefs` 与 `supersedes` edge 已定义。
 - [x] 定义协作与权限最小模型：roles、visibility、audience、sensitiveDataFlags、exportPolicy、decisionAuthority；新增 `CollaborationPolicy`，artifact/timeline 支持 visibility/audience/exportPolicy 字段。
-- [x] 更新导出逻辑的权限约束：ExecutionUnit JSON Bundle 导出前会检查 artifact `exportPolicy`、`sensitiveDataFlags` 和 `audience`；`blocked` artifact 会阻止导出，`restricted` artifact 会在 bundle 中写入 warning 和敏感标记。设计约束见 `docs/TimelineDecisionCollaborationModel.md`，实现见 `ui/src/exportPolicy.ts`。
+- [x] 更新导出逻辑的权限约束：ExecutionUnit JSON Bundle 导出前会检查 artifact `exportPolicy`、`sensitiveDataFlags` 和 `audience`；`blocked` artifact 会阻止导出，`restricted` artifact 会在 bundle 中写入 warning 和敏感标记。设计约束见 `docs/TimelineDecisionCollaborationModel.md`，实现见 `src/ui/src/exportPolicy.ts`。
 
 ## P3 - 已开始但需并入新架构
 
@@ -319,7 +319,7 @@
 - [x] 先迁移结构探索 Scenario 的 RCSB/AlphaFold 任务：最新 PDB 搜索、坐标下载、mmCIF/PDB 解析、atomCoordinates 输出已放到 workspace Python task；TypeScript 只负责复制任务模板、执行 Python、读取标准结果 JSON。
 - [x] 补齐通用 task runner 抽象：将结构探索 Scenario 当前的 Python runner 提炼为 skill-domain 无关的 workspace runner，支持 Python/R/Shell/CLI 脚本、捕获日志、退出码、产物路径和 runtime fingerprint；具体科学逻辑保留在 seed skill task code 中。
 - [x] 接入 AgentServer 自愈协议：失败时把 prompt、codeRef、日志、artifact schema、用户反馈和 UI 状态发给 AgentServer `/api/agent-server/runs`，请其生成 patch 或新 attempt，再由 BioAgent 执行；修复 diff、parentAttempt、selfHealReason、AgentServer run id 和失败原因写入 attempt history / ExecutionUnit。
-- [x] 再迁移组学差异分析 Scenario：将 Scanpy/DESeq2/edgeR 调用表达为 workspace task code，保留 Python/R 环境约定和真实 runner smoke；`scripts/python_tasks/omics_differential_task.py` 内部已包含 Scanpy、DESeq2、edgeR 后端选择与 fallback，`npm run smoke:omics-runners` 覆盖真实 Scanpy 或明确 fallback。
+- [x] 再迁移组学差异分析 Scenario：将 Scanpy/DESeq2/edgeR 调用表达为 workspace task code，保留 Python/R 环境约定和真实 runner smoke；`src/runtime/python_tasks/omics_differential_task.py` 内部已包含 Scanpy、DESeq2、edgeR 后端选择与 fallback，`npm run smoke:omics-runners` 覆盖真实 Scanpy 或明确 fallback。
 - [x] 更新动态结果区：展示 `taskCodeRef`、attempt history、自愈 diff 摘要、失败原因；没有真实 artifact 时保持 empty/failed state。ExecutionUnit 面板已展示 codeRef、stdout/stderr/outputRef、attempt、parentAttempt、selfHealReason、failureReason、patchSummary、diffRef。
 - [x] 验证失败-反馈-自愈闭环：构造 schema 缺字段/缺输入场景，确认 AgentServer 能修改 task code 重跑，并通过同一 workspace-server HTTP API 返回真实 artifact 和 `self-healed` ExecutionUnit。为避免视觉验证慢且不稳定，本轮不用 Computer Use，改用 `npm run smoke:workspace-agentserver-repair` 做无浏览器端到端验证；该 smoke 同时覆盖请求体显式 `agentServerBaseUrl` 和 workspace `.bioagent/config.json` 回退配置；`npm run smoke:repair` 覆盖 repair-needed empty state，确认无法修复时不生成 demo/default artifact。
 - [x] 移除前端一键 record-only local adapter：发送失败后 UI 不再生成会驱动结果图的本地草案 artifact；用户会看到明确错误，并继续走 workspace runtime / AgentServer 配置修复路径。omics skillDomain 的默认输入也从 `demo:rna-seq` 改为 workspace 文件约定 `matrix.csv`。

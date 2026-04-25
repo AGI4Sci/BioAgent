@@ -13,7 +13,7 @@
   "entrypoint": {
     "type": "workspace-task",
     "command": "python",
-    "path": "../../../scripts/python_tasks/literature_pubmed_task.py"
+    "path": "../../../src/runtime/python_tasks/literature_pubmed_task.py"
   },
   "environment": {
     "language": "python",

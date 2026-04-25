@@ -18,9 +18,11 @@
   },
   "include": [
     "vite.config.ts",
-    "scripts/**/*.ts",
-    "ui/src/**/*.ts",
-    "ui/src/**/*.tsx"
+    "src/runtime/**/*.ts",
+    "tools/**/*.ts",
+    "tests/smoke/**/*.ts",
+    "src/ui/src/**/*.ts",
+    "src/ui/src/**/*.tsx"
   ],
   "exclude": [
     "node_modules",

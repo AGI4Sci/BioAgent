@@ -52,7 +52,7 @@ assert.ok(agentAddress && typeof agentAddress === 'object');
 const agentServerBaseUrl = `http://127.0.0.1:${agentAddress.port}`;
 
 const workspacePort = await freePort();
-const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/workspace-server.ts'], {
+const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
   env: { ...process.env, BIOAGENT_WORKSPACE_PORT: String(workspacePort) },
   stdio: ['ignore', 'pipe', 'pipe'],

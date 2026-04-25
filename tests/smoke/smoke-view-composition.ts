@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { normalizeAgentResponse } from '../ui/src/api/agentClient.js';
+import { normalizeAgentResponse } from '../../src/ui/src/api/agentClient.js';
 
 const response = normalizeAgentResponse('omics-differential-exploration', 'UMAP 按 cell cycle 着色并 side-by-side batch 对比', {
   run: {

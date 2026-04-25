@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
 const workspace = '/tmp/bioagent-omics-runner-smoke';
 await mkdir(join(workspace, 'data'), { recursive: true });

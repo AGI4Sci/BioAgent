@@ -3,8 +3,8 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain, ToolPayload } from './runtime-types.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
+import type { BioAgentSkillDomain, ToolPayload } from '../../src/runtime/runtime-types.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-seed-runtime-'));
 await writeFile(join(workspace, 'matrix.csv'), [

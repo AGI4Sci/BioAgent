@@ -3,9 +3,9 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { loadSkillRegistry, matchSkill } from './skill-registry.js';
-import { runWorkspaceRuntimeGateway } from './workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain, ToolPayload } from './runtime-types.js';
+import { loadSkillRegistry, matchSkill } from '../../src/runtime/skill-registry.js';
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
+import type { BioAgentSkillDomain, ToolPayload } from '../../src/runtime/runtime-types.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-tools-skills-diverse-'));
 await writeFile(join(workspace, 'matrix.csv'), [

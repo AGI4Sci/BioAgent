@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { loadSkillRegistry, matchSkill } from './skill-registry.js';
-import type { SkillAvailability } from './runtime-types.js';
+import { loadSkillRegistry, matchSkill } from '../../src/runtime/skill-registry.js';
+import type { SkillAvailability } from '../../src/runtime/runtime-types.js';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-skill-registry-'));
 const brokenSkillDir = join(workspace, '.bioagent', 'skills', 'broken.skill');

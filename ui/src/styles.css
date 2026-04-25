@@ -1697,6 +1697,70 @@ code,
   white-space: nowrap;
 }
 
+.session-history-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(46, 61, 85, 0.58);
+  background: rgba(5, 8, 16, 0.46);
+}
+
+.session-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.session-history-head div,
+.session-history-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.session-history-head strong,
+.session-history-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bio-50);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-history-head span,
+.session-history-copy span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bio-400);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-history-list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.session-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(46, 61, 85, 0.58);
+  border-radius: 8px;
+  background: rgba(15, 22, 35, 0.56);
+}
+
+.empty-runtime-state.compact {
+  padding: 10px;
+}
+
 .workbench-grid {
   flex: 1;
   min-height: 0;
@@ -1977,9 +2041,33 @@ code,
 
 .composer {
   display: flex;
+  position: relative;
+  align-items: flex-end;
   gap: 8px;
   padding: 12px;
+  padding-top: 16px;
   border-top: 1px solid rgba(46, 61, 85, 0.58);
+}
+
+.composer-resize-handle {
+  position: absolute;
+  top: 4px;
+  left: 12px;
+  right: 12px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.composer-resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(123, 147, 176, 0.62);
 }
 
 .composer-error {
@@ -2052,19 +2140,23 @@ code,
   white-space: nowrap;
 }
 
-.composer input {
+.composer textarea {
   flex: 1;
   min-width: 0;
-  height: 36px;
-  padding: 0 12px;
+  min-height: 36px;
+  max-height: 360px;
+  padding: 8px 12px;
   color: var(--bio-50);
   background: rgba(5, 8, 16, 0.64);
   border: 1px solid rgba(46, 61, 85, 0.82);
   border-radius: var(--radius);
   outline: 0;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.45;
 }
 
-.composer input:disabled,
+.composer textarea:disabled,
 .action-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;

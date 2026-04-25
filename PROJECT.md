@@ -261,6 +261,46 @@
 - [ ] 将代表批次扩展为 CSV/SDF 大库流式任务：当前 CSV artifact/download schema 已落地；下一步需要接入真实百万库分页/队列化执行，而不是在同步网页请求中一次性 docking 1000+ 分子。
 - [x] 为“1-5 完整工作流”新增 workflow-level ExecutionUnit，把每个 step 的 artifactRef/状态串成同一个可恢复 run，而不是仅靠多次独立 runtime 请求。
 
+### T035 历史会话加载与恢复
+
+#### 目标说明
+- 用户刷新页面或重新进入工作区后，可以加载 `.bioagent/workspace-state.json` 中的历史会话；当前 Scenario 的 archived sessions 可以从聊天面板恢复为当前会话。
+
+#### TODO
+- [x] 启动时从配置 workspacePath 或 workspace writer 最近工作区读取 snapshot；没有显式 workspacePath 时也尝试最近工作区，不再直接跳过恢复。
+- [x] 切换 workspacePath 或设置页修改 workspacePath 时强制加载对应 `.bioagent` 快照，避免只更新路径不恢复历史。
+- [x] 聊天面板新增通用“历史会话”入口，按 Scenario 展示 archived sessions 的消息、artifact、ExecutionUnit 统计。
+- [x] 支持恢复 archived session：当前活跃会话会先归档，选中的历史会话成为当前 Scenario 会话，适用于全部内置 Scenario。
+- [x] 验证：`npm run typecheck` 通过；workspace snapshot GET 返回 active scenarios=4、archived sessions=11。
+
+### T036 任务脚本通用性与输入驱动执行
+
+#### 目标说明
+- Python task 的职责是把一次用户问题沉淀为可复现执行代码；只有当现有脚本/adapter 与用户输入和任务形态匹配时才复用，否则应触发 AgentServer 生成或修复当前问题专用脚本，不能用固定 demo/default 输入伪装成功。
+
+#### TODO
+- [x] 虚拟筛选 workflow adapter 不再默认填充 `PDB 1A3N` 或默认 `CCO/CCN/...` 化合物；缺 PDB 或分子库时返回 `repair-needed/failed-with-reason` blocker，并声明需要用户输入或 AgentServer task generation。
+- [x] 移除固定最多 5 个 docking attempt 的限制；`docking_top_n/top_n/top` 从 prompt 解析，默认语义为最多输出 top1000，但实际行数由输入库和真实工具结果决定，不伪造到 1000。
+- [x] 支持 `smiles_list` 和 workspace 文件输入（`smiles_file/smiles_csv/library_csv/library`），脚本按输入库内容执行。
+- [x] 移除通用 SCP 参数推断和专用 SCP adapter 中的 demo 默认值（如默认 protein sequence、EGFR/LUAD、BRCA1 query、aspirin、CCO、1A3N）；缺必需输入时返回 blocker，而不是自动补样例。
+- [x] live SCP adapter 若返回 `repair-needed` 或 artifact metadata 标记 `requiresAgentServerGeneration`，runtime gateway 会尝试 AgentServer repair/generation，而不是把固定 adapter 结果当最终答案。
+- [x] 验证：缺 PDB 请求不会使用默认结构；原始 4-SMILES prompt 返回 `4 input molecules`、4 次 docking attempt 和 4 个 CSV 下载项；`npm run typecheck` 与 `SCPhub_api_key=... npm run smoke:scp-live-skills` 通过。
+
+### T037 Fresh task generation 运行记录与自愈重试
+
+#### 目标说明
+- 每次网页端新请求都应优先沉淀一份当前请求专属的可复现任务代码；代码、输入、输出、日志、自愈 diff 和 attempt history 都归档到 `.bioagent` 运行记录中。若当前环境缺 AgentServer 或生成失败，则回落到已有 validated adapter，但仍不得伪造成功。
+
+#### TODO
+- [x] 网页端 project-tool 请求在 `uiState` 中声明 `freshTaskGeneration: true`，让 runtime gateway 能区分用户交互请求和底层 capability/tool smoke。
+- [x] runtime gateway 在匹配到固定 skill 后先尝试 AgentServer fresh task generation；AgentServer 不可用或 generation request 失败时才回落到现有 adapter，避免阻断无 AgentServer 环境。
+- [x] AgentServer 返回的 `taskFiles` 不再直接散落到 workspace 任意相对路径；运行前统一归档到 `.bioagent/tasks/<generated-run-id>/...`，ExecutionUnit `codeRef` 指向归档后的入口代码。
+- [x] generation prompt 明确要求：按当前用户请求重新生成任务代码、优先复用真实可用工具、缺输入/凭据/远端文件/可执行环境时返回 `failed-with-reason`，不能产出 demo/default success artifact。
+- [x] AgentServer-generated task 的运行失败、schema validation 失败、JSON parse 失败都会写 attempt 1，并携带 code/log/schema/error 调用 `tryAgentServerRepairAndRerun` 自愈；成功修复后返回 `self-healed` ExecutionUnit 和 diffRef。
+- [x] live SCP adapter 的执行失败和解析失败也接入同一自愈链路；固定 adapter 仍可作为无 AgentServer 环境的通用兜底。
+- [x] 验证：`npm run typecheck` 通过；无 AgentServer/无 SCP key 的 fresh 请求回落到 `.bioagent/tasks/scp-live-*.py` 并明确 `failed-with-reason`；本地 fake AgentServer smoke 验证 generated codeRef 为 `.bioagent/tasks/generated-knowledge-*/main.py` 且任务成功执行；重启 workspace server 后复用服务环境中的 SCP key 跑通 `npm run smoke:scp-live-skills`。
+- [x] 清理历史运行副本：保留 `.bioagent/tasks` 最近 12 个 active 任务脚本；将 48 个旧任务脚本及关联 input/result/log/attempt/diff 归档到 `.bioagent/archives/task-runs-20260422-211253/`，避免历史 `codeRef` 完全丢失。
+
 ### T021 Python-first 科学任务运行时与 AgentServer 自愈闭环
 
 #### 目标说明

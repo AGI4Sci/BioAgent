@@ -32,6 +32,7 @@ export async function sendBioAgentToolMessage(
       uiState: {
         scopeCheck: scopeCheck(input.scenarioId, input.prompt),
         scenarioOverride: input.scenarioOverride,
+        freshTaskGeneration: true,
       },
     }),
     signal,

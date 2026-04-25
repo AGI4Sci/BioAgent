@@ -1077,6 +1077,8 @@ function ChatPanel({
   onSessionChange,
   onNewChat,
   onDeleteChat,
+  archivedSessions,
+  onRestoreArchivedSession,
   onEditMessage,
   onDeleteMessage,
   archivedCount,
@@ -1095,6 +1097,8 @@ function ChatPanel({
   onSessionChange: (session: BioAgentSession) => void;
   onNewChat: () => void;
   onDeleteChat: () => void;
+  archivedSessions: BioAgentSession[];
+  onRestoreArchivedSession: (sessionId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
   onDeleteMessage: (messageId: string) => void;
   archivedCount: number;
@@ -1105,8 +1109,10 @@ function ChatPanel({
   const [expanded, setExpanded] = useState<number | null>(0);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(88);
   const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
   const activeSessionRef = useRef(session);
@@ -1114,6 +1120,7 @@ function ChatPanel({
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
+  const resizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const messages = session.messages;
   const scenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
 
@@ -1305,6 +1312,25 @@ function ChatPanel({
     abortRef.current?.abort();
   }
 
+  function beginComposerResize(event: React.MouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    resizeStateRef.current = { startY: event.clientY, startHeight: composerHeight };
+    const handleMove = (moveEvent: MouseEvent) => {
+      const state = resizeStateRef.current;
+      if (!state) return;
+      const delta = state.startY - moveEvent.clientY;
+      const nextHeight = Math.max(36, Math.min(360, state.startHeight + delta));
+      setComposerHeight(nextHeight);
+    };
+    const handleUp = () => {
+      resizeStateRef.current = null;
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  }
+
   function mergeAgentResponse(baseSession: BioAgentSession, response: NormalizedAgentResponse): BioAgentSession {
     return {
       ...baseSession,
@@ -1363,11 +1389,23 @@ function ChatPanel({
         {archivedCount ? <Badge variant="muted">{archivedCount} archived</Badge> : null}
         <div className="panel-actions">
           <IconButton icon={Plus} label="开启新聊天" onClick={onNewChat} />
+          <IconButton icon={Clock} label="历史会话" onClick={() => setHistoryOpen((value) => !value)} />
           {isSending ? <IconButton icon={RefreshCw} label="取消请求" onClick={handleAbort} /> : null}
           <IconButton icon={Download} label="导出当前 Scenario 会话" onClick={handleExport} />
           <IconButton icon={Trash2} label="删除当前聊天" onClick={onDeleteChat} />
         </div>
       </div>
+
+      {historyOpen ? (
+        <SessionHistoryPanel
+          currentSession={session}
+          archivedSessions={archivedSessions}
+          onRestore={(sessionId) => {
+            onRestoreArchivedSession(sessionId);
+            setHistoryOpen(false);
+          }}
+        />
+      ) : null}
 
       <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
         {!messages.length ? (
@@ -1450,13 +1488,18 @@ function ChatPanel({
         </div>
       ) : null}
       <div className="composer">
-        <input
+        <div className="composer-resize-handle" onMouseDown={beginComposerResize} title="拖拽调整输入框高度" />
+        <textarea
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') handleSend();
+            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            void handleSend();
           }}
           placeholder={isSending ? '继续输入引导，Enter 后排队到当前推理之后...' : '输入研究问题...'}
+          rows={1}
+          style={{ height: `${composerHeight}px` }}
         />
         <ActionButton icon={Sparkles} onClick={handleSend} disabled={!input.trim()}>
           {isSending ? '引导' : '发送'}
@@ -1464,6 +1507,59 @@ function ChatPanel({
       </div>
     </div>
   );
+}
+
+function SessionHistoryPanel({
+  currentSession,
+  archivedSessions,
+  onRestore,
+}: {
+  currentSession: BioAgentSession;
+  archivedSessions: BioAgentSession[];
+  onRestore: (sessionId: string) => void;
+}) {
+  const currentStats = sessionHistoryStats(currentSession);
+  return (
+    <div className="session-history-panel">
+      <div className="session-history-head">
+        <div>
+          <strong>历史会话</strong>
+          <span>当前：{currentSession.title}</span>
+        </div>
+        <Badge variant="muted">{currentStats}</Badge>
+      </div>
+      {!archivedSessions.length ? (
+        <div className="empty-runtime-state compact">
+          <Badge variant="muted">empty</Badge>
+          <strong>暂无归档会话</strong>
+          <p>点击开启新聊天或删除当前聊天后，旧会话会进入这里。</p>
+        </div>
+      ) : (
+        <div className="session-history-list">
+          {archivedSessions.map((item) => (
+            <div className="session-history-row" key={item.sessionId}>
+              <div className="session-history-copy">
+                <strong>{item.title}</strong>
+                <span>{formatSessionTime(item.updatedAt || item.createdAt)} · {sessionHistoryStats(item)}</span>
+              </div>
+              <ActionButton icon={Clock} variant="secondary" onClick={() => onRestore(item.sessionId)}>恢复</ActionButton>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function sessionHistoryStats(session: BioAgentSession) {
+  const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
+  return `${userMessages} messages · ${session.artifacts.length} artifacts · ${session.executionUnits.length} units`;
+}
+
+function formatSessionTime(value: string) {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return 'unknown time';
+  return new Date(time).toLocaleString('zh-CN', { hour12: false });
 }
 
 type VolcanoPoint = {
@@ -1582,6 +1678,8 @@ function Workbench({
   onSessionChange,
   onNewChat,
   onDeleteChat,
+  archivedSessions,
+  onRestoreArchivedSession,
   onEditMessage,
   onDeleteMessage,
   archivedCount,
@@ -1601,6 +1699,8 @@ function Workbench({
   onSessionChange: (session: BioAgentSession) => void;
   onNewChat: (scenarioId: ScenarioId) => void;
   onDeleteChat: (scenarioId: ScenarioId) => void;
+  archivedSessions: BioAgentSession[];
+  onRestoreArchivedSession: (scenarioId: ScenarioId, sessionId: string) => void;
   onEditMessage: (scenarioId: ScenarioId, messageId: string, content: string) => void;
   onDeleteMessage: (scenarioId: ScenarioId, messageId: string) => void;
   archivedCount: number;
@@ -1668,6 +1768,8 @@ function Workbench({
           onSessionChange={onSessionChange}
           onNewChat={() => onNewChat(scenarioId)}
           onDeleteChat={() => onDeleteChat(scenarioId)}
+          archivedSessions={archivedSessions}
+          onRestoreArchivedSession={(sessionId) => onRestoreArchivedSession(scenarioId, sessionId)}
           onEditMessage={(messageId, content) => onEditMessage(scenarioId, messageId, content)}
           onDeleteMessage={(messageId) => onDeleteMessage(scenarioId, messageId)}
           archivedCount={archivedCount}
@@ -2793,14 +2895,17 @@ function shouldUsePersistedWorkspaceState(current: BioAgentWorkspaceState, persi
 
 function workspaceActivityScore(state: BioAgentWorkspaceState) {
   return Object.values(state.sessionsByScenario).reduce((total, session) => {
-    const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
-    return total
-      + userMessages
-      + session.runs.length
-      + session.artifacts.length
-      + session.executionUnits.length
-      + session.notebook.length;
+    return total + sessionActivityScore(session);
   }, state.archivedSessions.length + (state.alignmentContracts?.length ?? 0));
+}
+
+function sessionActivityScore(session: BioAgentSession) {
+  const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
+  return userMessages
+    + session.runs.length
+    + session.artifacts.length
+    + session.executionUnits.length
+    + session.notebook.length;
 }
 
 export function BioAgentApp() {
@@ -2831,20 +2936,50 @@ export function BioAgentApp() {
   });
 
   const sessions = workspaceState.sessionsByScenario;
-  const archivedCountByAgent = useMemo(() => scenarios.reduce((acc, scenario) => {
-    acc[scenario.id] = workspaceState.archivedSessions.filter((session) => session.scenarioId === scenario.id).length;
+  const archivedSessionsByAgent = useMemo(() => scenarios.reduce((acc, scenario) => {
+    acc[scenario.id] = workspaceState.archivedSessions
+      .filter((session) => session.scenarioId === scenario.id)
+      .sort((left, right) => Date.parse(right.updatedAt || right.createdAt) - Date.parse(left.updatedAt || left.createdAt));
     return acc;
-  }, {} as Record<ScenarioId, number>), [workspaceState.archivedSessions]);
+  }, {} as Record<ScenarioId, BioAgentSession[]>), [workspaceState.archivedSessions]);
+  const archivedCountByAgent = useMemo(() => scenarios.reduce((acc, scenario) => {
+    acc[scenario.id] = archivedSessionsByAgent[scenario.id].length;
+    return acc;
+  }, {} as Record<ScenarioId, number>), [archivedSessionsByAgent]);
+
+  async function hydrateWorkspaceSnapshot(path: string, runtimeConfig: BioAgentConfig, mode: 'prefer-newer' | 'force' = 'prefer-newer') {
+    const requestedPath = path.trim();
+    setWorkspaceHydrated(false);
+    try {
+      const persisted = await loadPersistedWorkspaceState(requestedPath, runtimeConfig);
+      if (persisted) {
+        const restoredPath = persisted.workspacePath || requestedPath;
+        setWorkspaceState((current) => {
+          const incoming = { ...persisted, workspacePath: restoredPath };
+          return mode === 'force' || shouldUsePersistedWorkspaceState(current, incoming) ? incoming : current;
+        });
+        if (restoredPath && runtimeConfig.workspacePath !== restoredPath) {
+          setConfig((current) => {
+            if (current.workspacePath === restoredPath) return current;
+            const next = updateConfig(current, { workspacePath: restoredPath });
+            saveBioAgentConfig(next);
+            return next;
+          });
+        }
+        setWorkspaceStatus(`已从 ${restoredPath || '最近工作区'}/.bioagent 恢复工作区`);
+      } else {
+        setWorkspaceStatus(requestedPath ? `未找到 ${requestedPath}/.bioagent/workspace-state.json` : '未找到最近工作区快照');
+      }
+    } catch (err) {
+      setWorkspaceStatus(`Workspace snapshot 未加载：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setWorkspaceHydrated(true);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
     const workspacePath = config.workspacePath.trim();
-    if (!workspacePath) {
-      setWorkspaceHydrated(true);
-      return () => {
-        cancelled = true;
-      };
-    }
     loadPersistedWorkspaceState(workspacePath, config)
       .then((persisted) => {
         if (cancelled) return;
@@ -2861,6 +2996,8 @@ export function BioAgentApp() {
             return next;
           });
           setWorkspaceStatus(`已从 ${restoredPath}/.bioagent 恢复工作区`);
+        } else {
+          setWorkspaceStatus(workspacePath ? `未找到 ${workspacePath}/.bioagent/workspace-state.json` : '未找到最近工作区快照');
         }
       })
       .catch((err) => {
@@ -2908,12 +3045,11 @@ export function BioAgentApp() {
   }
 
   function setWorkspacePath(value: string) {
-    setConfig((current) => {
-      const next = updateConfig(current, { workspacePath: value });
-      saveBioAgentConfig(next);
-      return next;
-    });
+    const nextConfig = updateConfig(config, { workspacePath: value });
+    setConfig(nextConfig);
+    saveBioAgentConfig(nextConfig);
     updateWorkspace((current) => ({ ...current, workspacePath: value }));
+    void hydrateWorkspaceSnapshot(value, nextConfig, 'force');
   }
 
   function updateRuntimeConfig(patch: Partial<BioAgentConfig>) {
@@ -2922,6 +3058,7 @@ export function BioAgentApp() {
       saveBioAgentConfig(next);
       if ('workspacePath' in patch) {
         updateWorkspace((state) => ({ ...state, workspacePath: next.workspacePath }));
+        void hydrateWorkspaceSnapshot(next.workspacePath, next, 'force');
       }
       return next;
     });
@@ -2962,6 +3099,29 @@ export function BioAgentApp() {
         sessionsByScenario: {
           ...current.sessionsByScenario,
           [nextScenarioId]: resetSession(nextScenarioId),
+        },
+      };
+    });
+  }
+
+  function restoreArchivedSession(nextScenarioId: ScenarioId, sessionId: string) {
+    updateWorkspace((current) => {
+      const restored = current.archivedSessions.find((session) => session.scenarioId === nextScenarioId && session.sessionId === sessionId);
+      if (!restored) return current;
+      const active = current.sessionsByScenario[nextScenarioId];
+      const nextArchived = current.archivedSessions.filter((session) => session.sessionId !== sessionId);
+      const archivedActive = sessionActivityScore(active) > 0
+        ? [versionSession(active, `restored archived session ${sessionId}`), ...nextArchived]
+        : nextArchived;
+      return {
+        ...current,
+        archivedSessions: archivedActive.slice(0, 80),
+        sessionsByScenario: {
+          ...current.sessionsByScenario,
+          [nextScenarioId]: {
+            ...restored,
+            updatedAt: nowIso(),
+          },
         },
       };
     });
@@ -3131,6 +3291,8 @@ export function BioAgentApp() {
               onSessionChange={updateSession}
               onNewChat={newChat}
               onDeleteChat={deleteChat}
+              archivedSessions={archivedSessionsByAgent[scenarioId]}
+              onRestoreArchivedSession={restoreArchivedSession}
               onEditMessage={editMessage}
               onDeleteMessage={deleteMessage}
               archivedCount={archivedCountByAgent[scenarioId]}

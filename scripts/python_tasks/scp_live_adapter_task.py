@@ -45,7 +45,9 @@ def main():
 
 
 async def run_protein_properties(prompt):
-    sequence = extract_sequence(prompt) or "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKT"
+    sequence = extract_sequence(prompt)
+    if not sequence:
+        return failed_payload("scp.protein-properties-calculation", prompt, "Missing protein sequence input; provide sequence=<amino_acid_sequence>. BioAgent will not substitute a demo sequence.")
     protpara = await mcp_call(
         "https://scp.intern-ai.org.cn/api/v1/mcp/29/SciToolAgent-Bio",
         "ComputeProtPara",
@@ -83,8 +85,10 @@ async def run_protein_properties(prompt):
 
 
 async def run_tcga_expression(prompt):
-    gene = option_value(prompt, "gene") or first_gene_symbol(prompt) or "EGFR"
-    cancer_type = (option_value(prompt, "cancer_type") or option_value(prompt, "cohort") or "LUAD").upper()
+    gene = option_value(prompt, "gene") or first_gene_symbol(prompt)
+    cancer_type = (option_value(prompt, "cancer_type") or option_value(prompt, "cohort") or "").upper()
+    if not gene or not cancer_type:
+        return failed_payload("scp.tcga-gene-expression", prompt, "Missing TCGA inputs; provide gene=<symbol> and cancer_type=<TCGA cohort>. BioAgent will not substitute demo gene/cohort values.")
     scp_error = ""
     try:
         scp_result = await mcp_call(
@@ -105,7 +109,9 @@ async def run_tcga_expression(prompt):
 
 
 async def run_biomedical_search(prompt):
-    query = option_value(prompt, "query") or strip_skill_words(prompt) or "BRCA1 PARP inhibitor resistance"
+    query = option_value(prompt, "query") or strip_skill_words(prompt)
+    if not query:
+        return failed_payload("scp.biomedical-web-search", prompt, "Missing search query input; provide query=<biomedical query>. BioAgent will not substitute a demo query.")
     pubmed = await mcp_call(
         "https://scp.intern-ai.org.cn/api/v1/mcp/7/Origene-Search",
         "pubmed_search",
@@ -144,7 +150,9 @@ async def run_biomedical_search(prompt):
 
 
 async def run_molecular_docking(prompt):
-    smiles = option_value(prompt, "smiles") or "CC(=O)Oc1ccccc1C(=O)O"
+    smiles = option_value(prompt, "smiles")
+    if not smiles:
+        return docking_failed("", "", "Missing docking ligand input; provide smiles=<SMILES>. BioAgent will not substitute a demo molecule.")
     pdb_file_path = option_value(prompt, "pdb_file_path") or option_value(prompt, "pdbFile")
     center = {
         "pocket_center_x": float(option_value(prompt, "center_x") or 0),
@@ -188,15 +196,23 @@ async def run_drug_screening_docking(prompt, task_input=None):
     workspace = str(task_input.get("workspacePath") or os.getcwd())
     run_id = safe_file_token(str(task_input.get("runId") or str(int(time.time()))))
     tool_endpoint = "https://scp.intern-ai.org.cn/api/v1/mcp/2/DrugSDA-Tool"
-    pdb_id = (option_value(prompt, "pdb") or first_pdb_id(prompt) or "1A3N").upper()
-    smiles_list = extract_smiles_list(prompt) or [
-        "CCO",
-        "CCN",
-        "CC(=O)Oc1ccccc1C(=O)O",
-        "N[C@@H](Cc1ccc(O)cc1)C(=O)O",
-    ]
+    pdb_id = (option_value(prompt, "pdb") or first_pdb_id(prompt) or "").upper()
+    smiles_list = extract_smiles_list(prompt, workspace)
+    docking_top_n = requested_count(prompt, ("docking_top_n", "top_n", "top"), default=1000, scan_prompt=True)
+    admet_top_n = requested_count(prompt, ("admet_top_n",), default=100, scan_prompt=False)
     steps = []
     blockers = []
+
+    if not pdb_id:
+        return workflow_input_blocker(
+            "scp.drug-screening-docking",
+            "Missing PDB input. Provide pdb=<PDB_ID> or a prompt containing a PDB id; BioAgent will not substitute a default structure.",
+        )
+    if not smiles_list:
+        return workflow_input_blocker(
+            "scp.drug-screening-docking",
+            "Missing molecule library input. Provide smiles_list=\"SMILES|SMILES\" or smiles_file/smiles_csv pointing to a workspace CSV/SMILES file; BioAgent will not substitute a default compound library.",
+        )
 
     drug_likeness_result = await mcp_call(
         tool_endpoint,
@@ -235,7 +251,7 @@ async def run_drug_screening_docking(prompt, task_input=None):
         key=lambda row: admet_rank_score(row),
         reverse=True,
     )
-    admet_top = ranked_admet[: min(100, len(ranked_admet))]
+    admet_top = ranked_admet[: min(admet_top_n, len(ranked_admet))]
     docking_inputs = [row.get("smiles") for row in admet_top if row.get("smiles")] or passed
 
     pdb_server_path = ""
@@ -282,7 +298,8 @@ async def run_drug_screening_docking(prompt, task_input=None):
             "pocket_center_y": float(pocket.get("center_y") or option_value(prompt, "center_y") or 0),
             "pocket_center_z": float(pocket.get("center_z") or option_value(prompt, "center_z") or 0),
         }
-        for smiles in docking_inputs[: min(5, len(docking_inputs))]:
+        docking_batch = docking_inputs[: min(docking_top_n, len(docking_inputs))]
+        for smiles in docking_batch:
             try:
                 docking_result = await mcp_call(
                     tool_endpoint,
@@ -317,7 +334,7 @@ async def run_drug_screening_docking(prompt, task_input=None):
             blockers.append({"step": "similarity-expansion", "reason": str(exc)})
             steps.append({"step": "similarity-expansion", "tool": "calculate_morgan_fingerprint_similarity", "status": "failed-with-reason", "result": str(exc)})
 
-    docking_top = ranked_docking_rows(docking_results, top_n=1000)
+    docking_top = ranked_docking_rows(docking_results, top_n=docking_top_n)
     similarity_rows = similarity_table_rows(similarity)
     csv_exports = materialize_workflow_csvs(
         workspace,
@@ -332,7 +349,7 @@ async def run_drug_screening_docking(prompt, task_input=None):
     artifact_id = "virtual-screening-workflow"
     message = "SCP DrugSDA virtual-screening workflow completed" if overall_status == "done" else "SCP DrugSDA virtual-screening workflow returned partial results with explicit blockers"
     return {
-        "message": f"{message}: {len(passed)} Lipinski-pass molecules, {len(admet_top)} ADMET rows, {len(docking_results)} docking attempts.",
+        "message": f"{message}: {len(smiles_list)} input molecules, {len(passed)} Lipinski-pass molecules, {len(admet_top)} ADMET rows, {len(docking_results)} docking attempts. Results are input-driven; no default molecules or fake rows were added.",
         "confidence": 0.8 if overall_status != "failed-with-reason" else 1,
         "claimType": "fact",
         "evidenceLevel": "runtime",
@@ -353,7 +370,7 @@ async def run_drug_screening_docking(prompt, task_input=None):
         "executionUnits": [execution_unit(
             "scp.drug-screening-docking",
             "SCP.DrugSDA.virtual_screening_workflow",
-            {"pdbId": pdb_id, "smilesCount": len(smiles_list), "status": overall_status, "blockers": blockers},
+            {"pdbId": pdb_id, "smilesCount": len(smiles_list), "dockingTopN": docking_top_n, "admetTopN": admet_top_n, "status": overall_status, "blockers": blockers},
             "failed-with-reason" if overall_status == "failed-with-reason" else "done",
             ["SCP DrugSDA-Tool server 2", "RCSB PDB current"],
             [artifact_id],
@@ -380,7 +397,7 @@ async def run_drug_screening_docking(prompt, task_input=None):
                 "blockers": blockers,
                 "downloads": csv_exports,
                 "downloadRefs": {item["key"]: item["path"] for item in csv_exports},
-                "downloadNote": "CSV files are materialized in the workspace and embedded in this artifact for browser download. With the provided representative SMILES list, docking_top1000.csv contains all available ranked docking rows, not 1000 unique molecules.",
+                "downloadNote": "CSV files are materialized in the workspace and embedded in this artifact for browser download. docking_top1000.csv contains up to the requested top N from the provided or referenced molecule library; if the input library has fewer molecules, it contains all available ranked rows and does not fabricate rows.",
             },
         }],
     }
@@ -669,6 +686,45 @@ def failed_payload(skill_id, prompt, reason):
     }
 
 
+def workflow_input_blocker(skill_id, reason):
+    artifact_id = "virtual-screening-workflow"
+    return {
+        "message": f"BioAgent needs user-specific inputs or AgentServer task generation before running {skill_id}: {reason}",
+        "confidence": 1,
+        "claimType": "fact",
+        "evidenceLevel": "runtime",
+        "reasoningTrace": "The live SCP adapter refused to substitute default PDB or molecule-library inputs. If the prompt requires a new workflow shape, configure AgentServer so BioAgent can generate a task-specific script.",
+        "claims": [{
+            "text": reason,
+            "type": "fact",
+            "confidence": 1,
+            "evidenceLevel": "runtime",
+            "supportingRefs": [skill_id],
+            "opposingRefs": [],
+        }],
+        "uiManifest": [
+            {"componentId": "unknown-artifact-inspector", "title": "Workflow blocker", "artifactRef": artifact_id, "priority": 1},
+            {"componentId": "execution-unit-table", "title": "Execution units", "artifactRef": artifact_id, "priority": 2},
+        ],
+        "executionUnits": [execution_unit(
+            skill_id,
+            "SCP.DrugSDA.virtual_screening_workflow",
+            {"reason": reason, "requiresAgentServerGeneration": True},
+            "repair-needed",
+            ["BioAgent SCP adapter"],
+            [artifact_id],
+        )],
+        "artifacts": [{
+            "id": artifact_id,
+            "type": "virtual-screening-workflow",
+            "producerScenario": "scp-live-skill-adapter",
+            "schemaVersion": "1",
+            "metadata": {"skillId": skill_id, "status": "repair-needed", "requiresAgentServerGeneration": True, "accessedAt": now()},
+            "data": {"status": "repair-needed", "blockers": [{"step": "input", "reason": reason}], "rows": []},
+        }],
+    }
+
+
 def generic_capability_payload(skill_id, prompt, status, reason, endpoints, servers, selected):
     artifact_id = "scp-skill-capability"
     return {
@@ -812,31 +868,33 @@ def prompt_value_for_field(prompt, name, prop):
     explicit = option_value(prompt, name)
     if explicit is not None:
         return coerce_value(explicit, prop)
+    if "default" in prop:
+        return prop.get("default")
     lower = name.lower()
     if "file" in lower or "path" in lower:
-        return option_value(prompt, name) or ""
+        return None
     if "smiles" in lower:
-        return option_value(prompt, "smiles") or "CCO"
+        return option_value(prompt, "smiles")
     if lower in ("sequence", "protein") or "protein" in lower:
-        return extract_sequence(prompt) or "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKT"
+        return extract_sequence(prompt)
     if "query" in lower:
-        return option_value(prompt, "query") or strip_skill_words(prompt) or "BRCA1 PARP inhibitor resistance"
+        return option_value(prompt, "query") or strip_skill_words(prompt) or None
     if "gene" in lower or "symbol" in lower:
-        return option_value(prompt, "gene") or first_gene_symbol(prompt) or "TP53"
+        return option_value(prompt, "gene") or first_gene_symbol(prompt) or None
     if "drug" in lower:
-        return option_value(prompt, "drug") or "aspirin"
+        return option_value(prompt, "drug")
     if "molecule_name" in lower or lower == "name" or "compound" in lower:
-        return option_value(prompt, name) or option_value(prompt, "compound") or "aspirin"
+        return option_value(prompt, name) or option_value(prompt, "compound")
     if "pdb" in lower:
-        return option_value(prompt, name) or option_value(prompt, "pdb") or "1A3N"
+        return option_value(prompt, name) or option_value(prompt, "pdb")
     if "taxon" in lower:
-        return option_value(prompt, name) or "9606"
+        return option_value(prompt, name)
     if prop.get("type") == "number":
-        return 0
+        return None
     if prop.get("type") == "integer":
-        return 1
+        return None
     if prop.get("type") == "boolean":
-        return True
+        return None
     return None
 
 
@@ -895,13 +953,69 @@ def extract_sequence(prompt):
     return max(hits, key=len) if hits else ""
 
 
-def extract_smiles_list(prompt):
+def extract_smiles_list(prompt, workspace=None):
     value = option_value(prompt, "smiles_list")
     if not value:
         value = option_value(prompt, "smiles")
-    if not value:
+    smiles = []
+    if value:
+        smiles.extend(item.strip() for item in re.split(r"[|;\n]+", value) if item.strip())
+    file_ref = (
+        option_value(prompt, "smiles_file")
+        or option_value(prompt, "smiles_csv")
+        or option_value(prompt, "library_csv")
+        or option_value(prompt, "library")
+    )
+    if file_ref and workspace:
+        smiles.extend(read_smiles_file(workspace, file_ref))
+    return unique(smiles)
+
+
+def read_smiles_file(workspace, file_ref):
+    path = file_ref if os.path.isabs(file_ref) else os.path.join(workspace, file_ref)
+    if not os.path.exists(path):
         return []
-    return [item.strip() for item in re.split(r"[|;\n]+", value) if item.strip()]
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    rows = []
+    if "," in text.splitlines()[0]:
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            candidate = row.get("smiles") or row.get("SMILES") or row.get("canonical_smiles") or row.get("smile")
+            if candidate:
+                rows.append(candidate.strip())
+    else:
+        rows = [item.strip() for item in re.split(r"[\s|;]+", text) if item.strip() and not item.lower().startswith("smiles")]
+    return rows
+
+
+def requested_count(prompt, keys, default, scan_prompt=True):
+    for key in keys:
+        value = parse_int(option_value(prompt, key))
+        if value:
+            return value
+    if scan_prompt:
+        patterns = [
+            r"(?:top|前|排名前)\s*[-=：:]?\s*(\d+)",
+            r"top\s*(\d+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, prompt, flags=re.I)
+            if match:
+                parsed = parse_int(match.group(1))
+                if parsed:
+                    return parsed
+    return default
+
+
+def parse_int(value):
+    if value is None:
+        return None
+    try:
+        parsed = int(str(value).strip())
+        return parsed if parsed > 0 else None
+    except Exception:
+        return None
 
 
 def first_pdb_id(prompt):

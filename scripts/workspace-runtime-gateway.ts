@@ -12,7 +12,11 @@ export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>):
   const skills = await loadSkillRegistry(request);
   const skill = matchSkill(request, skills) ?? agentServerGenerationSkill(request.skillDomain);
   if (skill.manifest.entrypoint.type === 'agentserver-generation') {
-    return runAgentServerGeneratedTask(request, skill, skills);
+    return await runAgentServerGeneratedTask(request, skill, skills) ?? repairNeededPayload(request, skill, 'AgentServer task generation did not produce a runnable task.');
+  }
+  if (shouldAttemptFreshTaskGeneration(request, skill)) {
+    const generated = await runAgentServerGeneratedTask(request, skill, skills, { allowFallbackOnGenerationFailure: true });
+    if (generated) return generated;
   }
   if (skill.id === 'structure.rcsb_latest_or_entry') {
     return runPythonWorkspaceSkill(request, skill, 'structure');
@@ -33,7 +37,7 @@ export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>):
     return runLiveScpSkill(request, skill);
   }
   if (skill.manifest.entrypoint.type === 'markdown-skill') {
-    return runAgentServerGeneratedTask(request, skill, skills);
+    return await runAgentServerGeneratedTask(request, skill, skills) ?? repairNeededPayload(request, skill, 'AgentServer markdown-skill task generation did not produce a runnable task.');
   }
   return repairNeededPayload(request, skill, `Skill ${skill.id} is installed but has no gateway adapter yet.`);
 }
@@ -42,10 +46,12 @@ async function runAgentServerGeneratedTask(
   request: GatewayRequest,
   skill: SkillAvailability,
   skills: SkillAvailability[],
-): Promise<ToolPayload> {
+  options: { allowFallbackOnGenerationFailure?: boolean } = {},
+): Promise<ToolPayload | undefined> {
   const workspace = resolve(request.workspacePath || process.cwd());
   const baseUrl = request.agentServerBaseUrl || await readConfiguredAgentServerBaseUrl(workspace);
   if (!baseUrl) {
+    if (options.allowFallbackOnGenerationFailure) return undefined;
     return repairNeededPayload(request, skill, 'No validated local skill matched this request and no AgentServer base URL is configured.');
   }
   const generation = await requestAgentServerGeneration({
@@ -56,16 +62,20 @@ async function runAgentServerGeneratedTask(
     workspace,
   });
   if (!generation.ok) {
+    if (options.allowFallbackOnGenerationFailure) return undefined;
     return repairNeededPayload(request, skill, generation.error);
   }
 
   const taskId = `generated-${request.skillDomain}-${sha1(`${request.prompt}:${Date.now()}`).slice(0, 12)}`;
+  const generatedPathMap = new Map<string, string>();
   for (const file of generation.response.taskFiles) {
-    const rel = safeWorkspaceRel(file.path);
+    const rel = generatedTaskArchiveRel(taskId, file.path);
+    generatedPathMap.set(safeWorkspaceRel(file.path), rel);
     await mkdir(dirname(join(workspace, rel)), { recursive: true });
     await writeFile(join(workspace, rel), file.content);
   }
-  const taskRel = safeWorkspaceRel(generation.response.entrypoint.path);
+  const entrypointOriginalRel = safeWorkspaceRel(generation.response.entrypoint.path);
+  const taskRel = generatedPathMap.get(entrypointOriginalRel) ?? generatedTaskArchiveRel(taskId, generation.response.entrypoint.path);
   const outputRel = `.bioagent/task-results/${taskId}.json`;
   const stdoutRel = `.bioagent/logs/${taskId}.stdout.log`;
   const stderrRel = `.bioagent/logs/${taskId}.stderr.log`;
@@ -94,7 +104,7 @@ async function runAgentServerGeneratedTask(
       skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
-      status: 'failed',
+      status: 'repair-needed',
       codeRef: taskRel,
       inputRef: `.bioagent/task-inputs/${taskId}.json`,
       outputRef: outputRel,
@@ -104,6 +114,16 @@ async function runAgentServerGeneratedTask(
       failureReason,
       createdAt: new Date().toISOString(),
     });
+    const repaired = await tryAgentServerRepairAndRerun({
+      request,
+      skill,
+      taskId,
+      taskPrefix: 'generated',
+      run,
+      schemaErrors: [],
+      failureReason,
+    });
+    if (repaired) return repaired;
     return failedTaskPayload(request, skill, run, failureReason);
   }
 
@@ -133,6 +153,18 @@ async function runAgentServerGeneratedTask(
       schemaErrors: errors,
       createdAt: new Date().toISOString(),
     });
+    if (errors.length) {
+      const repaired = await tryAgentServerRepairAndRerun({
+        request,
+        skill,
+        taskId,
+        taskPrefix: 'generated',
+        run,
+        schemaErrors: errors,
+        failureReason: `AgentServer generated task output failed schema validation: ${errors.join('; ')}`,
+      });
+      if (repaired) return repaired;
+    }
     return {
       ...normalized,
       reasoningTrace: [
@@ -155,7 +187,7 @@ async function runAgentServerGeneratedTask(
       skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
-      status: 'failed',
+      status: 'repair-needed',
       codeRef: taskRel,
       inputRef: `.bioagent/task-inputs/${taskId}.json`,
       outputRef: outputRel,
@@ -165,6 +197,16 @@ async function runAgentServerGeneratedTask(
       failureReason,
       createdAt: new Date().toISOString(),
     });
+    const repaired = await tryAgentServerRepairAndRerun({
+      request,
+      skill,
+      taskId,
+      taskPrefix: 'generated',
+      run,
+      schemaErrors: ['output could not be parsed'],
+      failureReason,
+    });
+    if (repaired) return repaired;
     return failedTaskPayload(request, skill, run, failureReason);
   }
 }
@@ -353,7 +395,7 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
-      status: 'failed-with-reason',
+      status: 'repair-needed',
       codeRef: taskRel,
       inputRef: inputRel,
       outputRef: outputRel,
@@ -363,6 +405,16 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       failureReason,
       createdAt: new Date().toISOString(),
     });
+    const repaired = await tryAgentServerRepairAndRerun({
+      request,
+      skill,
+      taskId,
+      taskPrefix,
+      run,
+      schemaErrors: [],
+      failureReason,
+    });
+    if (repaired) return repaired;
     return failedTaskPayload(request, skill, run, failureReason);
   }
   try {
@@ -376,13 +428,14 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
     });
     const errors = schemaErrors(payload);
     const unitStatus = String(normalized.executionUnits[0]?.status || '');
+    const requiresGeneration = payloadRequestsAgentServerGeneration(normalized);
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
-      status: errors.length ? 'repair-needed' : unitStatus === 'failed-with-reason' ? 'failed-with-reason' : 'done',
+      status: errors.length || requiresGeneration || unitStatus === 'repair-needed' ? 'repair-needed' : unitStatus === 'failed-with-reason' ? 'failed-with-reason' : 'done',
       codeRef: taskRel,
       inputRef: inputRel,
       outputRef: outputRel,
@@ -392,6 +445,21 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       schemaErrors: errors,
       createdAt: new Date().toISOString(),
     });
+    if (errors.length || requiresGeneration || unitStatus === 'repair-needed') {
+      const reason = errors.length
+        ? `Live SCP adapter output failed schema validation: ${errors.join('; ')}`
+        : 'Live SCP adapter declared that this request needs task-specific AgentServer generation instead of a fixed adapter script.';
+      const repaired = await tryAgentServerRepairAndRerun({
+        request,
+        skill,
+        taskId,
+        taskPrefix,
+        run,
+        schemaErrors: errors,
+        failureReason: reason,
+      });
+      if (repaired) return repaired;
+    }
     return normalized;
   } catch (error) {
     const failureReason = `Live SCP adapter output could not be parsed: ${errorMessage(error)}`;
@@ -401,7 +469,7 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       skillDomain: request.skillDomain,
       skillId: skill.id,
       attempt: 1,
-      status: 'failed-with-reason',
+      status: 'repair-needed',
       codeRef: taskRel,
       inputRef: inputRel,
       outputRef: outputRel,
@@ -411,12 +479,41 @@ async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability
       failureReason,
       createdAt: new Date().toISOString(),
     });
+    const repaired = await tryAgentServerRepairAndRerun({
+      request,
+      skill,
+      taskId,
+      taskPrefix,
+      run,
+      schemaErrors: ['output could not be parsed'],
+      failureReason,
+    });
+    if (repaired) return repaired;
     return failedTaskPayload(request, skill, run, failureReason);
   }
 }
 
 function isLiveScpSkill(skillId: string) {
   return skillId.startsWith('scp.');
+}
+
+function shouldAttemptFreshTaskGeneration(request: GatewayRequest, skill: SkillAvailability) {
+  if (request.uiState?.freshTaskGeneration !== true) return false;
+  if (skill.manifest.entrypoint.type === 'agentserver-generation') return false;
+  if (skill.manifest.entrypoint.type === 'inspector') return false;
+  if (/capability[_\s-]*probe\s*[:=]\s*true/i.test(request.prompt)) return false;
+  if (/\btool\s*=\s*["']?[A-Za-z0-9_.-]+["']?/i.test(request.prompt) && request.prompt.length < 240) return false;
+  return true;
+}
+
+function payloadRequestsAgentServerGeneration(payload: ToolPayload) {
+  if (payload.executionUnits.some((unit) => isRecord(unit) && unit.status === 'repair-needed')) return true;
+  return payload.artifacts.some((artifact) => {
+    if (!isRecord(artifact)) return false;
+    const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+    const data = isRecord(artifact.data) ? artifact.data : {};
+    return metadata.requiresAgentServerGeneration === true || data.requiresAgentServerGeneration === true;
+  });
 }
 
 async function tryAgentServerRepairAndRerun(params: {
@@ -859,6 +956,10 @@ function buildAgentServerGenerationPrompt(request: {
   return [
     'Generate a BioAgent workspace task for this request.',
     'Return JSON matching AgentServerGenerationResponse: taskFiles, entrypoint, environmentRequirements, validationCommand, expectedArtifacts, and patchSummary.',
+    'Generate fresh task code for this specific user request; do not reuse a prior run as the implementation source.',
+    'Put generated task paths under .bioagent/tasks when possible. BioAgent will archive any returned taskFiles under .bioagent/tasks/<run-id>/ before execution.',
+    'Prefer installed or workspace tools when they genuinely fit, but write adapter code as needed so the run is reproducible from inputPath and outputPath.',
+    'If a required input, remote file, credential, or executable is missing, write a valid ToolPayload with executionUnits.status="failed-with-reason" and a precise failureReason instead of fabricating outputs.',
     '',
     JSON.stringify({
       ...request,
@@ -967,6 +1068,17 @@ function safeWorkspaceRel(path: string) {
   const normalized = path.replaceAll('\\', '/').replace(/^\/+/, '');
   if (!normalized || normalized.includes('..')) throw new Error(`Unsafe workspace-relative path: ${path}`);
   return normalized;
+}
+
+function generatedTaskArchiveRel(taskId: string, path: string) {
+  const rel = safeWorkspaceRel(path);
+  const archivePrefix = '.bioagent/tasks/';
+  const withoutArchivePrefix = rel.startsWith(archivePrefix) ? rel.slice(archivePrefix.length) : rel;
+  const withoutTaskPrefix = withoutArchivePrefix.startsWith(`${taskId}/`)
+    ? withoutArchivePrefix.slice(taskId.length + 1)
+    : withoutArchivePrefix;
+  const archived = withoutTaskPrefix || 'task.py';
+  return `${archivePrefix}${taskId}/${archived}`;
 }
 
 function validateAndNormalizePayload(

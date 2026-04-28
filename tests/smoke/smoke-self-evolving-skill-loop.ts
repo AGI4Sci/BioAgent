@@ -60,14 +60,14 @@ with open(output_path, "w", encoding="utf-8") as handle:
 `;
 
 const server = createServer(async (req, res) => {
-  if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+  if (req.url !== '/api/agent-server/runs/stream' || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
     return;
   }
   sawGenerationRequest = true;
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8' });
+  res.end(`${JSON.stringify({ result: {
     ok: true,
     data: {
       run: {
@@ -85,7 +85,7 @@ const server = createServer(async (req, res) => {
         },
       },
     },
-  }));
+  } })}\n`);
 });
 
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

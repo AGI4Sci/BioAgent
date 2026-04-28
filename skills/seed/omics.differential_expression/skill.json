@@ -2,27 +2,42 @@
   "id": "omics.differential_expression",
   "kind": "seed",
   "description": "Run differential expression from workspace matrix and metadata files with Scanpy, DESeq2, edgeR, or bounded CSV fallback.",
-  "skillDomains": ["omics"],
+  "skillDomains": [
+    "omics"
+  ],
   "inputContract": {
     "prompt": "Must include matrixRef and metadataRef; may include groupColumn, caseGroup, controlGroup, alpha, runner."
   },
   "outputArtifactSchema": {
     "type": "omics-differential-expression",
-    "required": ["points", "heatmap", "umap", "runner", "logRef"]
+    "required": [
+      "points",
+      "heatmap",
+      "umap",
+      "runner",
+      "logRef"
+    ]
   },
   "entrypoint": {
-    "type": "workspace-task",
-    "command": "python",
-    "path": "../../../src/runtime/python_tasks/omics_differential_task.py"
+    "type": "agentserver-generation"
   },
   "environment": {
     "language": "python",
-    "dependencies": ["python>=3.10", "csv", "statistics"],
-    "optionalRuntimes": ["scanpy.rank_genes_groups", "DESeq2", "edgeR"],
-    "migrationStatus": "workspace Python CSV task; production runner backends should be added inside this task"
+    "dependencies": [
+      "python>=3.10",
+      "csv",
+      "statistics"
+    ],
+    "optionalRuntimes": [
+      "scanpy.rank_genes_groups",
+      "DESeq2",
+      "edgeR"
+    ],
+    "migrationStatus": "generated capability; no fixed source task script",
+    "execution": "AgentServer generates workspace-local task code at runtime."
   },
   "validationSmoke": {
-    "mode": "workspace-task",
+    "mode": "delegated",
     "expectedPromptPattern": "matrixRef=<path> metadataRef=<path>",
     "expectedArtifactType": "omics-differential-expression"
   },

@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { agentServerGenerationSkill, loadSkillRegistry, matchSkill } from './skill-registry.js';
 import { appendTaskAttempt, readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
-import type { AgentServerGenerationResponse, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
+import type { AgentServerGenerationResponse, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
 import { fileExists, runWorkspaceTask, sha1 } from './workspace-task-runner.js';
 import { maybeWriteSkillPromotionProposal } from './skill-promotion.js';
 
@@ -10,6 +10,8 @@ const SKILL_DOMAIN_SET = new Set<BioAgentSkillDomain>(['literature', 'structure'
 
 export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>, callbacks: WorkspaceRuntimeCallbacks = {}): Promise<ToolPayload> {
   const request = normalizeGatewayRequest(body);
+  const artifactReferenceAnswer = await answerArtifactReferenceFollowupWithAgent(request, callbacks);
+  if (artifactReferenceAnswer) return artifactReferenceAnswer;
   const skills = await loadSkillRegistry(request);
   const skill = shouldForceAgentServerGeneration(request)
     ? agentServerGenerationSkill(request.skillDomain)
@@ -27,29 +29,8 @@ export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>, 
     const generated = await runAgentServerGeneratedTask(request, skill, skills, { allowFallbackOnGenerationFailure: true }, callbacks);
     if (generated) return generated;
   }
-  if (skill.id === 'structure.rcsb_latest_or_entry') {
-    return runPythonWorkspaceSkill(request, skill, 'structure', callbacks);
-  }
-  if (skill.id === 'literature.pubmed_search') {
-    return runPythonWorkspaceSkill(request, skill, 'literature', callbacks);
-  }
-  if (skill.id === 'literature.web_search') {
-    return runPythonWorkspaceSkill(request, skill, 'literature-web', callbacks);
-  }
-  if (skill.id === 'knowledge.uniprot_chembl_lookup') {
-    return runPythonWorkspaceSkill(request, skill, 'knowledge', callbacks);
-  }
-  if (skill.id === 'sequence.ncbi_blastp_search') {
-    return runPythonWorkspaceSkill(request, skill, 'blastp', callbacks);
-  }
-  if (skill.id === 'omics.differential_expression') {
-    return runPythonWorkspaceSkill(request, skill, 'omics', callbacks);
-  }
   if (skill.manifest.entrypoint.type === 'workspace-task') {
     return runPythonWorkspaceSkill(request, skill, 'workspace', callbacks);
-  }
-  if (isLiveScpSkill(skill.id)) {
-    return runLiveScpSkill(request, skill);
   }
   if (skill.manifest.entrypoint.type === 'markdown-skill') {
     return await runAgentServerGeneratedTask(request, skill, skills, {}, callbacks) ?? repairNeededPayload(request, skill, 'AgentServer markdown-skill task generation did not produce a runnable task.');
@@ -176,6 +157,7 @@ async function runAgentServerGeneratedTask(
     id: taskId,
     language: generation.response.entrypoint.language,
     entrypoint: generation.response.entrypoint.command || 'main',
+    entrypointArgs: generation.response.entrypoint.args,
     taskRel,
     input: {
       prompt: request.prompt,
@@ -242,6 +224,8 @@ async function runAgentServerGeneratedTask(
       stderrRel,
       runtimeFingerprint: run.runtimeFingerprint,
     });
+    const failureReason = firstPayloadFailureReason(payload, run);
+    const shouldRepairExecutionFailure = errors.length === 0 && run.exitCode !== 0 && Boolean(failureReason);
     await appendTaskAttempt(workspace, {
       id: taskId,
       prompt: request.prompt,
@@ -249,7 +233,7 @@ async function runAgentServerGeneratedTask(
       ...attemptPlanRefs(request, skill),
       skillId: skill.id,
       attempt: 1,
-      status: errors.length ? 'repair-needed' : 'done',
+      status: errors.length || shouldRepairExecutionFailure ? 'repair-needed' : payloadHasFailureStatus(payload) ? 'failed-with-reason' : 'done',
       codeRef: taskRel,
       inputRef: `.bioagent/task-inputs/${taskId}.json`,
       outputRef: outputRel,
@@ -257,9 +241,10 @@ async function runAgentServerGeneratedTask(
       stderrRef: stderrRel,
       exitCode: run.exitCode,
       schemaErrors: errors,
+      failureReason: errors.length ? `AgentServer generated task output failed schema validation: ${errors.join('; ')}` : failureReason,
       createdAt: new Date().toISOString(),
     });
-    if (errors.length) {
+    if (errors.length || shouldRepairExecutionFailure) {
       const repaired = await tryAgentServerRepairAndRerun({
         request,
         skill,
@@ -267,7 +252,9 @@ async function runAgentServerGeneratedTask(
         taskPrefix: 'generated',
         run,
         schemaErrors: errors,
-        failureReason: `AgentServer generated task output failed schema validation: ${errors.join('; ')}`,
+        failureReason: errors.length
+          ? `AgentServer generated task output failed schema validation: ${errors.join('; ')}`
+          : `AgentServer generated task exited ${run.exitCode} with failed payload: ${failureReason}`,
       });
       if (repaired) return repaired;
     }
@@ -549,6 +536,425 @@ function normalizeLlmEndpoint(value: unknown): LlmEndpointConfig | undefined {
   };
 }
 
+async function answerArtifactReferenceFollowup(request: GatewayRequest, callbacks: WorkspaceRuntimeCallbacks = {}): Promise<ToolPayload | undefined> {
+  const context = await collectArtifactReferenceContext(request);
+  if (!context) return undefined;
+  const { workspace, refs, refRows, latestFailed, latestAttempt, latestExecutionRef, combinedArtifacts, artifactFiles, paperListArtifact, researchReportArtifact } = context;
+  const refText = refRows
+    .map(([label, ref]) => `- ${label}: ${ref ? absoluteWorkspaceRef(workspace, String(ref)) : '未在当前上下文中找到'}`)
+    .join('\n');
+  const themeBullets = summarizePreviousArtifactThemes(paperListArtifact, researchReportArtifact);
+  const themeText = themeBullets.length
+    ? themeBullets.map((item) => `- ${item}`).join('\n')
+    : '- 当前上下文里没有足够的 paper-list/research-report 内容可用于可靠总结；上方路径是现有可追溯线索。';
+  const paperListRef = artifactRefForAnswer(paperListArtifact, artifactFiles, 'paper-list');
+  const researchReportRef = artifactRefForAnswer(researchReportArtifact, artifactFiles, 'research-report');
+  const message = [
+    '我没有重新检索或重新执行任务，而是直接读取当前会话已有的 workspace refs、execution refs 和 artifact refs。',
+    latestFailed ? `\n注意：最近一次相关任务状态是失败/需要修复，因此当前没有可确认的“已下载论文”或最终总结报告；下面列出的是这次失败 run 的可追溯脚本、输出和日志。失败原因：${stringField(latestAttempt?.failureReason) ?? stringField(latestExecutionRef?.failureReason) ?? '未记录具体原因'}` : '',
+    '',
+    '上一轮可追溯文件位置：',
+    refText,
+    '',
+    '上一轮内容要点：',
+    themeText,
+  ].join('\n');
+  return {
+    message,
+    confidence: 0.9,
+    claimType: 'fact',
+    evidenceLevel: 'workspace-runtime-context',
+    reasoningTrace: 'BioAgent answered a continuation/reference follow-up from existing artifacts, recentExecutionRefs, and task-attempt history. No AgentServer generation or workspace task execution was started.',
+    claims: [{
+      text: 'The answer was reconstructed from existing BioAgent workspace refs without rerunning the task.',
+      type: 'fact',
+      confidence: 0.9,
+      evidenceLevel: 'workspace-runtime-context',
+      supportingRefs: Object.values(refs).filter(Boolean),
+    }],
+    uiManifest: [
+      { componentId: 'report-viewer', artifactRef: 'context-reference-answer', priority: 1 },
+      { componentId: 'execution-unit-table', artifactRef: 'context-reference-answer', priority: 2 },
+    ],
+    executionUnits: [{
+      id: `context-reference-${sha1(`${request.skillDomain}:${request.prompt}`).slice(0, 10)}`,
+      status: 'done',
+      tool: 'bioagent.context-ref-inspector',
+      params: JSON.stringify({ prompt: request.prompt.slice(0, 240), sourceArtifacts: combinedArtifacts.length, priorAttempts: context.priorAttempts.length }),
+      codeRef: refs.codeRef,
+      inputRef: refs.inputRef,
+      outputRef: refs.outputRef,
+      stdoutRef: refs.stdoutRef,
+      stderrRef: refs.stderrRef,
+      routeDecision: {
+        selectedRuntime: 'context-ref-inspector',
+        fallbackReason: 'follow-up asks for existing files/artifacts; rerunning would lose context and waste tokens',
+        selectedAt: new Date().toISOString(),
+      },
+    }],
+    artifacts: [{
+      id: 'context-reference-answer',
+      type: 'research-report',
+      producerScenario: request.skillDomain,
+      schemaVersion: '1',
+      dataRef: researchReportRef || paperListRef || refs.outputRef,
+      metadata: {
+        source: 'workspace-runtime-context',
+        taskCodeRef: refs.codeRef,
+        inputRef: refs.inputRef,
+        outputRef: refs.outputRef,
+        stdoutRef: refs.stdoutRef,
+        stderrRef: refs.stderrRef,
+        paperListRef,
+        researchReportRef,
+      },
+      data: {
+        markdown: message,
+        sections: markdownSections(`## Workspace refs\n${refText}\n\n## Summary\n${themeText}`),
+      },
+    }],
+    logs: [
+      ...(refs.stdoutRef ? [{ kind: 'stdout', ref: refs.stdoutRef }] : []),
+      ...(refs.stderrRef ? [{ kind: 'stderr', ref: refs.stderrRef }] : []),
+    ],
+  };
+}
+
+async function answerArtifactReferenceFollowupWithAgent(request: GatewayRequest, callbacks: WorkspaceRuntimeCallbacks = {}): Promise<ToolPayload | undefined> {
+  const context = await collectArtifactReferenceContext(request);
+  if (!context) return undefined;
+  if (process.env.BIOAGENT_ENABLE_LOCAL_REFERENCE_ANSWER === '1') {
+    return answerArtifactReferenceFollowup(request, callbacks);
+  }
+  const skill = agentServerGenerationSkill(request.skillDomain);
+  const baseUrl = request.agentServerBaseUrl || await readConfiguredAgentServerBaseUrl(context.workspace);
+  if (!baseUrl) {
+    return repairNeededPayload(
+      request,
+      skill,
+      'Agent backend is required for multi-turn context answers. BioAgent did not use the local templated reference answer.',
+    );
+  }
+  emitWorkspaceRuntimeEvent(callbacks, {
+    type: 'artifact-reference-followup',
+    source: 'workspace-runtime',
+    status: 'running',
+    message: 'Forwarding multi-turn context to AgentServer for intent-aware answering without rerunning by default.',
+  });
+  const answer = await requestAgentServerContextAnswer({
+    baseUrl,
+    request,
+    skill,
+    workspace: context.workspace,
+    referenceContext: agentReferenceContextForPrompt(context),
+    callbacks,
+  });
+  if (!answer.ok) {
+    return repairNeededPayload(
+      request,
+      skill,
+      `Agent backend context answer failed: ${answer.error}`,
+    );
+  }
+  return answer.payload;
+}
+
+async function collectArtifactReferenceContext(request: GatewayRequest) {
+  if (!isArtifactReferenceFollowup(request)) return undefined;
+  const workspace = resolve(request.workspacePath || process.cwd());
+  const recentExecutionRefs = toRecordList(request.uiState?.recentExecutionRefs);
+  let priorAttempts = await readRecentTaskAttempts(workspace, request.skillDomain, 8, {
+    scenarioPackageId: request.scenarioPackageRef?.id,
+    skillPlanRef: request.skillPlanRef,
+  });
+  if (!priorAttempts.length) {
+    priorAttempts = await readRecentTaskAttempts(workspace, request.skillDomain, 8);
+  }
+  const sessionId = typeof request.uiState?.sessionId === 'string' ? request.uiState.sessionId : undefined;
+  const artifactFiles = await readRecentArtifactFiles(workspace, sessionId);
+  if (!request.artifacts.length && !recentExecutionRefs.length && !priorAttempts.length && !artifactFiles.length) return undefined;
+  const latestAttempt = pickLatestReferenceAttempt(priorAttempts);
+  const latestExecutionRef = pickLatestReferenceExecutionRef(recentExecutionRefs);
+  const refs = {
+    codeRef: await pickExistingReference(workspace, stringField(latestAttempt?.codeRef), stringField(latestExecutionRef?.codeRef)),
+    inputRef: await pickExistingReference(workspace, stringField(latestAttempt?.inputRef), stringField(latestExecutionRef?.inputRef)),
+    outputRef: await pickExistingReference(workspace, stringField(latestAttempt?.outputRef), stringField(latestExecutionRef?.outputRef)),
+    stdoutRef: await pickExistingReference(workspace, stringField(latestAttempt?.stdoutRef), stringField(latestExecutionRef?.stdoutRef)),
+    stderrRef: await pickExistingReference(workspace, stringField(latestAttempt?.stderrRef), stringField(latestExecutionRef?.stderrRef)),
+  };
+  const outputArtifacts = await readArtifactsFromOutputRef(workspace, refs.outputRef);
+  const allReferenceArtifacts = mergeArtifactsForReference([
+    ...request.artifacts,
+    ...outputArtifacts,
+  ], artifactFiles.map((entry) => ({
+    ...entry.artifact,
+    dataRef: stringField(entry.artifact.dataRef) ?? entry.rel,
+  })));
+  const hasCoreArtifacts = Boolean(
+    findArtifactByType(allReferenceArtifacts, 'paper-list')
+    || findArtifactByType(allReferenceArtifacts, 'research-report'),
+  );
+  const latestFailed = (isFailedReferenceAttempt(latestAttempt) || isFailedReferenceAttempt(latestExecutionRef)) && !hasCoreArtifacts;
+  const combinedArtifacts = latestFailed ? mergeArtifactsForReference(
+    request.artifacts.filter((artifact) => artifactMatchesExecutionRef(artifact, refs.outputRef)),
+    [],
+  ) : allReferenceArtifacts;
+  const paperListArtifact = findArtifactByType(combinedArtifacts, 'paper-list');
+  const researchReportArtifact = findArtifactByType(combinedArtifacts, 'research-report');
+  const paperListRef = artifactRefForAnswer(paperListArtifact, artifactFiles, 'paper-list');
+  const researchReportRef = artifactRefForAnswer(researchReportArtifact, artifactFiles, 'research-report');
+  const refRows: Array<[string, string | undefined]> = [
+    ['任务脚本', refs.codeRef],
+    ['任务输入 JSON', refs.inputRef],
+    ['任务结果 JSON', refs.outputRef],
+    ['stdout 日志', refs.stdoutRef],
+    ['stderr 日志', refs.stderrRef],
+    ['paper-list artifact', paperListRef],
+    ['research-report artifact', researchReportRef],
+  ];
+  return {
+    workspace,
+    recentExecutionRefs,
+    priorAttempts,
+    artifactFiles,
+    latestAttempt,
+    latestExecutionRef,
+    refs,
+    refRows,
+    allReferenceArtifacts,
+    combinedArtifacts,
+    paperListArtifact,
+    researchReportArtifact,
+    latestFailed,
+  };
+}
+
+function agentReferenceContextForPrompt(context: NonNullable<Awaited<ReturnType<typeof collectArtifactReferenceContext>>>) {
+  return {
+    refs: context.refs,
+    refRows: context.refRows,
+    latestFailed: context.latestFailed,
+    failureReason: stringField(context.latestAttempt?.failureReason) ?? stringField(context.latestExecutionRef?.failureReason),
+    artifacts: summarizeArtifactsForAgentContext(context.combinedArtifacts),
+    recentExecutionRefs: context.recentExecutionRefs.map((entry) => clipForAgentServerJson(entry, 2)),
+    priorAttempts: summarizeTaskAttemptsForAgentServer(context.priorAttempts),
+  };
+}
+
+function isArtifactReferenceFollowup(request: GatewayRequest) {
+  const prompt = currentUserRequestText(request.prompt).toLowerCase();
+  const hasContinuationMarker = /上一轮|上轮|刚才|之前|此前|前面|基于上|继续|补充|完善|修改|按.*要求|没有按照|为什么.*没|怎么.*没|缺少|漏了|不要重新|别重新|不重新|不要重跑|别重跑|不重跑|previous|last\s+(round|run|turn)|continue|revise|supplement|missing|did not|do not rerun|don't rerun|no rerun|without rerun|do not re-search|no re-search/.test(prompt);
+  const asksForRefsOrSummary = /在哪里|哪.*里|路径|存放|本地|文件|脚本|日志|总结|要点|产物|报告|每篇|逐篇|创新|方法|介绍|artifact|ref|path|local|file|script|stdout|stderr|log|result\s*json|outputref|coderef|summary|report|per[-\s]?paper|method|innovation/.test(prompt);
+  const hasContext = request.artifacts.length > 0
+    || toRecordList(request.uiState?.recentExecutionRefs).length > 0
+    || toStringList(request.uiState?.recentConversation).length > 1;
+  const isLocationQuestionWithContext = hasContext && /在哪里|哪.*里|路径|存放|本地|文件|脚本|日志|下载的|找到.*论文|artifact|ref|path|local|file|script|stdout|stderr|log|result\s*json|outputref|coderef/.test(prompt);
+  if ((!hasContinuationMarker && !isLocationQuestionWithContext) || !asksForRefsOrSummary) return false;
+  const asksFreshWork = /今天|最新|重新检索|重新搜索|重新执行|重新跑|new\s+search|fresh|latest|today/.test(prompt);
+  const explicitlyNoFreshWork = /不要重新|别重新|不重新|不要重跑|别重跑|不重跑|基于上|previous|last\s+(round|run|turn)|do not rerun|don't rerun|no rerun|do not re-search|no re-search/.test(prompt);
+  if (asksFreshWork && !explicitlyNoFreshWork) return false;
+  if (/round\s*1|第一轮|首轮/.test(prompt) && !explicitlyNoFreshWork) return false;
+  return hasContext;
+}
+
+function currentUserRequestText(prompt: string) {
+  const current = prompt.match(/Current user request:\s*([\s\S]*?)(?:\n[A-Z][^\n:]{2,80}:\s|\nWork requirements:\s|$)/);
+  if (current?.[1]?.trim()) return current[1].trim();
+  const recent = prompt.match(/当前用户请求[:：]\s*([\s\S]*?)(?:\n[A-Z][^\n:]{2,80}:\s|\n工作要求[:：]\s|$)/);
+  if (recent?.[1]?.trim()) return recent[1].trim();
+  return prompt;
+}
+
+function pickLatestReferenceAttempt(attempts: TaskAttemptRecord[]) {
+  return attempts.find((attempt) => hasExecutionFileRefs(attempt)) ?? attempts[0];
+}
+
+function pickLatestReferenceExecutionRef(refs: Array<Record<string, unknown>>) {
+  return refs.find((entry) => hasExecutionFileRefs(entry) && !isFailedReferenceAttempt(entry))
+    ?? refs.find((entry) => hasExecutionFileRefs(entry));
+}
+
+function hasExecutionFileRefs(value: unknown) {
+  if (!isRecord(value)) return false;
+  return Boolean(value.codeRef || value.outputRef || value.stdoutRef || value.stderrRef);
+}
+
+async function pickExistingReference(workspace: string, ...refs: Array<string | undefined>) {
+  const candidates = uniqueStrings(refs.filter((ref): ref is string => Boolean(ref)));
+  for (const ref of candidates) {
+    const path = workspaceRefPath(workspace, ref);
+    if (path && await fileExists(path)) return ref;
+  }
+  return candidates[0];
+}
+
+function isFailedReferenceAttempt(value: unknown) {
+  if (!isRecord(value)) return false;
+  const status = String(value.status || '').toLowerCase();
+  const exitCode = typeof value.exitCode === 'number' ? value.exitCode : undefined;
+  return status === 'failed'
+    || status === 'failed-with-reason'
+    || status === 'repair-needed'
+    || (typeof exitCode === 'number' && exitCode !== 0);
+}
+
+async function readRecentArtifactFiles(workspace: string, sessionId?: string) {
+  const dir = join(workspace, '.bioagent', 'artifacts');
+  if (!await fileExists(dir)) return [] as Array<{ rel: string; artifact: Record<string, unknown>; mtimeMs: number }>;
+  let files: string[] = [];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const entries = await Promise.all(files
+    .filter((file) => file.endsWith('.json'))
+    .map(async (file) => {
+      const rel = `.bioagent/artifacts/${file}`;
+      const path = join(workspace, rel);
+      try {
+        const [stats, text] = await Promise.all([stat(path), readFile(path, 'utf8')]);
+        const parsed = JSON.parse(text);
+        return isRecord(parsed) ? { rel, artifact: parsed, mtimeMs: stats.mtimeMs } : undefined;
+      } catch {
+        return undefined;
+      }
+    }));
+  return entries
+    .filter((entry): entry is { rel: string; artifact: Record<string, unknown>; mtimeMs: number } => Boolean(entry))
+    .filter((entry) => !sessionId || entry.rel.includes(sessionId) || String(entry.artifact.producerSessionId || entry.artifact.sessionId || '').includes(sessionId))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, 24);
+}
+
+async function readArtifactsFromOutputRef(workspace: string, outputRef: string | undefined) {
+  if (!outputRef || /^[a-z]+:\/\//i.test(outputRef)) return [] as Array<Record<string, unknown>>;
+  const path = workspaceRefPath(workspace, outputRef);
+  if (!path) return [];
+  if (!await fileExists(path)) return [];
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8'));
+    const artifacts = isRecord(parsed) && Array.isArray(parsed.artifacts)
+      ? toRecordList(parsed.artifacts)
+      : isRecord(parsed) && parsed.type ? [parsed] : [];
+    return artifacts.map((artifact) => ({
+      ...artifact,
+      dataRef: stringField(artifact.dataRef) ?? outputRef,
+      metadata: {
+        ...(isRecord(artifact.metadata) ? artifact.metadata : {}),
+        outputRef,
+      },
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function workspaceRefPath(workspace: string, ref: string | undefined) {
+  if (!ref || /^[a-z]+:\/\//i.test(ref)) return undefined;
+  try {
+    const root = resolve(workspace);
+    const path = ref.startsWith('/')
+      ? resolve(ref)
+      : resolve(root, safeWorkspaceRel(ref));
+    return path === root || path.startsWith(`${root}/`) ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mergeArtifactsForReference(left: Array<Record<string, unknown>>, right: Array<Record<string, unknown>>) {
+  return [...left, ...right].filter((artifact) => isRecord(artifact));
+}
+
+function findArtifactByType(artifacts: Array<Record<string, unknown>>, type: string) {
+  return artifacts.find((artifact) => String(artifact.type || artifact.id || '') === type && !artifactNeedsRepair(artifact))
+    ?? artifacts.find((artifact) => String(artifact.type || artifact.id || '') === type);
+}
+
+function artifactMatchesExecutionRef(artifact: Record<string, unknown>, outputRef: string | undefined) {
+  if (!outputRef) return false;
+  const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+  return stringField(artifact.outputRef) === outputRef
+    || stringField(artifact.dataRef) === outputRef
+    || stringField(metadata.outputRef) === outputRef;
+}
+
+function artifactRefForAnswer(artifact: Record<string, unknown> | undefined, artifactFiles: Array<{ rel: string; artifact: Record<string, unknown> }>, type: string) {
+  if (!artifact) return artifactFiles.find((entry) => String(entry.artifact.type || entry.artifact.id || '') === type)?.rel;
+  return stringField(artifact.dataRef)
+    ?? stringField(artifact.path)
+    ?? stringField(artifact.ref)
+    ?? stringField(artifact.outputRef)
+    ?? stringField(isRecord(artifact.metadata) ? artifact.metadata.artifactRef : undefined)
+    ?? stringField(isRecord(artifact.metadata) ? artifact.metadata.reportRef : undefined)
+    ?? artifactFiles.find((entry) => entry.artifact === artifact || String(entry.artifact.id || '') === String(artifact.id || ''))?.rel;
+}
+
+function summarizePreviousArtifactThemes(paperListArtifact?: Record<string, unknown>, researchReportArtifact?: Record<string, unknown>) {
+  const paperRows = artifactRows(paperListArtifact).slice(0, 12);
+  if (paperRows.length) {
+    const titles = paperRows
+      .map((row) => stringField(row.title) || stringField(row.name))
+      .filter((title): title is string => Boolean(title));
+    const keywordThemes = [
+      { pattern: /multi[-\s]?agent|多智能体|agent/i, text: '多智能体/agent 系统仍是上一轮结果的主轴，覆盖协作、评测、部署与应用。' },
+      { pattern: /security|anomaly|monitor|safety|安全|异常|监控/i, text: '安全、异常监测、上线后监控是高频主题，强调 agent 在真实部署中的可观测性。' },
+      { pattern: /software|github|pull request|code|review|软件|代码/i, text: '软件工程场景出现较多，包括 agentic PR、代码评审和开发工作流自动化。' },
+      { pattern: /planning|cache|embodied|robot|计划|缓存|具身/i, text: '规划、缓存和具身智能相关论文关注如何提升 agent 执行效率与长程任务能力。' },
+      { pattern: /clinical|movie|recommend|math|proof|business|医疗|推荐|数学|证明/i, text: '应用型 agent 覆盖推荐、临床、商业分析、数学证明等具体领域。' },
+    ];
+    const joined = titles.join(' \n ');
+    const matched = keywordThemes.filter((theme) => theme.pattern.test(joined)).map((theme) => theme.text);
+    const titleBullets = titles.slice(0, 5).map((title) => `代表论文：${title}`);
+    return uniqueStrings([...matched, ...titleBullets]).slice(0, 5);
+  }
+  const reportMarkdown = stringField(isRecord(researchReportArtifact?.data) ? researchReportArtifact.data.markdown : undefined)
+    ?? stringField(researchReportArtifact?.markdown);
+  if (!reportMarkdown) return [];
+  return reportMarkdown
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*#\d.\s]+/, '').trim())
+    .filter((line) => line.length >= 16)
+    .slice(0, 5);
+}
+
+function artifactRows(artifact?: Record<string, unknown>) {
+  if (!artifact) return [] as Array<Record<string, unknown>>;
+  const data = isRecord(artifact.data) ? artifact.data : {};
+  for (const candidate of [data.rows, data.papers, data.items, artifact.rows, artifact.papers, artifact.items]) {
+    const rows = toRecordList(candidate);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+function summarizeArtifactsForAgentContext(artifacts: Array<Record<string, unknown>>) {
+  return artifacts.slice(0, 12).map((artifact) => {
+    const data = isRecord(artifact.data) ? artifact.data : {};
+    const rows = artifactRows(artifact);
+    const markdown = stringField(data.markdown) ?? stringField(artifact.markdown);
+    return {
+      id: stringField(artifact.id),
+      type: stringField(artifact.type),
+      dataRef: stringField(artifact.dataRef),
+      metadata: clipForAgentServerJson(isRecord(artifact.metadata) ? artifact.metadata : {}, 2),
+      rowCount: rows.length,
+      sampleRows: rows.slice(0, 8).map((row) => clipForAgentServerJson(row, 2)),
+      markdown: markdown ? clipForAgentServerPrompt(markdown, 3000) : undefined,
+    };
+  });
+}
+
+function absoluteWorkspaceRef(workspace: string, ref: string) {
+  if (/^[a-z]+:\/\//i.test(ref) || ref.startsWith('/')) return ref;
+  return join(workspace, safeWorkspaceRel(ref));
+}
+
+function stringField(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 function attemptPlanRefs(request: GatewayRequest, skill?: SkillAvailability, fallbackReason?: string) {
   return {
     scenarioPackageRef: request.scenarioPackageRef,
@@ -566,7 +972,7 @@ function attemptPlanRefs(request: GatewayRequest, skill?: SkillAvailability, fal
 
 function runtimeProfileIdForRequest(request: GatewayRequest, skill?: SkillAvailability) {
   if (skill?.manifest.entrypoint.type === 'agentserver-generation') return `agentserver-${agentServerBackend(request, request.llmEndpoint)}`;
-  if (skill && isLiveScpSkill(skill.id)) return 'scp-hub';
+  if (skill?.manifest.entrypoint.type === 'markdown-skill') return `agentserver-${agentServerBackend(request, request.llmEndpoint)}`;
   if (skill?.manifest.entrypoint.type === 'workspace-task') return 'workspace-python';
   return request.scenarioPackageRef?.source === 'built-in' ? 'seed-skill' : undefined;
 }
@@ -576,7 +982,6 @@ function selectedRuntimeForSkill(skill?: SkillAvailability) {
   if (skill.manifest.entrypoint.type === 'agentserver-generation') return 'agentserver-generation';
   if (skill.manifest.entrypoint.type === 'markdown-skill') return 'agentserver-markdown-skill';
   if (skill.manifest.entrypoint.type === 'workspace-task') return 'workspace-python';
-  if (isLiveScpSkill(skill.id)) return 'scp-live-adapter';
   return skill.manifest.entrypoint.type;
 }
 
@@ -599,6 +1004,28 @@ function agentServerBackend(request?: GatewayRequest, llmEndpoint?: LlmEndpointC
   const endpoint = llmEndpoint ?? request?.llmEndpoint;
   if (endpoint?.baseUrl?.trim()) return 'openteam_agent';
   return 'codex';
+}
+
+function agentServerAgentId(request: GatewayRequest, purpose: string) {
+  const sessionId = typeof request.uiState?.sessionId === 'string' ? request.uiState.sessionId : '';
+  const packageId = request.scenarioPackageRef?.id || request.skillDomain;
+  const stable = [packageId, sessionId || request.skillPlanRef || request.skillDomain]
+    .filter(Boolean)
+    .join(':');
+  return `bioagent-${request.skillDomain}-${purpose}-${sha1(stable).slice(0, 12)}`;
+}
+
+function agentServerContextPolicy(request: GatewayRequest) {
+  const hasSession = typeof request.uiState?.sessionId === 'string' && request.uiState.sessionId.trim().length > 0;
+  const mode = contextEnvelopeMode(request);
+  return {
+    includeCurrentWork: hasSession,
+    includeRecentTurns: hasSession && mode === 'full',
+    includePersistent: false,
+    includeMemory: false,
+    persistRunSummary: hasSession,
+    persistExtractedConstraints: false,
+  };
 }
 
 async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvailability, taskPrefix: string, callbacks: WorkspaceRuntimeCallbacks = {}): Promise<ToolPayload> {
@@ -755,148 +1182,6 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
   }
 }
 
-async function runLiveScpSkill(request: GatewayRequest, skill: SkillAvailability): Promise<ToolPayload> {
-  const workspace = resolve(request.workspacePath || process.cwd());
-  const taskPrefix = 'scp-live';
-  const runId = sha1(`${skill.id}:${request.prompt}:${Date.now()}`).slice(0, 12);
-  const outputRel = `.bioagent/task-results/${taskPrefix}-${runId}.json`;
-  const inputRel = `.bioagent/task-inputs/${taskPrefix}-${runId}.json`;
-  const stdoutRel = `.bioagent/logs/${taskPrefix}-${runId}.stdout.log`;
-  const stderrRel = `.bioagent/logs/${taskPrefix}-${runId}.stderr.log`;
-  const taskRel = `.bioagent/tasks/${taskPrefix}-${runId}.py`;
-  const taskId = `${taskPrefix}-${runId}`;
-  const entrypointPath = resolve(process.cwd(), 'src', 'runtime', 'python_tasks', 'scp_live_adapter_task.py');
-  const run = await runWorkspaceTask(workspace, {
-    id: taskId,
-    language: 'python',
-    entrypoint: 'main',
-    codeTemplatePath: entrypointPath,
-    input: {
-      prompt: request.prompt,
-      runId,
-      attempt: 1,
-      skillId: skill.id,
-      skillMarkdownRef: skill.manifest.entrypoint.path,
-      skillDescription: skill.manifest.description,
-      expectedArtifacts: expectedArtifactTypesForRequest(request),
-      selectedComponentIds: selectedComponentIdsForRequest(request),
-    },
-    taskRel,
-    outputRel,
-    stdoutRel,
-    stderrRel,
-    timeoutMs: 180000,
-  });
-  if (run.exitCode !== 0 && !await fileExists(join(workspace, outputRel))) {
-    const failureReason = run.stderr || 'Live SCP adapter failed before writing output.';
-    await appendTaskAttempt(workspace, {
-      id: taskId,
-      prompt: request.prompt,
-      skillDomain: request.skillDomain,
-      ...attemptPlanRefs(request, skill),
-      skillId: skill.id,
-      attempt: 1,
-      status: 'repair-needed',
-      codeRef: taskRel,
-      inputRef: inputRel,
-      outputRef: outputRel,
-      stdoutRef: stdoutRel,
-      stderrRef: stderrRel,
-      exitCode: run.exitCode,
-      failureReason,
-      createdAt: new Date().toISOString(),
-    });
-    const repaired = await tryAgentServerRepairAndRerun({
-      request,
-      skill,
-      taskId,
-      taskPrefix,
-      run,
-      schemaErrors: [],
-      failureReason,
-    });
-    if (repaired) return repaired;
-    return failedTaskPayload(request, skill, run, failureReason);
-  }
-  try {
-    const payload = JSON.parse(await readFile(join(workspace, outputRel), 'utf8')) as ToolPayload;
-    const normalized = await validateAndNormalizePayload(payload, request, skill, {
-      taskRel,
-      outputRel,
-      stdoutRel,
-      stderrRel,
-      runtimeFingerprint: run.runtimeFingerprint,
-    });
-    const errors = schemaErrors(payload);
-    const firstUnit = normalized.executionUnits[0] as Record<string, unknown> | undefined;
-    const unitStatus = String(firstUnit && typeof firstUnit === 'object' ? firstUnit.status || '' : '');
-    const requiresGeneration = payloadRequestsAgentServerGeneration(normalized);
-    await appendTaskAttempt(workspace, {
-      id: taskId,
-      prompt: request.prompt,
-      skillDomain: request.skillDomain,
-      ...attemptPlanRefs(request, skill),
-      skillId: skill.id,
-      attempt: 1,
-      status: errors.length || requiresGeneration || unitStatus === 'repair-needed' ? 'repair-needed' : unitStatus === 'failed-with-reason' ? 'failed-with-reason' : 'done',
-      codeRef: taskRel,
-      inputRef: inputRel,
-      outputRef: outputRel,
-      stdoutRef: stdoutRel,
-      stderrRef: stderrRel,
-      exitCode: run.exitCode,
-      schemaErrors: errors,
-      createdAt: new Date().toISOString(),
-    });
-    if (errors.length || requiresGeneration || unitStatus === 'repair-needed') {
-      const reason = errors.length
-        ? `Live SCP adapter output failed schema validation: ${errors.join('; ')}`
-        : 'Live SCP adapter declared that this request needs task-specific AgentServer generation instead of a fixed adapter script.';
-      const repaired = await tryAgentServerRepairAndRerun({
-        request,
-        skill,
-        taskId,
-        taskPrefix,
-        run,
-        schemaErrors: errors,
-        failureReason: reason,
-      });
-      if (repaired) return repaired;
-    }
-    return normalized;
-  } catch (error) {
-    const failureReason = `Live SCP adapter output could not be parsed: ${errorMessage(error)}`;
-    await appendTaskAttempt(workspace, {
-      id: taskId,
-      prompt: request.prompt,
-      skillDomain: request.skillDomain,
-      ...attemptPlanRefs(request, skill),
-      skillId: skill.id,
-      attempt: 1,
-      status: 'repair-needed',
-      codeRef: taskRel,
-      inputRef: inputRel,
-      outputRef: outputRel,
-      stdoutRef: stdoutRel,
-      stderrRef: stderrRel,
-      exitCode: run.exitCode,
-      failureReason,
-      createdAt: new Date().toISOString(),
-    });
-    const repaired = await tryAgentServerRepairAndRerun({
-      request,
-      skill,
-      taskId,
-      taskPrefix,
-      run,
-      schemaErrors: ['output could not be parsed'],
-      failureReason,
-    });
-    if (repaired) return repaired;
-    return failedTaskPayload(request, skill, run, failureReason);
-  }
-}
-
 async function trySupplementMissingArtifacts(
   request: GatewayRequest,
   skill: SkillAvailability,
@@ -981,10 +1266,6 @@ function mergeUiManifest(left: Array<Record<string, unknown>>, right: Array<Reco
   return out.map((slot, index) => ({ ...slot, priority: typeof slot.priority === 'number' ? slot.priority : index + 1 }));
 }
 
-function isLiveScpSkill(skillId: string) {
-  return skillId.startsWith('scp.');
-}
-
 function shouldAttemptFreshTaskGeneration(request: GatewayRequest, skill: SkillAvailability) {
   if (request.uiState?.freshTaskGeneration !== true) return false;
   if (skill.manifest.entrypoint.type === 'agentserver-generation') return false;
@@ -1023,6 +1304,30 @@ function payloadRequestsAgentServerGeneration(payload: ToolPayload) {
     const data = isRecord(artifact.data) ? artifact.data : {};
     return metadata.requiresAgentServerGeneration === true || data.requiresAgentServerGeneration === true;
   });
+}
+
+function payloadHasFailureStatus(payload: ToolPayload) {
+  if (String(payload.claimType || '').toLowerCase().includes('error')) return true;
+  return payload.executionUnits.some((unit) => isRecord(unit) && /failed|error/i.test(String(unit.status || '')));
+}
+
+function normalizeExecutionUnitStatus(value: unknown) {
+  const status = String(value || '').trim().toLowerCase();
+  if (status === 'completed' || status === 'complete' || status === 'success' || status === 'succeeded') return 'done';
+  if (status === 'failure' || status === 'errored' || status === 'error') return 'failed-with-reason';
+  if (status === 'needs-repair' || status === 'repair_needed') return 'repair-needed';
+  if (status === 'self_healed' || status === 'self-heal') return 'self-healed';
+  if (['planned', 'running', 'done', 'failed', 'record-only', 'repair-needed', 'self-healed', 'failed-with-reason'].includes(status)) return status;
+  return 'done';
+}
+
+function firstPayloadFailureReason(payload: ToolPayload, run?: WorkspaceTaskRunResult) {
+  const unit = payload.executionUnits.find((entry) => isRecord(entry) && /failed|error/i.test(String(entry.status || '')));
+  const unitReason = isRecord(unit) ? stringField(unit.failureReason) ?? stringField(unit.error) ?? stringField(unit.message) : undefined;
+  return unitReason
+    ?? stringField(payload.message)
+    ?? stringField(run?.stderr)
+    ?? (typeof run?.exitCode === 'number' && run.exitCode !== 0 ? `Task exited ${run.exitCode}.` : undefined);
 }
 
 async function tryAgentServerRepairAndRerun(params: {
@@ -1086,8 +1391,9 @@ async function tryAgentServerRepairAndRerun(params: {
   const stderrRel = `.bioagent/logs/${params.taskId}-attempt-2.stderr.log`;
   const rerun = await runWorkspaceTask(workspace, {
     id: `${params.taskId}-attempt-2`,
-    language: 'python',
-    entrypoint: 'main',
+    language: params.run.spec.language,
+    entrypoint: params.run.spec.entrypoint,
+    entrypointArgs: params.run.spec.entrypointArgs,
     taskRel: params.run.spec.taskRel,
     input: {
       prompt: params.request.prompt,
@@ -1141,6 +1447,7 @@ async function tryAgentServerRepairAndRerun(params: {
       stderrRel,
       runtimeFingerprint: rerun.runtimeFingerprint,
     });
+    const failureReason = firstPayloadFailureReason(payload, rerun);
     await appendTaskAttempt(workspace, {
       id: params.taskId,
       prompt: params.request.prompt,
@@ -1152,7 +1459,7 @@ async function tryAgentServerRepairAndRerun(params: {
       selfHealReason: params.failureReason,
       patchSummary: diffSummary,
       diffRef: diffRel,
-      status: errors.length ? 'repair-needed' : 'done',
+      status: errors.length ? 'repair-needed' : payloadHasFailureStatus(payload) || rerun.exitCode !== 0 ? 'failed-with-reason' : 'done',
       codeRef: params.run.spec.taskRel,
       inputRef: `.bioagent/task-inputs/${params.taskId}-attempt-2.json`,
       outputRef: outputRel,
@@ -1160,9 +1467,10 @@ async function tryAgentServerRepairAndRerun(params: {
       stderrRef: stderrRel,
       exitCode: rerun.exitCode,
       schemaErrors: errors,
+      failureReason: errors.length ? `AgentServer repair rerun output failed schema validation: ${errors.join('; ')}` : failureReason,
       createdAt: new Date().toISOString(),
     });
-    if (errors.length) return undefined;
+    if (errors.length || payloadHasFailureStatus(payload) || rerun.exitCode !== 0) return undefined;
     const proposal = await maybeWriteSkillPromotionProposal({
       workspacePath: workspace,
       request: params.request,
@@ -1246,27 +1554,45 @@ async function requestAgentServerGeneration(params: {
     if (!llmRuntime.llmEndpoint && requiresUserLlmEndpoint(params.baseUrl)) {
       return { ok: false, error: missingUserLlmEndpointMessage() };
     }
+    const workspaceTree = await workspaceTreeSummary(params.workspace);
+    const priorAttempts = summarizeTaskAttemptsForAgentServer(await readRecentTaskAttempts(params.workspace, params.request.skillDomain, 8, {
+      scenarioPackageId: params.request.scenarioPackageRef?.id,
+      skillPlanRef: params.request.skillPlanRef,
+      prompt: params.request.prompt,
+    }));
+    const contextEnvelope = buildContextEnvelope(params.request, {
+      workspace: params.workspace,
+      workspaceTreeSummary: workspaceTree,
+      priorAttempts,
+      selectedSkill: params.skill,
+    });
+    const compactContext = buildAgentServerCompactContext(params.request, {
+      contextEnvelope,
+      workspaceTree,
+      priorAttempts,
+      selectedSkill: params.skill,
+      skills: params.skills,
+    });
     const generationRequest = {
       prompt: params.request.prompt,
       skillDomain: params.request.skillDomain,
-      workspaceTreeSummary: await workspaceTreeSummary(params.workspace),
-      availableSkills: summarizeSkillsForAgentServer(params.skills, params.skill, params.request.skillDomain),
+      contextEnvelope,
+      workspaceTreeSummary: compactContext.workspaceTreeSummary,
+      availableSkills: compactContext.availableSkills,
       artifactSchema: expectedArtifactSchema(params.request),
       uiManifestContract: { expectedKeys: ['componentId', 'artifactRef', 'encoding', 'layout', 'compare'] },
-      uiStateSummary: params.request.uiState,
-      artifacts: params.request.artifacts,
-      recentExecutionRefs: toRecordList(params.request.uiState?.recentExecutionRefs),
+      uiStateSummary: compactContext.uiStateSummary,
+      artifacts: compactContext.artifacts,
+      recentExecutionRefs: compactContext.recentExecutionRefs,
       expectedArtifactTypes: expectedArtifactTypesForRequest(params.request),
       selectedComponentIds: params.request.selectedComponentIds ?? toStringList(params.request.uiState?.selectedComponentIds),
-      priorAttempts: summarizeTaskAttemptsForAgentServer(await readRecentTaskAttempts(params.workspace, params.request.skillDomain, 8, {
-        scenarioPackageId: params.request.scenarioPackageRef?.id,
-        skillPlanRef: params.request.skillPlanRef,
-        prompt: params.request.prompt,
-      })),
+      priorAttempts: compactContext.priorAttempts,
     };
+    const generationPrompt = buildAgentServerGenerationPrompt(generationRequest);
+    const contextEnvelopeBytes = Buffer.byteLength(JSON.stringify(contextEnvelope), 'utf8');
     runPayload = {
       agent: {
-        id: `bioagent-${params.request.skillDomain}-task-generation`,
+        id: agentServerAgentId(params.request, 'task-generation'),
         name: `BioAgent ${params.request.skillDomain} Task Generation`,
         backend,
         workspace: params.workspace,
@@ -1279,7 +1605,7 @@ async function requestAgentServerGeneration(params: {
         ].join(' '),
       },
       input: {
-        text: buildAgentServerGenerationPrompt(generationRequest),
+        text: generationPrompt,
         metadata: {
           project: 'BioAgent',
           purpose: 'workspace-task-generation',
@@ -1288,8 +1614,14 @@ async function requestAgentServerGeneration(params: {
           expectedArtifactTypes: generationRequest.expectedArtifactTypes,
           selectedComponentIds: generationRequest.selectedComponentIds,
           priorAttemptCount: generationRequest.priorAttempts.length,
+          contextEnvelopeVersion: 'bioagent.context-envelope.v1',
+          contextMode: compactContext.mode,
+          contextEnvelopeBytes,
+          promptChars: generationPrompt.length,
+          workspaceTreeEntryCount: workspaceTree.length,
         },
       },
+      contextPolicy: agentServerContextPolicy(params.request),
       runtime: {
         backend,
         cwd: params.workspace,
@@ -1375,6 +1707,160 @@ async function requestAgentServerGeneration(params: {
   } catch (error) {
     await writeAgentServerDebugArtifact(params.workspace, 'generation', runPayload, 0, { error: errorMessage(error) });
     return { ok: false, error: agentServerRequestFailureMessage('generation', error, timeoutMs) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requestAgentServerContextAnswer(params: {
+  baseUrl: string;
+  request: GatewayRequest;
+  skill: SkillAvailability;
+  workspace: string;
+  referenceContext: Record<string, unknown>;
+  callbacks?: WorkspaceRuntimeCallbacks;
+}): Promise<{ ok: true; payload: ToolPayload } | { ok: false; error: string }> {
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.BIOAGENT_AGENTSERVER_CONTEXT_TIMEOUT_MS || 300000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let runPayload: unknown;
+  try {
+    const { llmEndpointSource, ...llmRuntime } = await agentServerLlmRuntime(params.request, params.workspace);
+    const backend = agentServerBackend(params.request, llmRuntime.llmEndpoint);
+    if (!llmRuntime.llmEndpoint && requiresUserLlmEndpoint(params.baseUrl)) {
+      return { ok: false, error: missingUserLlmEndpointMessage() };
+    }
+    const workspaceTree = await workspaceTreeSummary(params.workspace);
+    const priorAttempts = summarizeTaskAttemptsForAgentServer(await readRecentTaskAttempts(params.workspace, params.request.skillDomain, 8, {
+      scenarioPackageId: params.request.scenarioPackageRef?.id,
+      skillPlanRef: params.request.skillPlanRef,
+    }));
+    const contextEnvelope = buildContextEnvelope(params.request, {
+      workspace: params.workspace,
+      workspaceTreeSummary: workspaceTree,
+      priorAttempts,
+      selectedSkill: params.skill,
+    });
+    const contextPrompt = buildAgentServerContextAnswerPrompt({
+      prompt: params.request.prompt,
+      skillDomain: params.request.skillDomain,
+      contextEnvelope,
+      referenceContext: params.referenceContext,
+      expectedArtifactTypes: expectedArtifactTypesForRequest(params.request),
+      selectedComponentIds: params.request.selectedComponentIds ?? toStringList(params.request.uiState?.selectedComponentIds),
+    });
+    runPayload = {
+      agent: {
+        id: agentServerAgentId(params.request, 'context-answer'),
+        name: `BioAgent ${params.request.skillDomain} Context Answer`,
+        backend,
+        workspace: params.workspace,
+        workingDirectory: params.workspace,
+        reconcileExisting: true,
+        systemPrompt: [
+          'You are the BioAgent reasoning backend for multi-turn research conversations.',
+          'Understand the user request before answering; do not emit fixed templates.',
+          'Use provided workspace refs and artifacts as evidence.',
+          'If the user forbids reruns or re-search, answer from context only and say what is missing.',
+          'Return a BioAgent ToolPayload JSON when possible; plain text is acceptable only if it directly answers the user.',
+        ].join(' '),
+      },
+      input: {
+        text: contextPrompt,
+        metadata: {
+          project: 'BioAgent',
+          purpose: 'context-answer',
+          skillDomain: params.request.skillDomain,
+          skillId: params.skill.id,
+          expectedArtifactTypes: expectedArtifactTypesForRequest(params.request),
+          contextEnvelopeVersion: 'bioagent.context-envelope.v1',
+          promptChars: contextPrompt.length,
+        },
+      },
+      contextPolicy: agentServerContextPolicy(params.request),
+      runtime: {
+        backend,
+        cwd: params.workspace,
+        ...llmRuntime,
+        metadata: {
+          autoApprove: true,
+          sandbox: 'danger-full-access',
+          source: 'bioagent-workspace-runtime-gateway',
+          llmEndpointSource: llmRuntime.llmEndpoint ? llmEndpointSource : undefined,
+        },
+      },
+      metadata: {
+        project: 'BioAgent',
+        source: 'workspace-runtime-gateway',
+        task: 'context-answer',
+        workspace: params.workspace,
+        workingDirectory: params.workspace,
+      },
+    };
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-answer-dispatch',
+      source: 'workspace-runtime',
+      message: `Dispatching multi-turn context answer to AgentServer ${backend}`,
+      detail: params.baseUrl,
+    });
+    const response = await fetch(`${params.baseUrl}/api/agent-server/runs/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify(runPayload),
+    });
+    const { json, run, error } = await readAgentServerRunStream(response, (event) => {
+      emitWorkspaceRuntimeEvent(params.callbacks, normalizeAgentServerWorkspaceEvent(event));
+    });
+    await writeAgentServerDebugArtifact(params.workspace, 'context-answer', runPayload, response.status, json);
+    if (!response.ok) {
+      const detail = isRecord(json) ? String(json.error || json.message || '') : '';
+      return { ok: false, error: sanitizeAgentServerError(detail || error || `AgentServer context answer HTTP ${response.status}`) };
+    }
+    if (error) return { ok: false, error: sanitizeAgentServerError(error) };
+    const runFailure = agentServerRunFailure(run);
+    if (runFailure) return { ok: false, error: runFailure };
+    const directPayload = parseToolPayloadResponse(run);
+    const payload = directPayload ?? (() => {
+      const directText = extractAgentServerOutputText(run);
+      if (!directText) return undefined;
+      if (looksLikeAgentServerFailure(directText)) return undefined;
+      return toolPayloadFromPlainAgentOutput(directText, params.request);
+    })();
+    if (!payload) return { ok: false, error: 'AgentServer context answer did not return a usable ToolPayload or answer text.' };
+    const normalized = await validateAndNormalizePayload(payload, params.request, params.skill, {
+      taskRel: 'agentserver://context-answer',
+      outputRel: `agentserver://${typeof run.id === 'string' ? run.id : 'unknown'}/context-answer`,
+      stdoutRel: 'n/a',
+      stderrRel: 'n/a',
+      runtimeFingerprint: { runtime: 'AgentServer context answer', runId: typeof run.id === 'string' ? run.id : undefined },
+    });
+    return {
+      ok: true,
+      payload: {
+        ...normalized,
+        reasoningTrace: [
+          normalized.reasoningTrace,
+          'BioAgent routed this multi-turn answer through AgentServer reasoning instead of the local reference template.',
+        ].filter(Boolean).join('\n'),
+        executionUnits: normalized.executionUnits.map((unit) => {
+          if (!isRecord(unit)) return unit;
+          const record = unit as Record<string, unknown>;
+          return {
+            ...record,
+            tool: stringField(record.tool) ?? 'agentserver.context-answer',
+            routeDecision: {
+              ...(isRecord(record.routeDecision) ? record.routeDecision : {}),
+              selectedRuntime: 'agentserver-context-answer',
+              selectedAt: new Date().toISOString(),
+            },
+          };
+        }),
+      },
+    };
+  } catch (error) {
+    await writeAgentServerDebugArtifact(params.workspace, 'context-answer', runPayload, 0, { error: errorMessage(error) });
+    return { ok: false, error: agentServerRequestFailureMessage('context-answer', error, timeoutMs) };
   } finally {
     clearTimeout(timeout);
   }
@@ -1501,9 +1987,25 @@ async function requestAgentServerRepair(params: {
     if (!llmRuntime.llmEndpoint && requiresUserLlmEndpoint(params.baseUrl)) {
       return { ok: false, error: missingUserLlmEndpointMessage() };
     }
+    const priorAttempts = await readRecentTaskAttempts(params.run.workspace, params.request.skillDomain, 8, {
+      scenarioPackageId: params.request.scenarioPackageRef?.id,
+      skillPlanRef: params.request.skillPlanRef,
+      prompt: params.request.prompt,
+    });
+    const repairContext = await buildCompactRepairContext({
+      request: params.request,
+      workspace: params.run.workspace,
+      skill: params.skill,
+      run: params.run,
+      schemaErrors: params.schemaErrors,
+      failureReason: params.failureReason,
+      priorAttempts,
+    });
+    const repairPrompt = buildAgentServerRepairPrompt({ ...params, repairContext });
+    const repairContextBytes = Buffer.byteLength(JSON.stringify(repairContext), 'utf8');
     runPayload = {
       agent: {
-        id: `bioagent-${params.request.skillDomain}-runtime-repair`,
+        id: agentServerAgentId(params.request, 'runtime-repair'),
         name: `BioAgent ${params.request.skillDomain} Runtime Repair`,
         backend,
         workspace: params.run.workspace,
@@ -1517,7 +2019,7 @@ async function requestAgentServerRepair(params: {
         ].join(' '),
       },
       input: {
-        text: buildAgentServerRepairPrompt(params),
+        text: repairPrompt,
         metadata: {
           project: 'BioAgent',
           purpose: 'workspace-task-repair',
@@ -1528,8 +2030,13 @@ async function requestAgentServerRepair(params: {
           stderrRef: params.run.stderrRef,
           outputRef: params.run.outputRef,
           schemaErrors: params.schemaErrors,
+          repairContextVersion: 'bioagent.repair-context.v1',
+          contextMode: 'compact-repair',
+          repairContextBytes,
+          promptChars: repairPrompt.length,
         },
       },
+      contextPolicy: agentServerContextPolicy(params.request),
       runtime: {
         backend,
         cwd: params.run.workspace,
@@ -1609,7 +2116,7 @@ async function readConfiguredAgentServerBaseUrl(workspace: string) {
 
 async function writeAgentServerDebugArtifact(
   workspace: string,
-  task: 'generation' | 'repair',
+  task: 'generation' | 'repair' | 'context-answer',
   requestPayload: unknown,
   responseStatus: number,
   responseBody: unknown,
@@ -1701,6 +2208,115 @@ function missingUserLlmEndpointMessage() {
   ].join(' ');
 }
 
+async function buildCompactRepairContext(params: {
+  request: GatewayRequest;
+  workspace: string;
+  skill: SkillAvailability;
+  run: WorkspaceTaskRunResult;
+  schemaErrors: string[];
+  failureReason: string;
+  priorAttempts: unknown[];
+}) {
+  const taskAbs = join(params.workspace, params.run.spec.taskRel);
+  const inputRel = `.bioagent/task-inputs/${params.run.spec.id}.json`;
+  const [code, stdout, stderr, output, input] = await Promise.all([
+    readTextIfExists(taskAbs),
+    readTextIfExists(join(params.workspace, params.run.stdoutRef)),
+    readTextIfExists(join(params.workspace, params.run.stderrRef)),
+    readTextIfExists(join(params.workspace, params.run.outputRef)),
+    readTextIfExists(join(params.workspace, inputRel)),
+  ]);
+  const failureEvidence = `${params.failureReason}\n${stderr}\n${stdout}`;
+  return {
+    version: 'bioagent.repair-context.v1',
+    createdAt: new Date().toISOString(),
+    projectFacts: {
+      project: 'BioAgent',
+      runtimeRole: 'scenario-first AI4Science workspace runtime',
+      taskCodePolicy: 'Generated tasks live in workspace .bioagent/tasks and must be runnable from inputPath/outputPath.',
+      completionPolicy: 'The final user-visible result must come from executing the repaired task and writing a valid ToolPayload, not from code generation alone.',
+      toolPayloadContract: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'uiManifest', 'executionUnits', 'artifacts'],
+    },
+    currentGoal: {
+      currentUserRequest: clipForAgentServerPrompt(currentUserRequestText(params.request.prompt), 4000),
+      skillDomain: params.request.skillDomain,
+      expectedArtifactTypes: expectedArtifactTypesForRequest(params.request),
+      selectedComponentIds: selectedComponentIdsForRequest(params.request),
+    },
+    workspaceRefs: {
+      workspacePath: params.workspace,
+      codeRef: params.run.spec.taskRel,
+      inputRef: inputRel,
+      outputRef: params.run.outputRef,
+      stdoutRef: params.run.stdoutRef,
+      stderrRef: params.run.stderrRef,
+      generatedTaskId: params.run.spec.id,
+    },
+    selectedSkill: {
+      id: params.skill.id,
+      kind: params.skill.kind,
+      entrypointType: params.skill.manifest.entrypoint.type,
+      manifestPath: params.skill.manifestPath,
+    },
+    failure: {
+      exitCode: params.run.exitCode,
+      failureReason: clipForAgentServerPrompt(params.failureReason, 4000),
+      schemaErrors: params.schemaErrors.slice(0, 16).map((entry) => clipForAgentServerPrompt(entry, 600)).filter(Boolean),
+      likelyErrorLine: extractLikelyErrorLine(failureEvidence),
+      stderrTail: tailForAgentServer(stderr, 8000),
+      stdoutTail: tailForAgentServer(stdout, 4000),
+      outputHead: headForAgentServer(output, 4000),
+    },
+    code: {
+      sha1: sha1(code),
+      excerpt: excerptAroundFailureLine(code, failureEvidence),
+      head: headForAgentServer(code, code.length > 24000 ? 4000 : 8000),
+      tail: tailForAgentServer(code, code.length > 24000 ? 4000 : 8000),
+      fullTextIncluded: code.length <= 24000,
+      fullText: code.length <= 24000 ? code : undefined,
+    },
+    inputSummary: {
+      head: headForAgentServer(input, 4000),
+      sha1: input ? sha1(input) : undefined,
+    },
+    sessionSummary: summarizeUiStateForAgentServer(params.request.uiState, 'delta'),
+    artifacts: summarizeArtifactRefs(params.request.artifacts),
+    recentExecutionRefs: summarizeExecutionRefs(toRecordList(params.request.uiState?.recentExecutionRefs)),
+    priorAttempts: summarizeTaskAttemptsForAgentServer(params.priorAttempts).slice(0, 4),
+  };
+}
+
+function extractLikelyErrorLine(text: string) {
+  const matches = Array.from(text.matchAll(/line\s+(\d+)/gi));
+  const last = matches[matches.length - 1];
+  if (!last) return undefined;
+  const line = Number(last[1]);
+  return Number.isFinite(line) && line > 0 ? line : undefined;
+}
+
+function excerptAroundFailureLine(code: string, failureEvidence: string) {
+  const line = extractLikelyErrorLine(failureEvidence);
+  if (!line) return headForAgentServer(code, 8000);
+  const lines = code.split(/\r?\n/);
+  const start = Math.max(0, line - 16);
+  const end = Math.min(lines.length, line + 15);
+  return lines.slice(start, end).map((entry, index) => {
+    const lineNumber = start + index + 1;
+    const marker = lineNumber === line ? '>>' : '  ';
+    return `${marker} ${lineNumber}: ${entry}`;
+  }).join('\n');
+}
+
+function headForAgentServer(value: string, maxLength: number) {
+  if (!value) return '';
+  return value.length > maxLength ? `${value.slice(0, maxLength)}\n... [truncated head ${value.length - maxLength} chars]` : value;
+}
+
+function tailForAgentServer(value: string, maxLength: number) {
+  if (!value) return '';
+  return value.length > maxLength ? `[truncated tail ${value.length - maxLength} chars] ...\n${value.slice(-maxLength)}` : value;
+}
+
 async function readConfiguredLlmEndpoint(path: string, source: string): Promise<{
   modelProvider?: string;
   modelName?: string;
@@ -1739,28 +2355,18 @@ function buildAgentServerRepairPrompt(params: {
   schemaErrors: string[];
   failureReason: string;
   priorAttempts: unknown[];
+  repairContext?: Record<string, unknown>;
 }) {
   return [
     'Repair this BioAgent workspace task and leave the workspace ready for BioAgent to rerun it.',
-    'Read the priorAttempts plus codeRef/stdoutRef/stderrRef/outputRef before changing behavior. Preserve failureReason in the next ToolPayload if the blocker remains.',
+    'Use the compact repair context below: it contains the current user goal, workspace refs, failure evidence, and relevant code/log excerpts.',
+    'Edit the referenced task file or adjacent helper files only as needed. BioAgent will rerun the task after you finish.',
+    'The repaired task must execute the user goal end-to-end, not merely generate code or report that code was generated.',
+    'Preserve failureReason in the next ToolPayload only if the real blocker remains after repair.',
     'Do not fabricate success or replace the user goal with an unrelated demo task.',
     '',
     JSON.stringify({
-      prompt: params.request.prompt,
-      skillDomain: params.request.skillDomain,
-      skillId: params.skill.id,
-      codeRef: params.run.spec.taskRel,
-      inputRef: `.bioagent/task-inputs/${params.run.spec.id}.json`,
-      outputRef: params.run.outputRef,
-      stdoutRef: params.run.stdoutRef,
-      stderrRef: params.run.stderrRef,
-      exitCode: params.run.exitCode,
-      schemaErrors: params.schemaErrors,
-      failureReason: params.failureReason,
-      uiStateSummary: params.request.uiState,
-      artifacts: params.request.artifacts,
-      recentExecutionRefs: toRecordList(params.request.uiState?.recentExecutionRefs),
-      priorAttempts: params.priorAttempts,
+      repairContext: params.repairContext,
       expectedPayloadKeys: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'uiManifest', 'executionUnits', 'artifacts'],
     }, null, 2),
     '',
@@ -1771,6 +2377,7 @@ function buildAgentServerRepairPrompt(params: {
 function buildAgentServerGenerationPrompt(request: {
   prompt: string;
   skillDomain: BioAgentSkillDomain;
+  contextEnvelope?: Record<string, unknown>;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
   availableSkills: Array<{
     id: string;
@@ -1808,6 +2415,41 @@ function buildAgentServerGenerationPrompt(request: {
       taskContract: {
         argv: ['inputPath', 'outputPath'],
         outputPayloadKeys: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'uiManifest', 'executionUnits', 'artifacts'],
+      },
+    }), null, 2),
+  ].join('\n');
+}
+
+function buildAgentServerContextAnswerPrompt(request: {
+  prompt: string;
+  skillDomain: BioAgentSkillDomain;
+  contextEnvelope?: Record<string, unknown>;
+  referenceContext: Record<string, unknown>;
+  expectedArtifactTypes?: string[];
+  selectedComponentIds?: string[];
+}) {
+  return [
+    'Answer this BioAgent multi-turn user request by reasoning over the supplied context.',
+    'Do not use a fixed template. First infer what the user is really asking in the current turn.',
+    'If the user is complaining about a prior answer, explain the cause and answer the missed question directly.',
+    'If the user asks for locations, cite exact workspace refs. If the user asks for synthesis, summarize from artifacts.',
+    'If the user explicitly says not to rerun or not to re-search, do not start new retrieval or execution; answer from existing refs and state any missing evidence.',
+    'If existing artifacts prove success, do not treat unrelated optional failed execution units as the whole task failing.',
+    'Return BioAgent ToolPayload JSON with message, confidence, claimType, evidenceLevel, reasoningTrace, claims, uiManifest, executionUnits, and artifacts.',
+    'If plain text is returned instead, it must still be a direct, intent-aware answer rather than a generic status template.',
+    '',
+    JSON.stringify(clipForAgentServerJson({
+      currentUserRequest: currentUserRequestText(request.prompt),
+      runtimePrompt: request.prompt,
+      skillDomain: request.skillDomain,
+      expectedArtifactTypes: request.expectedArtifactTypes,
+      selectedComponentIds: request.selectedComponentIds,
+      referenceContext: request.referenceContext,
+      contextEnvelope: request.contextEnvelope,
+      outputContract: {
+        payloadKeys: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'uiManifest', 'executionUnits', 'artifacts'],
+        preferredArtifact: 'research-report',
+        executionUnitTool: 'agentserver.context-answer',
       },
     }), null, 2),
   ].join('\n');
@@ -1868,6 +2510,99 @@ function summarizeTaskAttemptsForAgentServer(attempts: unknown[]) {
     }));
 }
 
+function buildAgentServerCompactContext(
+  request: GatewayRequest,
+  params: {
+    contextEnvelope: Record<string, unknown>;
+    workspaceTree: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
+    priorAttempts: unknown[];
+    selectedSkill: SkillAvailability;
+    skills: SkillAvailability[];
+  },
+) {
+  const mode = contextEnvelopeMode(request);
+  const selectedOnly = mode === 'delta';
+  return {
+    mode,
+    workspaceTreeSummary: mode === 'full' ? params.workspaceTree : [],
+    availableSkills: selectedOnly
+      ? summarizeSkillsForAgentServer([params.selectedSkill], params.selectedSkill, request.skillDomain)
+      : summarizeSkillsForAgentServer(params.skills, params.selectedSkill, request.skillDomain),
+    uiStateSummary: summarizeUiStateForAgentServer(request.uiState, mode),
+    artifacts: mode === 'full' ? request.artifacts : summarizeArtifactRefs(request.artifacts),
+    recentExecutionRefs: summarizeExecutionRefs(toRecordList(request.uiState?.recentExecutionRefs)),
+    priorAttempts: mode === 'full' ? params.priorAttempts : params.priorAttempts.slice(0, 2),
+  };
+}
+
+function contextEnvelopeMode(request: GatewayRequest) {
+  const uiState = isRecord(request.uiState) ? request.uiState : {};
+  const hasSession = typeof uiState.sessionId === 'string' && uiState.sessionId.trim().length > 0;
+  const hasPriorRefs = request.artifacts.length > 0
+    || toRecordList(uiState.recentExecutionRefs).length > 0
+    || toStringList(uiState.recentConversation).length > 1;
+  return hasSession && hasPriorRefs ? 'delta' : 'full';
+}
+
+function summarizeUiStateForAgentServer(uiState: unknown, mode: 'full' | 'delta') {
+  if (!isRecord(uiState)) return undefined;
+  if (mode === 'full') return uiState;
+  return {
+    sessionId: typeof uiState.sessionId === 'string' ? uiState.sessionId : undefined,
+    currentPrompt: clipForAgentServerPrompt(uiState.currentPrompt, 1200),
+    recentConversation: toStringList(uiState.recentConversation)
+      .slice(-6)
+      .map((entry) => clipForAgentServerPrompt(entry, 1000))
+      .filter(Boolean),
+    selectedComponentIds: toStringList(uiState.selectedComponentIds),
+    recentRuns: Array.isArray(uiState.recentRuns)
+      ? uiState.recentRuns.slice(-4).map((entry) => clipForAgentServerJson(entry, 2))
+      : undefined,
+    contextMode: 'delta',
+  };
+}
+
+function summarizeArtifactRefs(artifacts: Array<Record<string, unknown>>) {
+  return artifacts.slice(-12).map((artifact) => {
+    const id = typeof artifact.id === 'string' ? artifact.id : undefined;
+    const type = typeof artifact.type === 'string' ? artifact.type : undefined;
+    const title = typeof artifact.title === 'string'
+      ? artifact.title
+      : typeof artifact.name === 'string'
+        ? artifact.name
+        : undefined;
+    return {
+      id,
+      type,
+      title: clipForAgentServerPrompt(title, 240),
+      ref: typeof artifact.ref === 'string' ? artifact.ref : undefined,
+      path: typeof artifact.path === 'string' ? artifact.path : undefined,
+      outputRef: typeof artifact.outputRef === 'string' ? artifact.outputRef : undefined,
+      keys: Object.keys(artifact).slice(0, 20),
+      hash: hashJson(artifact),
+    };
+  });
+}
+
+function summarizeExecutionRefs(refs: Array<Record<string, unknown>>) {
+  return refs.slice(-12).map((entry) => ({
+    id: typeof entry.id === 'string' ? entry.id : undefined,
+    status: typeof entry.status === 'string' ? entry.status : undefined,
+    tool: typeof entry.tool === 'string' ? entry.tool : undefined,
+    codeRef: typeof entry.codeRef === 'string' ? entry.codeRef : undefined,
+    inputRef: typeof entry.inputRef === 'string' ? entry.inputRef : undefined,
+    outputRef: typeof entry.outputRef === 'string' ? entry.outputRef : undefined,
+    stdoutRef: typeof entry.stdoutRef === 'string' ? entry.stdoutRef : undefined,
+    stderrRef: typeof entry.stderrRef === 'string' ? entry.stderrRef : undefined,
+    failureReason: clipForAgentServerPrompt(entry.failureReason, 480),
+    hash: hashJson(entry),
+  }));
+}
+
+function hashJson(value: unknown) {
+  return sha1(JSON.stringify(clipForAgentServerJson(value, 0))).slice(0, 16);
+}
+
 function clipForAgentServerPrompt(value: unknown, maxLength: number) {
   if (typeof value !== 'string') return undefined;
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -1896,6 +2631,108 @@ function clipForAgentServerJson(value: unknown, depth = 0): unknown {
     out[key] = clipForAgentServerJson(entry, depth + 1);
   }
   return out;
+}
+
+function buildContextEnvelope(
+  request: GatewayRequest,
+  params: {
+    workspace: string;
+    workspaceTreeSummary?: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
+    priorAttempts?: unknown[];
+    selectedSkill?: SkillAvailability;
+    repairRefs?: Record<string, unknown>;
+  },
+) {
+  const uiState = isRecord(request.uiState) ? request.uiState : {};
+  const recentExecutionRefs = toRecordList(uiState.recentExecutionRefs);
+  const recentConversation = toStringList(uiState.recentConversation);
+  const mode = contextEnvelopeMode(request);
+  const workspaceTree = params.workspaceTreeSummary ?? [];
+  const artifactRefs = mode === 'full' ? request.artifacts : summarizeArtifactRefs(request.artifacts);
+  const executionRefs = summarizeExecutionRefs(recentExecutionRefs);
+  const visibleRecentConversation = recentConversation
+    .slice(mode === 'full' ? -12 : -6)
+    .map((entry) => clipForAgentServerPrompt(entry, mode === 'full' ? 1600 : 1000))
+    .filter(Boolean);
+  return {
+    version: 'bioagent.context-envelope.v1',
+    mode,
+    createdAt: new Date().toISOString(),
+    hashes: {
+      workspaceTree: hashJson(workspaceTree),
+      artifacts: hashJson(request.artifacts),
+      recentExecutionRefs: hashJson(recentExecutionRefs),
+      priorAttempts: hashJson(params.priorAttempts ?? []),
+    },
+    projectFacts: mode === 'full' ? {
+      project: 'BioAgent',
+      runtimeRole: 'scenario-first AI4Science workspace runtime',
+      taskCodePolicy: 'Generate or repair task code in the active workspace; do not rely on fixed source-tree scientific task scripts.',
+      toolPayloadContract: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'uiManifest', 'executionUnits', 'artifacts'],
+    } : {
+      project: 'BioAgent',
+      taskCodePolicyRef: 'bioagent.generated-task.v1',
+      toolPayloadContractRef: 'bioagent.toolPayload.v1',
+    },
+    workspaceFacts: mode === 'full' ? {
+      workspacePath: params.workspace,
+      bioagentDir: '.bioagent',
+      taskDir: '.bioagent/tasks/',
+      taskResultDir: '.bioagent/task-results/',
+      logDir: '.bioagent/logs/',
+      artifactDir: '.bioagent/artifacts/',
+      workspaceTreeSummary: mode === 'full' ? workspaceTree : undefined,
+      workspaceTreeHash: hashJson(workspaceTree),
+      workspaceTreeEntryCount: workspaceTree.length,
+    } : {
+      workspacePath: params.workspace,
+      dirs: {
+        task: '.bioagent/tasks/',
+        result: '.bioagent/task-results/',
+        log: '.bioagent/logs/',
+        artifact: '.bioagent/artifacts/',
+      },
+      workspaceTreeHash: hashJson(workspaceTree),
+      workspaceTreeEntryCount: workspaceTree.length,
+    },
+    scenarioFacts: {
+      skillDomain: request.skillDomain,
+      scenarioPackageRef: request.scenarioPackageRef,
+      skillPlanRef: request.skillPlanRef,
+      uiPlanRef: request.uiPlanRef,
+      expectedArtifactTypes: expectedArtifactTypesForRequest(request),
+      selectedComponentIds: selectedComponentIdsForRequest(request),
+      selectedSkill: params.selectedSkill ? {
+        id: params.selectedSkill.id,
+        kind: params.selectedSkill.kind,
+        entrypointType: params.selectedSkill.manifest.entrypoint.type,
+        manifestPath: params.selectedSkill.manifestPath,
+      } : undefined,
+    },
+    sessionFacts: {
+      sessionId: typeof uiState.sessionId === 'string' ? uiState.sessionId : undefined,
+      currentPrompt: typeof uiState.currentPrompt === 'string' ? uiState.currentPrompt : request.prompt,
+      recentConversation: visibleRecentConversation,
+      recentRuns: Array.isArray(uiState.recentRuns)
+        ? (mode === 'full' ? uiState.recentRuns : uiState.recentRuns.slice(-4).map((entry) => clipForAgentServerJson(entry, 2)))
+        : undefined,
+    },
+    longTermRefs: {
+      artifacts: artifactRefs,
+      recentExecutionRefs: executionRefs,
+      priorAttempts: mode === 'full' ? params.priorAttempts : (params.priorAttempts ?? []).slice(0, 2),
+      repairRefs: params.repairRefs,
+    },
+    continuityRules: mode === 'full' ? [
+      'Use workspace refs as the source of truth for files, logs, generated code, and artifacts.',
+      'Use recentConversation only to infer current intent.',
+      'For continuation or repair requests, continue from priorAttempts/artifacts instead of restarting an unrelated task.',
+      'If a requested local ref does not exist, say so explicitly and point to the nearest available output/log/artifact ref.',
+    ] : [
+      'Workspace refs are source of truth.',
+      'Continue from recentExecutionRefs/artifacts; answer missing refs honestly.',
+    ],
+  };
 }
 
 async function workspaceTreeSummary(workspace: string) {
@@ -1947,9 +2784,15 @@ function parseGenerationResponse(value: unknown): AgentServerGenerationResponse 
     value,
     isRecord(value) ? value.result : undefined,
     isRecord(value) ? value.text : undefined,
+    isRecord(value) ? value.finalText : undefined,
+    isRecord(value) ? value.handoffSummary : undefined,
+    isRecord(value) ? value.outputSummary : undefined,
+    ...generationTextCandidates(value),
   ];
   for (const candidate of candidates) {
     const parsed = typeof candidate === 'string' ? extractJson(candidate) : candidate;
+    const fallback = typeof candidate === 'string' ? parseGenerationResponseFromText(candidate) : undefined;
+    if (fallback) return fallback;
     if (!isRecord(parsed)) continue;
     const taskFiles = Array.isArray(parsed.taskFiles)
       ? parsed.taskFiles
@@ -1979,6 +2822,115 @@ function parseGenerationResponse(value: unknown): AgentServerGenerationResponse 
   return undefined;
 }
 
+function parseGenerationResponseFromText(text: string): AgentServerGenerationResponse | undefined {
+  if (!/taskFiles|entrypoint|\.bioagent\/tasks\//i.test(text)) return undefined;
+  const extractedFiles = extractTaskFilesFromGenerationText(text);
+  const pathMatches = extractedFiles.map((file) => file.path);
+  const wroteMatches = Array.from(text.matchAll(/wrote\s+\d+\s+bytes\s+to\s+([^\s\n]+\.bioagent\/tasks\/[^\s\n]+\.(?:py|R|r|sh))/gi))
+    .map((match) => match[1])
+    .filter(Boolean)
+    .map((path) => path.replace(/^.*?(\.bioagent\/tasks\/)/, '$1'));
+  const paths = uniqueStrings([...pathMatches, ...wroteMatches].map((path) => path.replaceAll('\\/', '/')));
+  const entrypointPath = paths[0];
+  if (!entrypointPath) return undefined;
+  const fileByPath = new Map(extractedFiles.map((file) => [file.path, file]));
+  return {
+    taskFiles: paths.map((path) => {
+      const file = fileByPath.get(path);
+      return {
+        path,
+        content: file?.content ?? '',
+        language: file?.language ?? inferLanguageFromEntrypoint(path),
+      };
+    }),
+    entrypoint: {
+      language: inferLanguageFromEntrypoint(entrypointPath),
+      path: entrypointPath,
+      args: /--inputPath|--outputPath/.test(text) ? ['--inputPath', '{inputPath}', '--outputPath', '{outputPath}'] : undefined,
+    },
+    environmentRequirements: { source: 'agentserver-text-fallback' },
+    validationCommand: '',
+    expectedArtifacts: [],
+    patchSummary: 'Recovered AgentServerGenerationResponse from plain/fenced AgentServer text that referenced workspace task files.',
+  };
+}
+
+function generationTextCandidates(value: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<unknown>();
+  const visit = (item: unknown, depth: number) => {
+    if (depth > 5 || item === null || item === undefined || seen.has(item)) return;
+    if (typeof item === 'string') {
+      if (/taskFiles|entrypoint|\.bioagent\/tasks\//i.test(item)) out.push(item);
+      return;
+    }
+    if (!isRecord(item) && !Array.isArray(item)) return;
+    seen.add(item);
+    if (Array.isArray(item)) {
+      for (const child of item) visit(child, depth + 1);
+      return;
+    }
+    for (const key of ['finalText', 'handoffSummary', 'outputSummary', 'result', 'text', 'output', 'data', 'run', 'stages']) {
+      visit(item[key], depth + 1);
+    }
+  };
+  visit(value, 0);
+  return uniqueStrings(out);
+}
+
+function extractTaskFilesFromGenerationText(text: string) {
+  const files: Array<{ path: string; content: string; language: string }> = [];
+  const pathRegex = /"path"\s*:\s*"([^"]*\.bioagent\/tasks\/[^"]+\.(?:py|R|r|sh))"/gi;
+  const matches = Array.from(text.matchAll(pathRegex));
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const rawPath = match[1];
+    if (!rawPath) continue;
+    const path = rawPath.replaceAll('\\/', '/').replace(/^.*?(\.bioagent\/tasks\/)/, '$1');
+    const start = match.index ?? 0;
+    const end = matches[index + 1]?.index ?? text.length;
+    const segment = text.slice(start, end);
+    const content = extractJsonStringField(segment, 'content') ?? '';
+    const language = extractJsonStringField(segment, 'language') ?? inferLanguageFromEntrypoint(path);
+    if (path) files.push({ path, content, language });
+  }
+  return files;
+}
+
+function extractJsonStringField(text: string, field: string) {
+  const key = `"${field}"`;
+  const keyIndex = text.indexOf(key);
+  if (keyIndex < 0) return undefined;
+  const colonIndex = text.indexOf(':', keyIndex + key.length);
+  if (colonIndex < 0) return undefined;
+  let quoteIndex = colonIndex + 1;
+  while (quoteIndex < text.length && /\s/.test(text[quoteIndex] ?? '')) quoteIndex += 1;
+  if (text[quoteIndex] !== '"') return undefined;
+  let escaped = false;
+  let value = '';
+  for (let i = quoteIndex + 1; i < text.length; i += 1) {
+    const char = text[i] ?? '';
+    if (escaped) {
+      value += `\\${char}`;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      try {
+        return JSON.parse(`"${value}"`);
+      } catch {
+        return value.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      }
+    }
+    value += char;
+  }
+  return undefined;
+}
+
 type NormalizedGenerationEntrypoint = {
   language?: WorkspaceTaskRunResult['spec']['language'] | string;
   path?: string;
@@ -1988,22 +2940,88 @@ type NormalizedGenerationEntrypoint = {
 
 function normalizeGenerationEntrypoint(value: unknown): NormalizedGenerationEntrypoint {
   if (typeof value === 'string' && value.trim()) {
+    const command = value.trim();
+    const path = extractEntrypointPath(command) ?? command;
     return {
-      language: inferLanguageFromEntrypoint(value),
-      path: extractEntrypointPath(value) ?? value.trim(),
+      language: inferLanguageFromEntrypoint(command),
+      path,
+      command,
+      args: extractEntrypointArgs(command, path),
     };
   }
   if (isRecord(value)) {
     const path = typeof value.path === 'string' ? extractEntrypointPath(value.path) ?? value.path : undefined;
     const command = typeof value.command === 'string' ? value.command : undefined;
+    const resolvedPath = path ?? extractEntrypointPath(command);
     return {
-      path: path ?? extractEntrypointPath(command),
+      path: resolvedPath,
       command,
-      args: Array.isArray(value.args) ? value.args : undefined,
-      language: typeof value.language === 'string' ? value.language : inferLanguageFromEntrypoint(path ?? command),
+      args: Array.isArray(value.args) ? value.args : extractEntrypointArgs(command, resolvedPath),
+      language: typeof value.language === 'string' ? value.language : inferLanguageFromEntrypoint(resolvedPath ?? command),
     };
   }
   return {};
+}
+
+function extractEntrypointArgs(command: unknown, path: unknown) {
+  const commandText = typeof command === 'string' ? command.trim() : '';
+  if (!commandText) return undefined;
+  const tokens = splitCommandLine(commandText);
+  if (tokens.length === 0) return undefined;
+  const pathText = typeof path === 'string' ? path.trim().replace(/^\.\//, '') : '';
+  let start = 0;
+  if (tokens[start] && /^(?:python(?:\d(?:\.\d+)?)?|python3|Rscript|bash|sh|node|tsx)$/.test(tokens[start])) {
+    start += 1;
+  }
+  if (tokens[start]) {
+    const tokenPath = tokens[start].replace(/^\.\//, '');
+    if (!pathText || tokenPath === pathText || tokenPath.endsWith(`/${pathText}`) || pathText.endsWith(`/${tokenPath}`)) {
+      start += 1;
+    }
+  }
+  const args = tokens.slice(start);
+  return args.length ? args : undefined;
+}
+
+function splitCommandLine(command: string) {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  for (const char of command) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (escaped) current += '\\';
+  if (current) tokens.push(current);
+  return tokens;
 }
 
 function extractEntrypointPath(value: unknown) {
@@ -2096,7 +3114,7 @@ function sanitizeAgentServerError(text: string) {
     .slice(0, 320);
 }
 
-function agentServerRequestFailureMessage(operation: 'generation' | 'repair', error: unknown, timeoutMs: number) {
+function agentServerRequestFailureMessage(operation: 'generation' | 'repair' | 'context-answer', error: unknown, timeoutMs: number) {
   const message = errorMessage(error);
   if (isAbortError(error) || /abort|cancel|timeout/i.test(message)) {
     return `AgentServer ${operation} request timed out or was cancelled after ${timeoutMs}ms. Retry can resume with this repair-needed attempt in priorAttempts.`;
@@ -2278,6 +3296,7 @@ async function validateAndNormalizePayload(
       skillId: skill.id,
       ...attemptPlanRefs(request, skill),
       ...unit,
+      status: normalizeExecutionUnitStatus(unit.status),
     } : unit),
     artifacts: await normalizedArtifactsWithPlaceholders(Array.isArray(payload.artifacts) ? payload.artifacts : [], request, resolve(request.workspacePath || process.cwd()), refs),
     logs: [{ kind: 'stdout', ref: refs.stdoutRel }, { kind: 'stderr', ref: refs.stderrRel }],
@@ -2333,7 +3352,10 @@ async function enrichArtifactDataFromFileRefs(artifact: Record<string, unknown>,
   const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
   const currentData = isRecord(artifact.data) ? artifact.data : {};
   const type = String(artifact.type || artifact.id || '');
-  const data: Record<string, unknown> = { ...currentData };
+  const data: Record<string, unknown> = {
+    ...await artifactDataFromPayloadRef(artifact, workspace),
+    ...currentData,
+  };
 
   if (type === 'omics-differential-expression') {
     const markerRows = await readCsvRef(metadata.markerRef, workspace);
@@ -2371,6 +3393,19 @@ async function enrichArtifactDataFromFileRefs(artifact: Record<string, unknown>,
         data.sections = markdownSections(markdown);
       }
     }
+    const inlineMarkdown = stringField(data.markdown)
+      ?? stringField(data.report)
+      ?? stringField(data.content)
+      ?? stringField(artifact.markdown)
+      ?? stringField(artifact.report)
+      ?? stringField(artifact.content);
+    if (inlineMarkdown) {
+      data.markdown = inlineMarkdown;
+      data.report = stringField(data.report) ?? inlineMarkdown;
+      if (!Array.isArray(data.sections)) {
+        data.sections = markdownSections(inlineMarkdown);
+      }
+    }
     if (realDataPlanText) {
       try {
         data.realDataPlan = JSON.parse(realDataPlanText);
@@ -2381,6 +3416,35 @@ async function enrichArtifactDataFromFileRefs(artifact: Record<string, unknown>,
   }
 
   return Object.keys(data).length ? { ...artifact, data } : artifact;
+}
+
+async function artifactDataFromPayloadRef(artifact: Record<string, unknown>, workspace: string) {
+  const ref = typeof artifact.dataRef === 'string'
+    ? artifact.dataRef
+    : isRecord(artifact.metadata) && typeof artifact.metadata.outputRef === 'string'
+      ? artifact.metadata.outputRef
+      : undefined;
+  if (!ref) return {};
+  const path = safeWorkspaceFilePath(ref, workspace);
+  if (!path) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    return {};
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed.artifacts)) return {};
+  const wantedId = typeof artifact.id === 'string' ? artifact.id : undefined;
+  const wantedType = typeof artifact.type === 'string' ? artifact.type : wantedId;
+  const match = parsed.artifacts
+    .filter(isRecord)
+    .find((candidate) => {
+      const id = typeof candidate.id === 'string' ? candidate.id : undefined;
+      const type = typeof candidate.type === 'string' ? candidate.type : undefined;
+      return (wantedId && id === wantedId) || (wantedType && type === wantedType);
+    });
+  if (!match || !isRecord(match.data)) return {};
+  return match.data;
 }
 
 async function readTextRef(value: unknown, workspace: string) {

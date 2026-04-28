@@ -2,27 +2,38 @@
   "id": "literature.pubmed_search",
   "kind": "seed",
   "description": "Search PubMed E-utilities and return paper-list artifacts with evidence claims.",
-  "skillDomains": ["literature"],
+  "skillDomains": [
+    "literature"
+  ],
   "inputContract": {
     "prompt": "Free text PubMed query or artifact-derived entity."
   },
   "outputArtifactSchema": {
     "type": "paper-list",
-    "required": ["papers", "query", "sourceRefs"]
+    "required": [
+      "papers",
+      "query",
+      "sourceRefs"
+    ]
   },
   "entrypoint": {
-    "type": "workspace-task",
-    "command": "python",
-    "path": "../../../src/runtime/python_tasks/literature_pubmed_task.py"
+    "type": "agentserver-generation"
   },
   "environment": {
     "language": "python",
-    "dependencies": ["python>=3.10", "urllib.request", "json"],
-    "network": ["https://eutils.ncbi.nlm.nih.gov"],
-    "migrationStatus": "workspace task"
+    "dependencies": [
+      "python>=3.10",
+      "urllib.request",
+      "json"
+    ],
+    "network": [
+      "https://eutils.ncbi.nlm.nih.gov"
+    ],
+    "migrationStatus": "generated capability; no fixed source task script",
+    "execution": "AgentServer generates workspace-local task code at runtime."
   },
   "validationSmoke": {
-    "mode": "workspace-task",
+    "mode": "delegated",
     "prompt": "TP53 tumor suppressor reviews",
     "expectedArtifactType": "paper-list"
   },

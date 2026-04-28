@@ -3,6 +3,8 @@ dist/
 dist-ui/
 .DS_Store
 *.log
+__pycache__/
+*.py[cod]
 .bioagent/
 config.local.json
 docs/test-artifacts/

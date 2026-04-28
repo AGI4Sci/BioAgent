@@ -747,7 +747,7 @@ export async function sendAgentMessageStream(
       throw new BioAgentClientError({
         title: 'AgentServer 流式响应不完整',
         reason: '流结束时没有最终 run result。',
-        recoverActions: ['查看 AgentServer 日志', '重试当前请求', '改用 seed skill 或 workspace runtime'],
+        recoverActions: ['查看 AgentServer 日志', '重试当前请求', '改用 workspace/evolved capability 或 workspace runtime'],
         diagnosticRef: 'agentserver-stream-missing-result',
       });
     }

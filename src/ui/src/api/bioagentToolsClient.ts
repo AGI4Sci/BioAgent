@@ -121,8 +121,8 @@ export async function sendBioAgentToolMessage(
     throw new Error(error || `BioAgent project tool failed: HTTP ${response.status}`);
   }
   callbacks.onEvent?.(toolEvent('project-tool-done', priorFailure
-    ? `重跑完成：BioAgent ${builtInScenarioId} 已保留修复结果或 repair-needed 诊断`
-    : `重跑完成：BioAgent ${builtInScenarioId} project tool completed`));
+    ? `BioAgent ${builtInScenarioId} 已完成，并保留修复结果或 repair-needed 诊断`
+    : `BioAgent ${builtInScenarioId} project tool completed`));
   return normalizeAgentResponse(builtInScenarioId, input.prompt, {
     ok: true,
     data: {

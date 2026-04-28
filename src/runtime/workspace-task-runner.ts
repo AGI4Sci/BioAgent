@@ -40,7 +40,11 @@ export async function runWorkspaceTask(workspacePath: string, spec: WorkspaceTas
 
   const command = await commandFor(workspace, spec.language, spec.entrypoint);
   const taskInputArg = spec.inputArgMode === 'empty-data-path' ? '' : inputPath;
-  const args = argsFor(spec.language, taskPath, taskInputArg, outputPath, spec.entrypoint);
+  const explicitEntrypointArgs = Array.isArray(spec.entrypointArgs) && spec.entrypointArgs.length > 0
+    ? spec.entrypointArgs
+    : undefined;
+  const entrypointArgs = explicitEntrypointArgs ?? await inferEntrypointArgsFromTask(taskPath, taskInputArg);
+  const args = argsFor(spec.language, taskPath, taskInputArg, outputPath, spec.entrypoint, entrypointArgs);
   const runtimeFingerprint = await fingerprint(command, spec.language);
   try {
     const result = await execFileAsync(command, args, {
@@ -143,9 +147,69 @@ async function pythonSupportsModernAnnotations(command: string) {
   }
 }
 
-function argsFor(language: WorkspaceTaskSpec['language'], taskPath: string, inputPath: string, outputPath: string, entrypoint: string) {
+function argsFor(
+  language: WorkspaceTaskSpec['language'],
+  taskPath: string,
+  inputPath: string,
+  outputPath: string,
+  entrypoint: string,
+  entrypointArgs?: string[],
+) {
+  const resolvedTemplate = normalizeEntrypointArgTemplate(entrypointArgs, taskPath, inputPath, outputPath);
+  if (resolvedTemplate.length > 0) {
+    if (language === 'python' || language === 'r' || language === 'shell') {
+      return [taskPath, ...stripEntrypointCommandTokens(resolvedTemplate, taskPath, entrypoint)];
+    }
+    return resolvedTemplate;
+  }
   if (language === 'python' || language === 'r' || language === 'shell') return [taskPath, inputPath, outputPath];
   return [inputPath, outputPath].filter((item) => item !== entrypoint);
+}
+
+function normalizeEntrypointArgTemplate(args: string[] | undefined, taskPath: string, inputPath: string, outputPath: string) {
+  if (!Array.isArray(args)) return [];
+  return args
+    .map((arg) => String(arg)
+      .replace(/\{inputPath\}|<inputPath>|INPUT_PATH/g, inputPath)
+      .replace(/\{outputPath\}|<outputPath>|OUTPUT_PATH/g, outputPath)
+      .replace(/\{taskPath\}|<taskPath>|TASK_PATH/g, taskPath))
+    .filter((arg) => arg.length > 0);
+}
+
+function stripEntrypointCommandTokens(args: string[], taskPath: string, entrypoint: string) {
+  const normalizedTaskPath = taskPath.replace(/\\/g, '/');
+  const normalizedEntrypoint = entrypoint.replace(/\\/g, '/');
+  let next = [...args];
+  while (next.length > 0 && isInterpreterToken(next[0])) {
+    next = next.slice(1);
+  }
+  if (next.length > 0) {
+    const first = next[0].replace(/\\/g, '/');
+    if (first === normalizedTaskPath || first === normalizedEntrypoint || normalizedTaskPath.endsWith(`/${first}`)) {
+      next = next.slice(1);
+    }
+  }
+  return next;
+}
+
+function isInterpreterToken(value: string) {
+  return /^(?:python(?:\d(?:\.\d+)?)?|python3|Rscript|bash|sh|node|tsx)$/.test(value);
+}
+
+async function inferEntrypointArgsFromTask(taskPath: string, inputPath: string) {
+  let text = '';
+  try {
+    text = await readFile(taskPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const hasOutputFlag = /--outputPath\b|--output-path\b|--output\b/.test(text);
+  if (!hasOutputFlag) return undefined;
+  const outputFlag = /--outputPath\b/.test(text) ? '--outputPath' : /--output-path\b/.test(text) ? '--output-path' : '--output';
+  const inputFlag = /--inputPath\b/.test(text) ? '--inputPath' : /--input-path\b/.test(text) ? '--input-path' : /--input\b/.test(text) ? '--input' : undefined;
+  return inputFlag && inputPath
+    ? [inputFlag, '{inputPath}', outputFlag, '{outputPath}']
+    : [outputFlag, '{outputPath}'];
 }
 
 async function fingerprint(command: string, language: WorkspaceTaskSpec['language']) {

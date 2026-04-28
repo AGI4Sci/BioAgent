@@ -185,7 +185,7 @@ try {
     logStep('offline runtime health shows concrete recovery actions');
     await offlineHealthPage.getByText('Runtime Health').first().waitFor({ timeout: 15_000 });
     await offlineHealthPage.getByText('启动 npm run workspace:server 后刷新').waitFor({ timeout: 15_000 });
-    await offlineHealthPage.getByText('需要通用生成/修复时启动 AgentServer；seed skill 可离线运行').waitFor({ timeout: 15_000 });
+    await offlineHealthPage.getByText('需要通用生成/修复时启动 AgentServer；workspace/evolved skill 可复用已批准任务').waitFor({ timeout: 15_000 });
     await assertNoRawJsonErrors(offlineHealthPage, 'offline-health');
     await assertNoUnexplainedDisabledPrimaryButtons(offlineHealthPage, 'offline-health');
     await offlineHealthPage.close();

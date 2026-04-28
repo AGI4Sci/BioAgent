@@ -12,17 +12,17 @@ export interface RuntimeCapabilityProfile {
 export const runtimeCapabilityProfiles: RuntimeCapabilityProfile[] = [
   {
     id: 'seed-skill',
-    label: 'Validated seed skill',
-    description: 'Prebuilt and schema-checked BioAgent seed skills.',
+    label: 'Seed capability contract',
+    description: 'Schema-checked BioAgent capability contracts that guide AgentServer workspace task generation.',
     capabilities: {
-      'workspace-task': 'deterministic',
+      'agentserver-generation': 'self-healing',
       'artifact-emission': 'schema-checked',
       'http-fetch': 'basic',
       'artifact-inspection': 'deterministic',
       'ui-fallback': 'schema-checked',
     },
     runtimePriority: 1,
-    failureModes: ['runtime-error', 'network-unavailable', 'schema-mismatch', 'missing-input'],
+    failureModes: ['backend-unavailable', 'network-unavailable', 'schema-mismatch', 'missing-input'],
   },
   {
     id: 'workspace-python',
@@ -80,4 +80,3 @@ export function profileSupportsCapability(profile: RuntimeCapabilityProfile, cap
   const level = profile.capabilities[capability];
   return Boolean(level && level !== 'none');
 }
-

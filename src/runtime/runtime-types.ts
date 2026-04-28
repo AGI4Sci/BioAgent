@@ -75,6 +75,7 @@ export interface WorkspaceTaskSpec {
   id: string;
   language: 'python' | 'r' | 'shell' | 'cli';
   entrypoint: string;
+  entrypointArgs?: string[];
   codeTemplatePath?: string;
   input: Record<string, unknown>;
   outputRel: string;
@@ -180,6 +181,7 @@ export interface SkillPromotionProposal {
 export interface AgentServerGenerationRequest {
   prompt: string;
   skillDomain: BioAgentSkillDomain;
+  contextEnvelope?: Record<string, unknown>;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
   availableSkills: Array<Pick<SkillAvailability, 'id' | 'kind' | 'available' | 'reason' | 'manifestPath'> & {
     description?: string;
@@ -211,6 +213,7 @@ export interface AgentServerGenerationResponse {
 export interface AgentServerRepairRequest {
   prompt: string;
   skillDomain: BioAgentSkillDomain;
+  contextEnvelope?: Record<string, unknown>;
   codeRef: string;
   inputRef?: string;
   outputRef?: string;

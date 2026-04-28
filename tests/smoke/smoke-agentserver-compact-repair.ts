@@ -1,0 +1,202 @@
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
+
+const workspace = await mkdtemp(join(tmpdir(), 'bioagent-compact-repair-'));
+let generationRequests = 0;
+let repairRequests = 0;
+let repairBodyLength = 0;
+
+const badTask = String.raw`
+import json
+import sys
+
+input_path = sys.argv[1]
+output_path = sys.argv[2]
+
+payload = {
+  "message": "This task has a generated syntax bug",
+  "confidence": 0.0,
+}
+broken = f"bad syntax {payload["message"]}"
+with open(output_path, "w", encoding="utf-8") as handle:
+  json.dump(payload, handle)
+`;
+
+const fixedTask = String.raw`
+import json
+import sys
+
+input_path = sys.argv[1]
+output_path = sys.argv[2]
+with open(input_path, "r", encoding="utf-8") as handle:
+  request = json.load(handle)
+
+payload = {
+  "message": "Compact AgentServer repair executed the requested task end-to-end.",
+  "confidence": 0.9,
+  "claimType": "fact",
+  "evidenceLevel": "runtime",
+  "reasoningTrace": ["fixed generated syntax error", "reran task after repair"],
+  "claims": [{
+    "id": "claim.compact_repair",
+    "text": "Repair requests can stay compact while preserving enough context to fix generated code.",
+    "supportingRefs": ["artifact.compact_repair"]
+  }],
+  "uiManifest": [{
+    "componentId": "report-viewer",
+    "artifactRef": "artifact.compact_repair"
+  }],
+  "executionUnits": [{
+    "id": "generic-compact-repair",
+    "status": "done",
+    "tool": "generic.generated.task",
+    "params": request.get("prompt", "")[:80]
+  }],
+  "artifacts": [{
+    "id": "artifact.compact_repair",
+    "type": "research-report",
+    "data": {
+      "markdown": "# Compact repair\n\nThe repaired task ran and produced the final artifact."
+    }
+  }]
+}
+with open(output_path, "w", encoding="utf-8") as handle:
+  json.dump(payload, handle, indent=2)
+`;
+
+const hugePrompt = [
+  'Generate, execute, repair if needed, and return final research artifacts.',
+  'x'.repeat(700_000),
+].join('\n');
+
+const server = createServer(async (req, res) => {
+  if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'not found' }));
+    return;
+  }
+  const { parsed, raw } = await readJsonWithRaw(req);
+  const metadata = isRecord(parsed.input) && isRecord(parsed.input.metadata) ? parsed.input.metadata : {};
+  if (metadata.purpose === 'workspace-task-repair') {
+    repairRequests += 1;
+    repairBodyLength = raw.length;
+    assert.ok(repairBodyLength < 220_000, `repair request should be compact, got ${repairBodyLength} bytes`);
+    assert.equal(metadata.contextMode, 'compact-repair');
+    assert.equal(metadata.contextEnvelopeBytes, undefined);
+    assert.equal(metadata.repairContextVersion, 'bioagent.repair-context.v1');
+    const text = isRecord(parsed.input) ? String(parsed.input.text || '') : '';
+    assert.match(text, /repairContext/);
+    assert.match(text, /broken = f/);
+    assert.doesNotMatch(text, /x{50000}/, 'repair prompt should not include the full huge user prompt');
+    const codeRef = String(metadata.codeRef || '');
+    assert.match(codeRef, /^\.bioagent\/tasks\/generated-literature-/);
+    await writeFile(join(workspace, codeRef), fixedTask);
+    const result = {
+      ok: true,
+      data: {
+        run: {
+          id: 'mock-compact-repair-run',
+          status: 'completed',
+          output: { result: 'Fixed syntax error in generated task.' },
+        },
+      },
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+    return;
+  }
+
+  generationRequests += 1;
+  const result = {
+    ok: true,
+    data: {
+      run: {
+        id: 'mock-compact-generation-run',
+        status: 'completed',
+        output: {
+          result: {
+            taskFiles: [{
+              path: '.bioagent/tasks/compact-repair-syntax-bug.py',
+              language: 'python',
+              content: badTask,
+            }],
+            entrypoint: {
+              language: 'python',
+              path: '.bioagent/tasks/compact-repair-syntax-bug.py',
+            },
+            environmentRequirements: { language: 'python' },
+            validationCommand: 'python .bioagent/tasks/compact-repair-syntax-bug.py <input> <output>',
+            expectedArtifacts: ['research-report'],
+            patchSummary: 'Generated a task with an intentional syntax bug.',
+          },
+        },
+      },
+    },
+  };
+  if (req.url === '/api/agent-server/runs/stream') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(JSON.stringify({ result }) + '\n');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
+});
+
+await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+const address = server.address();
+assert.ok(address && typeof address === 'object');
+const baseUrl = `http://127.0.0.1:${address.port}`;
+
+try {
+  const result = await runWorkspaceRuntimeGateway({
+    skillDomain: 'literature',
+    prompt: hugePrompt,
+    workspacePath: workspace,
+    agentServerBaseUrl: baseUrl,
+    availableSkills: ['missing.skill'],
+    expectedArtifactTypes: ['research-report'],
+    uiState: {
+      sessionId: 'session-compact-repair',
+      forceAgentServerGeneration: true,
+      currentPrompt: hugePrompt,
+      recentConversation: [hugePrompt],
+    },
+  });
+
+  assert.equal(generationRequests, 1);
+  assert.equal(repairRequests, 1);
+  assert.ok(repairBodyLength > 0);
+  assert.match(result.message, /Compact AgentServer repair executed/);
+  assert.equal(result.executionUnits[0]?.status, 'self-healed');
+  assert.ok(result.artifacts.some((artifact) => artifact.id === 'artifact.compact_repair'));
+
+  const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
+  const generatedAttemptFile = attemptFiles.find((file) => file.startsWith('generated-literature-'));
+  assert.ok(generatedAttemptFile);
+  const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', generatedAttemptFile), 'utf8'));
+  assert.equal(attemptHistory.attempts.length, 2);
+  assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
+  assert.match(attemptHistory.attempts[0].failureReason, /SyntaxError|invalid syntax|unmatched/);
+  assert.equal(attemptHistory.attempts[1].status, 'done');
+
+  console.log('[ok] generated syntax failures use compact AgentServer repair and rerun end-to-end');
+} finally {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
+async function readJsonWithRaw(req: NodeJS.ReadableStream): Promise<{ parsed: Record<string, unknown>; raw: string }> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  const raw = Buffer.concat(chunks).toString('utf8');
+  const parsed = JSON.parse(raw || '{}');
+  return { parsed: isRecord(parsed) ? parsed : {}, raw };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

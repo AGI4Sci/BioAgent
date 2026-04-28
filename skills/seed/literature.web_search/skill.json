@@ -2,27 +2,43 @@
   "id": "literature.web_search",
   "kind": "seed",
   "description": "Search the open web through reproducible network search providers when the user explicitly asks for Google, web, browser, arXiv, or general internet search instead of a PubMed-only query.",
-  "skillDomains": ["literature"],
+  "skillDomains": [
+    "literature"
+  ],
   "inputContract": {
     "prompt": "Free text web search query. Explicit Google/web/browser/arXiv requests should use this skill instead of PubMed."
   },
   "outputArtifactSchema": {
     "type": "paper-list",
-    "required": ["papers", "query", "sourceRefs"]
+    "required": [
+      "papers",
+      "query",
+      "sourceRefs"
+    ]
   },
   "entrypoint": {
-    "type": "workspace-task",
-    "command": "python",
-    "path": "../../../src/runtime/python_tasks/literature_web_search_task.py"
+    "type": "agentserver-generation"
   },
   "environment": {
     "language": "python",
-    "dependencies": ["python>=3.10", "urllib.request", "html.parser", "xml.etree.ElementTree"],
-    "network": ["https://export.arxiv.org/api/query", "https://arxiv.org/list", "https://duckduckgo.com", "https://www.bing.com", "https://www.google.com/search"],
-    "migrationStatus": "workspace task; mirrors AgentServer web_search semantics for reproducible BioAgent runs"
+    "dependencies": [
+      "python>=3.10",
+      "urllib.request",
+      "html.parser",
+      "xml.etree.ElementTree"
+    ],
+    "network": [
+      "https://export.arxiv.org/api/query",
+      "https://arxiv.org/list",
+      "https://duckduckgo.com",
+      "https://www.bing.com",
+      "https://www.google.com/search"
+    ],
+    "migrationStatus": "generated capability; no fixed source task script",
+    "execution": "AgentServer generates workspace-local task code at runtime."
   },
   "validationSmoke": {
-    "mode": "workspace-task",
+    "mode": "delegated",
     "prompt": "通过google搜索一下今天arxiv上AI+生命科学的文章",
     "expectedArtifactType": "paper-list"
   },
@@ -33,8 +49,19 @@
   ],
   "promotionHistory": [],
   "scopeDeclaration": {
-    "supportedTasks": ["general web search", "Google-style query routing", "arXiv and news discovery", "web source paper-list artifacts"],
-    "requiredInputs": ["Search query"],
-    "unsupportedTasks": ["Authenticated browser sessions", "Manual visual browsing", "PubMed-only controlled vocabulary search"]
+    "supportedTasks": [
+      "general web search",
+      "Google-style query routing",
+      "arXiv and news discovery",
+      "web source paper-list artifacts"
+    ],
+    "requiredInputs": [
+      "Search query"
+    ],
+    "unsupportedTasks": [
+      "Authenticated browser sessions",
+      "Manual visual browsing",
+      "PubMed-only controlled vocabulary search"
+    ]
   }
 }

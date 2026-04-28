@@ -11,6 +11,12 @@ const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-generation-
 let sawGenerationRequest = false;
 let sawPriorAttempt = false;
 let sawScopeSummary = false;
+let sawContextEnvelope = false;
+let sawContinuationRefs = false;
+let requestCount = 0;
+const agentIds: string[] = [];
+const promptLengths: number[] = [];
+const contextBytes: number[] = [];
 
 const generatedTask = String.raw`
 import json
@@ -80,9 +86,33 @@ const server = createServer(async (req, res) => {
   assert.equal(metadata.purpose, 'workspace-task-generation');
   assert.equal(metadata.skillDomain, 'literature');
   assert.equal(metadata.skillId, 'agentserver.generate.literature');
+  assert.equal(metadata.contextEnvelopeVersion, 'bioagent.context-envelope.v1');
+  const agentId = String(isRecord(body.agent) ? body.agent.id : '');
+  assert.match(agentId, /^bioagent-literature-task-generation-/);
+  agentIds.push(agentId);
   const promptText = isRecord(body.input) && typeof body.input.text === 'string' ? body.input.text : '';
+  promptLengths.push(promptText.length);
+  if (typeof metadata.contextEnvelopeBytes === 'number') contextBytes.push(metadata.contextEnvelopeBytes);
+  requestCount += 1;
   sawPriorAttempt = promptText.includes('prior-generation-failure');
   sawScopeSummary = promptText.includes('scopeCheck') && promptText.includes('handoffTargets');
+  sawContextEnvelope = promptText.includes('"version": "bioagent.context-envelope.v1"')
+    && promptText.includes('"workspaceFacts"')
+    && promptText.includes('"longTermRefs"');
+  if (requestCount === 2) {
+    const contextPolicy = isRecord(body.contextPolicy) ? body.contextPolicy : {};
+    assert.equal(metadata.contextMode, 'delta');
+    assert.equal(contextPolicy.includeRecentTurns, false);
+    sawContinuationRefs = promptText.includes('Where did the generated files go?')
+      && promptText.includes('"mode": "delta"')
+      && promptText.includes('"workspaceTreeHash"')
+      && promptText.includes('"sessionId": "session-smoke-context"')
+      && promptText.includes('"recentExecutionRefs"')
+      && promptText.includes('"codeRef"')
+      && promptText.includes('"stdoutRef"')
+      && promptText.includes('"stderrRef"')
+      && promptText.includes('"outputRef"');
+  }
   sawGenerationRequest = true;
 
   const result = {
@@ -147,6 +177,9 @@ try {
     agentServerBaseUrl: baseUrl,
     availableSkills: ['missing.skill'],
     uiState: {
+      sessionId: 'session-smoke-context',
+      currentPrompt: 'custom literature request that intentionally bypasses local skills',
+      recentConversation: ['user: create a generated literature task'],
       forceAgentServerGeneration: true,
       scopeCheck: {
         inScope: false,
@@ -158,6 +191,7 @@ try {
   assert.equal(sawGenerationRequest, true);
   assert.equal(sawPriorAttempt, true);
   assert.equal(sawScopeSummary, true);
+  assert.equal(sawContextEnvelope, true);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].type, 'paper-list');
   assert.equal(result.executionUnits.length, 1);
@@ -178,7 +212,32 @@ try {
   assert.equal(await readFile(join(workspace, '.bioagent', 'tasks', 'generated-literature.py'), 'utf8'), generatedTask);
   assert.equal(await readFile(join(workspace, attemptHistory.attempts[0].codeRef), 'utf8'), generatedTask);
 
-  console.log('[ok] agentserver generation smoke writes generated task code and runs it through gateway');
+  const continuation = await runWorkspaceRuntimeGateway({
+    skillDomain: 'literature',
+    prompt: 'Where did the generated files go?',
+    workspacePath: workspace,
+    agentServerBaseUrl: baseUrl,
+    availableSkills: ['missing.skill'],
+    artifacts: result.artifacts as Array<Record<string, unknown>>,
+    uiState: {
+      sessionId: 'session-smoke-context',
+      currentPrompt: 'Where did the generated files go?',
+      recentConversation: [
+        'user: create a generated literature task',
+        'assistant: generated task code and produced a paper-list artifact',
+        'user: Where did the generated files go?',
+      ],
+      recentExecutionRefs: [attemptHistory.attempts[0]],
+      forceAgentServerGeneration: true,
+    },
+  });
+
+  assert.equal(continuation.executionUnits[0].tool, 'bioagent.context-ref-inspector');
+  assert.equal(continuation.executionUnits[0].status, 'done');
+  assert.match(continuation.message, /generated-literature/);
+  assert.equal(requestCount, 1);
+
+  console.log('[ok] agentserver generation smoke writes generated task code, carries refs into turn two, and reuses the session agent key');
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

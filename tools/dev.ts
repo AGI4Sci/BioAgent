@@ -17,8 +17,9 @@ if (process.env.BIOAGENT_AGENT_SERVER_AUTOSTART !== '0') {
     children.push(start('agentserver', ['run', 'dev'], AGENT_SERVER_ROOT, {
       OPENTEAM_SERVER_PORT: String(AGENT_SERVER_PORT),
       PORT: String(AGENT_SERVER_PORT),
+      NODE_OPTIONS: mergeNodeOptions(process.env.NODE_OPTIONS, '--max-old-space-size=8192'),
       ...agentServerModelEnvFromLocalConfig(),
-    }));
+    }, { restartOnFailure: true }));
   } else {
     console.warn(`AgentServer root not found at ${AGENT_SERVER_ROOT}; set BIOAGENT_AGENT_SERVER_ROOT or BIOAGENT_AGENT_SERVER_AUTOSTART=0.`);
   }
@@ -64,7 +65,18 @@ if (await isListening(UI_PORT)) {
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
 
-function start(label: string, args: string[], cwd = process.cwd(), envPatch: Record<string, string> = {}) {
+function mergeNodeOptions(existing: string | undefined, required: string) {
+  const current = existing?.trim() ?? '';
+  return current.includes('--max-old-space-size') ? current : [current, required].filter(Boolean).join(' ');
+}
+
+function start(
+  label: string,
+  args: string[],
+  cwd = process.cwd(),
+  envPatch: Record<string, string> = {},
+  options: { restartOnFailure?: boolean } = {},
+) {
   const child = spawn('npm', args, {
     stdio: 'inherit',
     cwd,
@@ -72,6 +84,18 @@ function start(label: string, args: string[], cwd = process.cwd(), envPatch: Rec
   });
   child.once('exit', (code, signal) => {
     if (shuttingDown) return;
+    if (options.restartOnFailure) {
+      console.error(`${label} dev process exited with ${signal || `code ${code}`}; restarting.`);
+      const index = children.indexOf(child);
+      if (index >= 0) children.splice(index, 1);
+      setTimeout(async () => {
+        if (shuttingDown) return;
+        if (label === 'agentserver' && await isListening(AGENT_SERVER_PORT)) return;
+        console.log(`Restarting ${label} dev process...`);
+        children.push(start(label, args, cwd, envPatch, options));
+      }, 1000);
+      return;
+    }
     if (code === 0 || signal === 'SIGTERM' || signal === 'SIGINT') return;
     console.error(`${label} dev process exited with ${signal || `code ${code}`}`);
     shutdown();

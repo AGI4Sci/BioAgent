@@ -39,7 +39,7 @@ export function recoverActionsForService(service: 'workspace' | 'agentserver') {
   return [
     '确认 AgentServer URL 正确',
     '启动 http://127.0.0.1:18080 对应服务',
-    '可先使用当前场景 seed skill 或 workspace runtime 继续',
+    '可先使用当前场景 workspace/evolved capability 或 workspace runtime 继续',
   ];
 }
 

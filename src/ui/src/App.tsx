@@ -244,7 +244,7 @@ function useRuntimeHealth(config: BioAgentConfig, libraryCount?: number) {
           : { id: 'workspace', label: 'Workspace Writer', status: 'offline', detail: config.workspaceWriterBaseUrl, recoverAction: '启动 npm run workspace:server 后刷新' },
         agentOnline
           ? { id: 'agentserver', label: 'AgentServer', status: 'online', detail: config.agentServerBaseUrl }
-          : { id: 'agentserver', label: 'AgentServer', status: 'optional', detail: config.agentServerBaseUrl, recoverAction: '需要通用生成/修复时启动 AgentServer；seed skill 可离线运行' },
+          : { id: 'agentserver', label: 'AgentServer', status: 'optional', detail: config.agentServerBaseUrl, recoverAction: '需要通用生成/修复时启动 AgentServer；workspace/evolved skill 可复用已批准任务' },
         modelHealth(config),
         {
           id: 'library',
@@ -1168,9 +1168,9 @@ function Sidebar({
                 </div>
                 <div className="extension-section">
                   <div className="sidebar-label">Skills</div>
-                  <p className="extension-note">Markdown skill 是可读、可安装、可沉淀的任务知识；seed skill 带可执行入口。</p>
+                  <p className="extension-note">Markdown skill 是可读、可安装、可沉淀的任务知识；seed skill 描述能力和产物契约。</p>
                   <div className="extension-subhead">
-                    <span>Seed executable skills</span>
+                    <span>Seed capability contracts</span>
                     <code>{executableSeedSkills.length}</code>
                   </div>
                   {executableSeedSkills.map((skill) => (
@@ -1178,7 +1178,7 @@ function Sidebar({
                       <span className="extension-icon"><FileCode size={13} /></span>
                       <span className="extension-copy">
                         <strong>{skill}</strong>
-                        <small>skills/seed executable manifest</small>
+                        <small>skills/seed capability manifest</small>
                       </span>
                     </div>
                   ))}
@@ -2701,7 +2701,7 @@ function ChatPanel({
                     const lastPrompt = [...messages].reverse().find((item) => item.role === 'user')?.content;
                     if (lastPrompt) void runPrompt(lastPrompt, activeSessionRef.current);
                   }}
-                  onUseSeedSkill={() => setErrorText(`当前可先使用 seed skill / workspace runtime：${skillPlanRef}。如果任务需要通用生成，再启动 AgentServer。`)}
+                  onUseSeedSkill={() => setErrorText(`当前可先使用 workspace/evolved capability：${skillPlanRef}。如果任务需要通用生成，请启动 AgentServer。`)}
                   onExportDiagnostics={() => exportJsonFile(`${scenarioId}-${session.sessionId}-diagnostics.json`, buildSessionDiagnostics(session, message.content, {
                     scenarioPackageRef,
                     skillPlanRef,
@@ -2791,7 +2791,7 @@ function ChatPanel({
       {errorText ? (
         <div className="composer-error">
           <span>{errorText}</span>
-          <small>可检查 Runtime Health、启动缺失服务，或改用当前场景的 seed skill 重试。</small>
+          <small>可检查 Runtime Health、启动缺失服务，或改用当前场景的 workspace capability 重试。</small>
         </div>
       ) : null}
       <div className="run-readiness">
@@ -2959,7 +2959,7 @@ function FailureRecoveryCard({
       </div>
       <div className="scenario-builder-actions">
         <button onClick={onRetry}>重试上一条请求</button>
-        <button onClick={onUseSeedSkill}>改用 seed skill</button>
+        <button onClick={onUseSeedSkill}>改用 workspace capability</button>
         <button onClick={onOpenSettings}>检查设置</button>
         <button onClick={onExportDiagnostics}>导出诊断包</button>
       </div>
@@ -3040,7 +3040,7 @@ function recoveryActionsForMessage(message: string) {
   if (/AgentServer|18080|stream|fetch/i.test(message)) {
     return [
       '启动或修复 AgentServer 后重试。',
-      '如果当前任务已有 seed skill，BioAgent 会优先走 workspace runtime。',
+      '如果当前任务已有 workspace/evolved skill，BioAgent 会优先走 workspace runtime。',
       '仍失败时导出诊断包，保留 package/version 和 execution logs。',
     ];
   }
@@ -4986,10 +4986,10 @@ function NotebookTimeline({ scenarioId, notebook = [] }: { scenarioId: ScenarioI
       <SectionHeader icon={Clock} title="研究记录" subtitle="从对话到可审计 notebook timeline" />
       {!filtered.length ? <EmptyArtifactState title="等待真实 notebook 记录" detail="Notebook 只展示当前会话运行产生的记录；全局 demo timeline 仅保留在研究时间线页面。" /> : null}
       <div className="timeline-list">
-        {filtered.map((item) => {
+        {filtered.map((item, index) => {
           const scenario = scenarios.find((entry) => entry.id === item.scenario) ?? scenarios[0];
           return (
-            <Card className="timeline-card" key={item.title}>
+            <Card className="timeline-card" key={`${item.id || item.title}-${item.time || index}-${index}`}>
               <div className="timeline-dot" style={{ background: scenario.color }} />
               <div>
                 <div className="timeline-meta">

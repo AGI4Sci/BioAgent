@@ -11,20 +11,19 @@ The product shape is no longer "one page per agent". A user enters a research sc
 - what the honest scope boundaries and failure states are
 
 The UI renders structured runtime artifacts through a component registry. The LLM may choose components and View Composition parameters through JSON, but it does not generate arbitrary UI code.
-Workspace seed skills also pass through the same UIManifest composition layer: task-requested components and user-edited Scenario settings can reorder or replace the default slots before React renders the component registry.
+Workspace-generated tasks and evolved skills also pass through the same UIManifest composition layer: task-requested components and user-edited Scenario settings can reorder or replace the default slots before React renders the component registry.
 
 BioAgent separates extension capability into two families:
 
 - **Tools**: deterministic MCP tools, database connectors, workspace runners, and repair flows.
-- **Skills**: markdown or executable task knowledge. Executable seed skills live in `skills/seed`; installed SCP markdown skills live in `skills/installed/scp`, are indexed in the UI, and are discoverable by the runtime registry as `markdown-skill` entries.
+- **Skills**: capability contracts, markdown task knowledge, and user-approved evolved workspace skills. Seed skills in `skills/seed` describe capabilities and artifact contracts; runtime task code is generated in the active workspace and can later be promoted with user approval.
 
 ## Repository
 
 - `src/ui/`: React + Vite Scenario workbench
 - `src/runtime/`: workspace server, runtime gateway, task runner, skill registry, and shared runtime types
-- `src/runtime/python_tasks/`: Python-first scientific task templates
 - `tests/smoke/`: end-to-end and contract smoke scripts
-- `skills/seed/`: built-in validated executable skills with `skill.json`
+- `skills/seed/`: built-in capability contracts with `skill.json`
 - `skills/installed/scp/`: installed SCP markdown skills copied from the SCP skill library
 - `docs/`: product and architecture documentation
 - `docs/templates/scenario.md`: template for proposing new scenario cases
@@ -37,7 +36,7 @@ The core chain is:
 ```text
 scenario.md or built-in preset
   -> ScenarioSpec
-  -> skill registry / workspace task / AgentServer repair
+  -> skill registry / AgentServer-generated workspace task / evolved skill repair
   -> Artifact + ExecutionUnit + claims + UIManifest
   -> registered scientific UI components
 ```
@@ -128,7 +127,7 @@ The workbench first calls the BioAgent workspace runtime:
 POST http://127.0.0.1:5174/api/bioagent/tools/run
 ```
 
-Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain only to match seed/workspace skills, installed Markdown skills, and run scientific task code. Installed SCP Markdown skills run through the live SCP adapter when `SCP_HUB_API_KEY` or `SCPhub_api_key` is present: the adapter parses each `SKILL.md`, discovers MCP servers/tools, can execute selected tools with prompt-provided inputs, and returns explicit blockers instead of fake artifacts.
+Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain to match seed capability contracts, workspace/evolved skills, and installed Markdown skills. Seed and Markdown skills do not point to fixed source task scripts; BioAgent asks AgentServer to generate or repair workspace-local task code when execution is needed.
 
 If no validated local skill can satisfy the request, the runtime can ask AgentServer to generate or repair workspace-local task code:
 
@@ -165,7 +164,7 @@ Scenario responses can include natural language plus structured JSON:
 
 Unknown components fall back to `UnknownArtifactInspector`; generated UI plugins remain disabled by default and must be sandboxed before use.
 
-For workspace-backed runs, BioAgent normalizes returned `uiManifest` with the current task prompt and editable Scenario settings. This keeps high-frequency seed skills stable while still allowing a prompt such as "only show data table + evidence matrix + execution unit" or "UMAP colorBy cellCycle splitBy batch" to produce a different formatted JSON manifest from the same artifact.
+For workspace-backed runs, BioAgent normalizes returned `uiManifest` with the current task prompt and editable Scenario settings. This keeps generated and evolved skills stable while still allowing a prompt such as "only show data table + evidence matrix + execution unit" or "UMAP colorBy cellCycle splitBy batch" to produce a different formatted JSON manifest from the same artifact.
 
 ## Workspace Records
 

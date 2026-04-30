@@ -168,7 +168,11 @@ const cases = [
 ];
 
 const server = createServer(async (req, res) => {
-  if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+  if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    sendContextSnapshot(res, 'mock-cell-benchmark-context');
+    return;
+  }
+  if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
     return;
@@ -189,8 +193,7 @@ const server = createServer(async (req, res) => {
     assert.ok(codeRef.startsWith('.bioagent/tasks/'), `repair codeRef should point at generated task, got ${codeRef}`);
     assert.match(text, /schema-bad|schema validation|missing claims|priorAttempts|failureReason/i);
     await writeFile(join(workspacePath, codeRef), goodTask);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+    sendAgentServerRun(res, req.url, {
       ok: true,
       data: {
         run: {
@@ -199,13 +202,12 @@ const server = createServer(async (req, res) => {
           output: { result: 'Patched schema-bad cell benchmark task to emit a valid ToolPayload.' },
         },
       },
-    }));
+    });
     return;
   }
 
   if (/direct text bridge/i.test(text)) {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+    sendAgentServerRun(res, req.url, {
       ok: true,
       data: {
         run: {
@@ -216,15 +218,14 @@ const server = createServer(async (req, res) => {
           },
         },
       },
-    }));
+    });
     return;
   }
 
   const shouldReturnBadTask = /Tabula Sapiens/.test(text) && !seenPrompts.some((item) => item.purpose === 'workspace-task-repair');
   const taskIndex = seenPrompts.length;
   const taskContent = shouldReturnBadTask ? schemaBadTask : goodTask;
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  sendAgentServerRun(res, req.url, {
     ok: true,
     data: {
       run: {
@@ -244,7 +245,7 @@ const server = createServer(async (req, res) => {
         },
       },
     },
-  }));
+  });
 });
 
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -449,7 +450,11 @@ raise SystemExit(2)
 `;
 
   const threeRoundServer = createServer(async (req, res) => {
-    if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+    if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+      sendContextSnapshot(res, 'mock-tabula-three-round-context');
+      return;
+    }
+    if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'not found' }));
       return;
@@ -461,22 +466,21 @@ raise SystemExit(2)
 
     if (prompts.length === 1) {
       assert.match(text, /Scenario goal|Tabula Sapiens|recentConversation|expectedArtifactTypes/i);
-      sendGeneration(res, 'tabula-round-1', round1Task);
+      sendGeneration(res, req.url, 'tabula-round-1', round1Task);
       return;
     }
     if (prompts.length === 2) {
       assert.match(text, /继续|marker gene|跨器官|系统性报告/i);
       assert.match(text, /tabula-plan|dataRef|producer|runId/i);
       assert.match(text, /recentExecutionRefs|stdoutRef|stderrRef|outputRef|codeRef/i);
-      sendGeneration(res, 'tabula-round-2', round2FailTask);
+      sendGeneration(res, req.url, 'tabula-round-2', round2FailTask);
       return;
     }
 
     assert.match(text, /如果有失败|不要伪造成功|first pass marker table crashed/i);
     assert.match(text, /priorAttempts|failureReason|stderrRef|stdoutRef|outputRef|codeRef/i);
     assert.match(text, /tabula-round-2|repair-needed|failed-with-reason/i);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+    sendAgentServerRun(res, req.url, {
       ok: true,
       data: {
         run: {
@@ -522,7 +526,7 @@ raise SystemExit(2)
           }
         }
       }
-    }));
+    });
   });
 
   await new Promise<void>((resolve) => threeRoundServer.listen(0, '127.0.0.1', resolve));
@@ -605,9 +609,13 @@ raise SystemExit(2)
   }
 }
 
-function sendGeneration(res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void }, id: string, content: string) {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+function sendGeneration(
+  res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
+  requestUrl: string | undefined,
+  id: string,
+  content: string,
+) {
+  sendAgentServerRun(res, requestUrl, {
     ok: true,
     data: {
       run: {
@@ -625,5 +633,37 @@ function sendGeneration(res: { writeHead: (status: number, headers: Record<strin
         }
       }
     }
+  });
+}
+
+function sendAgentServerRun(
+  res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
+  requestUrl: string | undefined,
+  result: Record<string, unknown>,
+) {
+  if (requestUrl === '/api/agent-server/runs/stream') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(JSON.stringify({ result }) + '\n');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
+}
+
+function sendContextSnapshot(
+  res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
+  id: string,
+) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    ok: true,
+    data: {
+      session: { id, status: 'active' },
+      operationalGuidance: { summary: ['context healthy'], items: [] },
+      workLayout: { strategy: 'live_only', safetyPointReached: true, segments: [] },
+      workBudget: { status: 'healthy', approxCurrentWorkTokens: 160 },
+      recentTurns: [],
+      currentWorkEntries: [],
+    },
   }));
 }

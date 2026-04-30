@@ -77,6 +77,10 @@ with open(output_path, "w", encoding="utf-8") as handle:
   json.dump(payload, handle, indent=2)
 `;
 
+const stillBrokenRepairTask = String.raw`
+raise RuntimeError("repair attempt still needs another AgentServer pass")
+`;
+
 const server = createServer(async (req, res) => {
   if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -89,14 +93,16 @@ const server = createServer(async (req, res) => {
     repairRequests += 1;
     const codeRef = String(metadata.codeRef || '');
     assert.match(codeRef, /^\.bioagent\/tasks\/generated-literature-/);
-    await writeFile(join(workspace, codeRef), fixedTask);
+    await writeFile(join(workspace, codeRef), repairRequests === 1 ? stillBrokenRepairTask : fixedTask);
     const result = {
       ok: true,
       data: {
         run: {
-          id: 'mock-repair-run',
+          id: `mock-repair-run-${repairRequests}`,
           status: 'completed',
-          output: { result: 'Replaced failing task code with a repaired generic implementation.' },
+          output: { result: repairRequests === 1
+            ? 'First repair pass changed the task, but another rerun will expose the remaining execution error.'
+            : 'Replaced failing task code with a repaired generic implementation.' },
         },
       },
     };
@@ -161,21 +167,24 @@ try {
   });
 
   assert.equal(generationRequests, 1);
-  assert.equal(repairRequests, 1);
+  assert.equal(repairRequests, 2);
   assert.match(result.message, /Repair produced/);
   assert.equal(result.executionUnits[0]?.status, 'self-healed');
+  assert.equal(result.executionUnits[0]?.attempt, 3);
   assert.ok(result.artifacts.some((artifact) => artifact.id === 'artifact.repaired'));
 
   const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
   const generatedAttemptFile = attemptFiles.find((file) => file.startsWith('generated-literature-'));
   assert.ok(generatedAttemptFile);
   const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', generatedAttemptFile), 'utf8'));
-  assert.equal(attemptHistory.attempts.length, 2);
+  assert.equal(attemptHistory.attempts.length, 3);
   assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
   assert.match(attemptHistory.attempts[0].failureReason, /failed payload|Intentional transient bug/);
-  assert.equal(attemptHistory.attempts[1].status, 'done');
+  assert.equal(attemptHistory.attempts[1].status, 'failed-with-reason');
+  assert.match(attemptHistory.attempts[1].failureReason, /still needs another AgentServer pass/);
+  assert.equal(attemptHistory.attempts[2].status, 'done');
 
-  console.log('[ok] generated task failed payload triggers generic AgentServer repair and rerun');
+  console.log('[ok] generated task failed payload triggers generic AgentServer repair loop until rerun succeeds');
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

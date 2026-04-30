@@ -38,11 +38,24 @@ export interface WorkspaceRuntimeEvent {
   toolName?: string;
   text?: string;
   output?: string;
+  usage?: WorkspaceRuntimeTokenUsage;
   raw?: unknown;
+}
+
+export interface WorkspaceRuntimeTokenUsage {
+  input?: number;
+  output?: number;
+  total?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  provider?: string;
+  model?: string;
+  source?: string;
 }
 
 export interface WorkspaceRuntimeCallbacks {
   onEvent?: (event: WorkspaceRuntimeEvent) => void;
+  signal?: AbortSignal;
 }
 
 export interface LlmEndpointConfig {

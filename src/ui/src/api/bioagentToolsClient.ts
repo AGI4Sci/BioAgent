@@ -3,8 +3,6 @@ import type { ScenarioId } from '../data';
 import { makeId, nowIso } from '../domain';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
 import { normalizeAgentResponse } from './agentClient';
-import { scopeCheck } from './scopeCheck';
-import { recommendScenarioElements } from '../scenarioCompiler/scenarioElementCompiler';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -12,6 +10,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 export async function sendBioAgentToolMessage(
@@ -23,27 +25,11 @@ export async function sendBioAgentToolMessage(
   const artifactSummary = summarizeArtifacts(input);
   const recentExecutionRefs = summarizeExecutionRefs(input);
   const recentConversation = currentTurnConversation(input, artifactSummary, recentExecutionRefs);
-  const runtimePrompt = buildRuntimePrompt(input, recentConversation, artifactSummary, recentExecutionRefs);
-  const compileText = [
-    input.scenarioOverride?.title,
-    input.scenarioOverride?.description,
-    input.scenarioOverride?.scenarioMarkdown,
-    recentConversation.join('\n'),
-    input.prompt,
-  ].filter(Boolean).join('\n');
-  const compileHints = recommendScenarioElements(compileText || input.prompt);
-  const expectedArtifactTypes = compileHints.selectedArtifactTypes;
-  const selectedComponentIds = input.scenarioOverride?.defaultComponents?.length ? input.scenarioOverride.defaultComponents : compileHints.selectedComponentIds;
   const skillDomain = input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain;
-  const explicitLocalSkills = explicitLocalSkillRequest(input.prompt, skillDomain);
-  const forceAgentServerGeneration = explicitLocalSkills.length
-    ? false
-    : shouldForceGeneralAgentWork(input, expectedArtifactTypes, selectedComponentIds, recentConversation, artifactSummary);
-  const availableSkills = explicitLocalSkills.length
-    ? explicitLocalSkills
-    : forceAgentServerGeneration
-    ? [`agentserver.generate.${skillDomain}`]
-    : compileHints.selectedSkillIds;
+  const selectedComponentIds = input.scenarioOverride?.defaultComponents?.length
+    ? input.scenarioOverride.defaultComponents
+    : SCENARIO_SPECS[builtInScenarioId].componentPolicy.defaultComponents;
+  const expectedArtifactTypes = expectedArtifactsForScenario(builtInScenarioId, selectedComponentIds);
   const priorFailure = hasPriorFailure(artifactSummary, recentExecutionRefs);
   const requestController = new AbortController();
   let timedOut = false;
@@ -61,7 +47,7 @@ export async function sendBioAgentToolMessage(
     lastRealEventAt = Date.now();
   }, 10_000);
   try {
-    callbacks.onEvent?.(toolEvent('current-plan', `当前计划：${forceAgentServerGeneration ? '交给 AgentServer 生成/延续 workspace task' : '使用匹配的 workspace skill'}，目标 artifacts=${expectedArtifactTypes.join(', ') || 'default'}`));
+    callbacks.onEvent?.(toolEvent('current-plan', `当前计划：发送用户原始请求到 AgentServer/workspace runtime，由后台判断回答、生成、修复或执行；UI 仅附带目标 artifacts=${expectedArtifactTypes.join(', ') || 'default'}`));
   callbacks.onEvent?.(toolEvent(
     'context-loaded',
     artifactSummary.length || recentExecutionRefs.length
@@ -82,7 +68,7 @@ export async function sendBioAgentToolMessage(
         uiPlanRef: input.uiPlanRef,
         skillDomain,
         agentBackend: input.config.agentBackend,
-        prompt: runtimePrompt,
+        prompt: input.prompt,
         workspacePath: input.config.workspacePath,
         agentServerBaseUrl: input.config.agentServerBaseUrl,
         modelProvider: input.config.modelProvider,
@@ -90,12 +76,16 @@ export async function sendBioAgentToolMessage(
         llmEndpoint: buildToolLlmEndpoint(input),
         roleView: input.roleView,
         artifacts: artifactSummary,
-        availableSkills,
+        availableSkills: [`agentserver.generate.${skillDomain}`],
         expectedArtifactTypes,
         selectedComponentIds,
         uiState: {
           sessionId: input.sessionId,
-          scopeCheck: scopeCheck(builtInScenarioId, input.prompt),
+          scopeCheck: {
+            source: 'structured-scenario-hint',
+            decisionOwner: 'AgentServer',
+            note: 'BioAgent does not route or reject current-turn intent by keyword; AgentServer decides from rawUserPrompt and context.',
+          },
           scenarioOverride: input.scenarioOverride,
           scenarioPackageRef: input.scenarioPackageRef,
           skillPlanRef: input.skillPlanRef,
@@ -107,8 +97,9 @@ export async function sendBioAgentToolMessage(
           workspacePersistence: workspacePersistenceSummary(input),
           expectedArtifactTypes,
           selectedComponentIds,
-          freshTaskGeneration: true,
-          forceAgentServerGeneration,
+          rawUserPrompt: input.prompt,
+          agentDispatchPolicy: 'agentserver-decides',
+          agentContext: buildAgentContext(input, recentConversation, artifactSummary, recentExecutionRefs),
         },
       }),
       signal: requestController.signal,
@@ -120,15 +111,18 @@ export async function sendBioAgentToolMessage(
   if (!response.ok || error || !isRecord(result)) {
     throw new Error(error || `BioAgent project tool failed: HTTP ${response.status}`);
   }
-  callbacks.onEvent?.(toolEvent('project-tool-done', priorFailure
-    ? `BioAgent ${builtInScenarioId} 已完成，并保留修复结果或 repair-needed 诊断`
-    : `BioAgent ${builtInScenarioId} project tool completed`));
+  const completion = workspaceResultCompletion(result);
+  callbacks.onEvent?.(toolEvent('project-tool-done', completion.status === 'failed'
+    ? `BioAgent ${builtInScenarioId} 未完成：${completion.reason ?? '后台返回 repair-needed/failed-with-reason 诊断，未产出用户要求的最终结果。'}`
+    : priorFailure
+      ? `BioAgent ${builtInScenarioId} 已完成，并保留上一轮修复上下文`
+      : `BioAgent ${builtInScenarioId} project tool completed`));
   return normalizeAgentResponse(builtInScenarioId, input.prompt, {
     ok: true,
     data: {
       run: {
         id: makeId(`project-${builtInScenarioId}`),
-        status: 'completed',
+        status: completion.status,
         createdAt: nowIso(),
         completedAt: nowIso(),
         output: {
@@ -149,6 +143,98 @@ export async function sendBioAgentToolMessage(
     globalThis.clearInterval(silenceWatchdog);
     signal?.removeEventListener('abort', linkedAbort);
   }
+}
+
+function expectedArtifactsForScenario(scenarioId: ScenarioId, componentIds: string[]) {
+  const builtInTypes = SCENARIO_SPECS[scenarioId].outputArtifacts.map((artifact) => artifact.type);
+  return uniqueStrings([
+    ...builtInTypes,
+    ...componentIds.flatMap((componentId) => COMPONENT_ARTIFACT_TYPES[componentId] ?? []),
+  ]);
+}
+
+const COMPONENT_ARTIFACT_TYPES: Record<string, string[]> = {
+  'paper-card-list': ['paper-list'],
+  'evidence-matrix': ['evidence-matrix'],
+  'notebook-timeline': ['notebook-timeline'],
+  'report-viewer': ['research-report'],
+  'data-table': ['data-table'],
+  'network-graph': ['knowledge-graph'],
+  'molecule-viewer': ['structure-summary'],
+  'molecule-viewer-3d': ['structure-summary'],
+  'protein-sequence-viewer': ['sequence-alignment'],
+  'volcano-plot': ['omics-differential-expression'],
+  'heatmap-viewer': ['omics-differential-expression'],
+  'umap-viewer': ['omics-differential-expression'],
+};
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function workspaceResultCompletion(result: Record<string, unknown>): { status: 'completed' | 'failed'; reason?: string } {
+  const failure = firstBlockingResultReason(result);
+  return failure ? { status: 'failed', reason: failure } : { status: 'completed' };
+}
+
+function firstBlockingResultReason(result: Record<string, unknown>) {
+  const units = arrayRecords(result.executionUnits);
+  for (const unit of units) {
+    const status = String(unit.status || '').trim().toLowerCase();
+    if (status === 'repair-needed' || status === 'failed-with-reason' || status === 'failed') {
+      return asString(unit.failureReason)
+        || asString(unit.message)
+        || `${asString(unit.id) || 'execution unit'} status=${status}`;
+    }
+  }
+  const artifacts = arrayRecords(result.artifacts);
+  for (const artifact of artifacts) {
+    const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+    const data = isRecord(artifact.data) ? artifact.data : {};
+    const status = String(metadata.status || data.status || '').trim().toLowerCase();
+    if (status === 'repair-needed' || status === 'failed-with-reason' || status === 'failed') {
+      return asString(metadata.failureReason)
+        || asString(data.failureReason)
+        || `${asString(artifact.id) || asString(artifact.type) || 'artifact'} status=${status}`;
+    }
+  }
+  const message = asString(result.message);
+  if (message && /\brepair-needed\b|\bfailed-with-reason\b/i.test(message) && shouldTreatMessageAsBlocking(message, units, artifacts)) {
+    return message.slice(0, 240);
+  }
+  return undefined;
+}
+
+function shouldTreatMessageAsBlocking(message: string, units: Record<string, unknown>[], artifacts: Record<string, unknown>[]) {
+  if (/^\s*(?:repair-needed|failed-with-reason|failed)\s*$/i.test(message)) return true;
+  if (looksLikeBlockingDiagnosticMessage(message)) return true;
+  return !hasSuccessfulResultEvidence(units, artifacts);
+}
+
+function looksLikeBlockingDiagnosticMessage(message: string) {
+  return /^(?:BioAgent runtime gateway needs repair|Agent backend .* failed|AgentServer .* failed|No validated local skill|Task output failed|AgentServer .* did not|Generated artifacts did not)/i.test(message)
+    || /\b(?:execution unit|artifact|research-report|paper-list)\s+status=(?:repair-needed|failed-with-reason|failed)\b/i.test(message);
+}
+
+function hasSuccessfulResultEvidence(units: Record<string, unknown>[], artifacts: Record<string, unknown>[]) {
+  const hasCompletedUnit = units.some((unit) => {
+    const status = String(unit.status || '').trim().toLowerCase();
+    return status === 'done' || status === 'record-only' || status === 'self-healed' || status === 'completed' || status === 'success';
+  });
+  const hasUsableArtifact = artifacts.some((artifact) => {
+    const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+    const data = isRecord(artifact.data) ? artifact.data : {};
+    const status = String(metadata.status || data.status || '').trim().toLowerCase();
+    return status !== 'repair-needed'
+      && status !== 'failed-with-reason'
+      && status !== 'failed'
+      && Boolean(asString(artifact.id) || asString(artifact.type));
+  });
+  return hasCompletedUnit || hasUsableArtifact;
+}
+
+function arrayRecords(value: unknown) {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
 async function readWorkspaceToolStream(
@@ -199,21 +285,66 @@ function normalizeWorkspaceRuntimeEvent(raw: unknown): AgentStreamEvent {
   const type = asString(record.type) || asString(record.kind) || 'workspace-runtime-event';
   const source = asString(record.source);
   const toolName = asString(record.toolName);
-  const detail = asString(record.detail)
+  const usage = normalizeTokenUsage(record.usage)
+    ?? normalizeTokenUsage(isRecord(record.output) ? record.output.usage : undefined)
+    ?? normalizeTokenUsage(isRecord(record.result) ? record.result.usage : undefined)
+    ?? normalizeTokenUsage(isRecord(record.result) && isRecord(record.result.output) ? record.result.output.usage : undefined);
+  const baseDetail = asString(record.detail)
     || asString(record.message)
     || asString(record.text)
     || asString(record.output)
     || asString(record.status)
     || asString(record.error)
     || (Object.keys(record).length ? JSON.stringify(record) : undefined);
+  const usageDetail = formatTokenUsage(usage);
+  const detail = [baseDetail, usageDetail].filter(Boolean).join(' | ') || undefined;
   return {
     id: makeId('evt'),
     type,
     label: streamEventLabel(type, source, toolName),
     detail,
+    usage,
     createdAt: nowIso(),
     raw,
   };
+}
+
+function normalizeTokenUsage(value: unknown): AgentStreamEvent['usage'] | undefined {
+  if (!isRecord(value)) return undefined;
+  const usage = {
+    input: asNumber(value.input),
+    output: asNumber(value.output),
+    total: asNumber(value.total),
+    cacheRead: asNumber(value.cacheRead),
+    cacheWrite: asNumber(value.cacheWrite),
+    provider: asString(value.provider),
+    model: asString(value.model),
+    source: asString(value.source),
+  };
+  if (
+    usage.input === undefined
+    && usage.output === undefined
+    && usage.total === undefined
+    && usage.cacheRead === undefined
+    && usage.cacheWrite === undefined
+  ) {
+    return undefined;
+  }
+  return usage;
+}
+
+function formatTokenUsage(usage: AgentStreamEvent['usage'] | undefined) {
+  if (!usage) return undefined;
+  const parts = [
+    usage.input !== undefined ? `in ${usage.input}` : '',
+    usage.output !== undefined ? `out ${usage.output}` : '',
+    usage.total !== undefined ? `total ${usage.total}` : '',
+    usage.cacheRead !== undefined ? `cache read ${usage.cacheRead}` : '',
+    usage.cacheWrite !== undefined ? `cache write ${usage.cacheWrite}` : '',
+  ].filter(Boolean);
+  const model = [usage.provider, usage.model].filter(Boolean).join('/');
+  const suffix = [model, usage.source].filter(Boolean).join(' ');
+  return `tokens ${parts.join(', ')}${suffix ? ` (${suffix})` : ''}`;
 }
 
 function streamEventLabel(type: string, source?: string, toolName?: string) {
@@ -332,6 +463,13 @@ function artifactFailureReason(artifact: { metadata?: Record<string, unknown>; d
 }
 
 function summarizeArtifactData(data: unknown) {
+  if (typeof data === 'string') {
+    return {
+      valueType: 'string',
+      textPreview: data.slice(0, 1200),
+      markdownPreview: data.slice(0, 1200),
+    };
+  }
   if (!isRecord(data)) return data === undefined ? undefined : { valueType: Array.isArray(data) ? 'array' : typeof data };
   const keys = Object.keys(data).slice(0, 20);
   const rows = Array.isArray(data.rows) ? data.rows : Array.isArray(data.records) ? data.records : undefined;
@@ -479,90 +617,29 @@ function buildToolLlmEndpoint(input: SendAgentMessageInput) {
   };
 }
 
-function buildRuntimePrompt(
+function buildAgentContext(
   input: SendAgentMessageInput,
   recentConversation: string[],
   artifactSummary: ReturnType<typeof summarizeArtifacts>,
   recentExecutionRefs: ReturnType<typeof summarizeExecutionRefs>,
 ) {
   const scenario = input.scenarioOverride;
-  return [
-    'BioAgent should complete the user task end-to-end like a general coding/research agent, not only run a narrow seed search.',
-    scenario ? `Scenario title: ${scenario.title}` : '',
-    scenario ? `Scenario goal: ${scenario.description}` : '',
-    scenario ? `Scenario markdown:\n${scenario.scenarioMarkdown}` : '',
-    recentConversation.length ? 'Recent multi-turn conversation:' : '',
-    recentConversation.join('\n'),
-    artifactSummary.length ? 'Existing artifacts from previous turns:' : '',
-    artifactSummary.length ? JSON.stringify(artifactSummary, null, 2) : '',
-    recentExecutionRefs.length ? 'Code/log/output refs from previous turns:' : '',
-    recentExecutionRefs.length ? JSON.stringify(recentExecutionRefs, null, 2) : '',
-    'Local workspace persistence:',
-    JSON.stringify(workspacePersistenceSummary(input), null, 2),
-    'Current user request:',
-    input.prompt,
-    '',
-    'Work requirements:',
-    '- Infer the full user intent across turns.',
-    '- For continuation/repair requests, read prior attempts, existing artifacts, and code/log/output refs before deciding what to do next.',
-    '- Do not restart an unrelated task when the current request says continue, repair, based on the previous result, add figures, or add a report.',
-    '- If previous runs failed, preserve failureReason and return repair-needed or failed-with-reason unless the rerun truly succeeds.',
-    '- If the user asks to read, summarize, compare, or write a report, produce a research-report artifact, not just search metadata.',
-    '- Reuse previous artifacts when useful; fetch or compute additional data only when needed.',
-    '- If the user asks where downloaded/source files, generated code, reports, logs, or artifacts are stored, answer directly with exact workspace refs from artifacts, executionUnits, and Local workspace persistence. If no local file ref exists for the requested item, say that explicitly and point to the task output/artifact JSON that is actually present.',
-    '- Emit BioAgent ToolPayload JSON with message, claims, artifacts, executionUnits, uiManifest, and reasoningTrace.',
-  ].filter(Boolean).join('\n');
-}
-
-function shouldForceGeneralAgentWork(
-  input: SendAgentMessageInput,
-  expectedArtifactTypes: string[],
-  selectedComponentIds: string[],
-  recentConversation: string[],
-  artifactSummary: ReturnType<typeof summarizeArtifacts>,
-) {
-  const text = [
-    input.scenarioOverride?.description,
-    input.scenarioOverride?.scenarioMarkdown,
-    recentConversation.join('\n'),
-    input.prompt,
-  ].filter(Boolean).join('\n').toLowerCase();
-  const wantsReport = expectedArtifactTypes.includes('research-report')
-    || selectedComponentIds.includes('report-viewer')
-    || /report|summary|summari[sz]e|systematic|read|reading|review|报告|总结|系统性|阅读|综述/.test(text);
-  const wantsFreshExternalResearch = /\barxiv\b|\blatest\b|\btoday\b|\bweb\b|\bbrowser\b|最新|今天|今日|网页|浏览器/.test(text);
-  const multiTurnContinuation = artifactSummary.length > 0 && /继续|这些|上述|它们|阅读|总结|报告|不只是|not only|not just|write|draft/.test(text);
-  const explicitGeneratedTaskRequest = /agentserver|bioagent\/agentserver|workspace[-\s]?local task|generate workspace|generated? task|自己生成|生成.*任务|生成.*代码|自愈|修复.*重跑|读取上一轮日志|不要伪造成功|不要复用|不要使用.*seed|不要.*seed|故意制造|failure|fail|failed|repair-needed|failureReason|stdoutRef|stderrRef|ExecutionUnit/i.test(text);
-  return (wantsReport && (wantsFreshExternalResearch || multiTurnContinuation))
-    || explicitGeneratedTaskRequest
-    || isComplexCellReproductionTask(text);
-}
-
-function explicitLocalSkillRequest(prompt: string, skillDomain: string) {
-  const text = prompt.toLowerCase();
-  const rejectsLocalOrSeedSkill = /不要使用.*(?:seed|workspace skill|registered|local)|不要.*(?:seed|workspace skill)|do not use.*(?:seed|workspace skill|registered|local)|don't use.*(?:seed|workspace skill|registered|local)|不要复用|不要.*窄.*skill/i.test(text);
-  if (rejectsLocalOrSeedSkill) return [];
-  const asksForLocalRegisteredSkill = /已注册|registered|local|本地|deterministic|确定性|seed|workspace skill|不要生成新代码|不要写新代码|do not generate new code|don't generate new code/.test(text);
-  if (!asksForLocalRegisteredSkill) return [];
-  if (skillDomain === 'structure' && /structure\.rcsb_latest_or_entry|rcsb|pdb|alphafold|coordinate|坐标|结构/.test(text)) {
-    return ['structure.rcsb_latest_or_entry'];
-  }
-  if (skillDomain === 'literature' && /literature\.pubmed_search|pubmed|文献/.test(text) && !/web|网页|浏览器/.test(text)) {
-    return ['literature.pubmed_search'];
-  }
-  if (skillDomain === 'knowledge' && /knowledge\.uniprot_chembl_lookup|uniprot|chembl|知识/.test(text)) {
-    return ['knowledge.uniprot_chembl_lookup'];
-  }
-  if (skillDomain === 'omics' && /omics\.differential_expression|差异表达|differential expression/.test(text)) {
-    return ['omics.differential_expression'];
-  }
-  return [];
-}
-
-function isComplexCellReproductionTask(text: string) {
-  const cellSignals = /single[-\s]?cell|scrna|scatac|cite[-\s]?seq|perturb[-\s]?seq|velocity|scvelo|seurat|scanpy|harmony|scvi|totalvi|wnn|glue|milo|scenic|cellchat|spatial transcriptomics|multi[-\s]?organ|multi[-\s]?omics|多器官|单细胞|细胞图谱|跨数据集|标签迁移|整合|速度|扰动|空间转录组|多组学|轨迹|通讯|调控网络|克隆型|类器官/.test(text);
-  const workSignals = /reproduce|replicate|benchmark|workflow|pipeline|atlas|integration|label transfer|mapping|reference mapping|batch mixing|qc|cluster|marker|annotation|latent time|driver genes|velocity stream|spliced|unspliced|embedding|modality|niche|复现|重现|基准|流程|图谱|整合|映射|质控|聚类|标记基因|注释|比较|分析|模型比较|复现重点|联合建模|空间邻域/.test(text);
-  return cellSignals && workSignals;
+  return {
+    scenario: scenario ? {
+      title: scenario.title,
+      goal: scenario.description,
+      markdown: scenario.scenarioMarkdown,
+    } : undefined,
+    recentConversation,
+    artifacts: artifactSummary,
+    recentExecutionRefs,
+    workspacePersistence: workspacePersistenceSummary(input),
+    notes: [
+      'User prompt is carried separately as the authoritative request.',
+      'Use this context only as supporting evidence for AgentServer-side intent reasoning.',
+      'Do not let UI hints, scenario text, or historical requests override the current raw user prompt.',
+    ],
+  };
 }
 
 function toolEvent(type: string, detail: string): AgentStreamEvent {

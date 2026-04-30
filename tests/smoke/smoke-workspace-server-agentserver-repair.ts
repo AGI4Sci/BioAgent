@@ -7,8 +7,34 @@ import { tmpdir } from 'node:os';
 
 const workspace = await createRepairWorkspace('bioagent-workspace-http-repair-');
 
+const brokenGeneratedTask = [
+  'import json, sys',
+  'matrix_ref = ""',
+  'metadata_ref = ""',
+  'if not matrix_ref or not metadata_ref:',
+  '    sys.stderr.write("missing matrix/metadata refs\\n")',
+  '    raise SystemExit(2)',
+  'payload = {"message":"omics repaired ok","confidence":0.82,"claimType":"evidence-summary","evidenceLevel":"workspace-task","reasoningTrace":"generated omics task reran after repair","claims":[],"uiManifest":[{"componentId":"volcano-plot","artifactRef":"omics-differential-expression","priority":1}],"executionUnits":[{"id":"omics-generated-repaired","tool":"agentserver.generated.python","status":"done"}],"artifacts":[{"id":"omics-differential-expression","type":"omics-differential-expression","producerScenario":"omics","schemaVersion":"1","metadata":{"matrixRef":matrix_ref,"metadataRef":metadata_ref},"data":{"rows":[{"gene":"IL6","log2FoldChange":2.4,"pValue":0.01}]}}]}',
+  'json.dump(payload, open(sys.argv[2], "w"))',
+].join('\n');
+
 const agentServer = createServer(async (req, res) => {
-  if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+  if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      data: {
+        session: { id: 'mock-workspace-repair-context', status: 'active' },
+        operationalGuidance: { summary: ['context healthy'], items: [] },
+        workLayout: { strategy: 'live_only', safetyPointReached: true, segments: [] },
+        workBudget: { status: 'healthy', approxCurrentWorkTokens: 80 },
+        recentTurns: [],
+        currentWorkEntries: [],
+      },
+    }));
+    return;
+  }
+  if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
     return;
@@ -17,20 +43,35 @@ const agentServer = createServer(async (req, res) => {
   const agent = isRecord(body.agent) ? body.agent : {};
   const repairWorkspace = typeof agent.workingDirectory === 'string' ? agent.workingDirectory : workspace;
   const metadata = isRecord(body.input) && isRecord(body.input.metadata) ? body.input.metadata : {};
+  if (metadata.purpose === 'workspace-task-generation') {
+    sendRunResponse(res, req.url, {
+      ok: true,
+      data: {
+        run: {
+          id: 'mock-agentserver-generated-omics-run',
+          status: 'completed',
+          output: {
+            result: {
+              taskFiles: [{ path: '.bioagent/tasks/omics-generated.py', language: 'python', content: brokenGeneratedTask }],
+              entrypoint: { language: 'python', path: '.bioagent/tasks/omics-generated.py' },
+              environmentRequirements: { language: 'python' },
+              validationCommand: 'python .bioagent/tasks/omics-generated.py <input> <output>',
+              expectedArtifacts: ['omics-differential-expression'],
+              patchSummary: 'Generated an omics task that intentionally needs repair.',
+            },
+          },
+        },
+      },
+    });
+    return;
+  }
   const codeRef = typeof metadata.codeRef === 'string' ? metadata.codeRef : '';
-  assert.ok(codeRef.startsWith('.bioagent/tasks/omics-'));
+  assert.ok(codeRef.startsWith('.bioagent/tasks/'));
   const taskPath = join(repairWorkspace, codeRef);
   const source = await readFile(taskPath, 'utf8');
-  await writeFile(taskPath, source.replace(
-    '    params = omics_params(prompt)\n',
-    [
-      '    params = omics_params(prompt)\n',
-      '    if not params["matrixRef"]:\n',
-      '        params["matrixRef"] = "matrix.csv"\n',
-      '    if not params["metadataRef"]:\n',
-      '        params["metadataRef"] = "metadata.csv"\n',
-    ].join(''),
-  ));
+  await writeFile(taskPath, source
+    .replace('matrix_ref = ""', 'matrix_ref = "matrix.csv"')
+    .replace('metadata_ref = ""', 'metadata_ref = "metadata.csv"'));
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     ok: true,
@@ -189,4 +230,18 @@ async function assertSelfHealedAttemptHistory(repairWorkspace: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sendRunResponse(
+  res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
+  requestUrl: string | undefined,
+  result: Record<string, unknown>,
+) {
+  if (requestUrl === '/api/agent-server/runs/stream') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(JSON.stringify({ result }) + '\n');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
 }

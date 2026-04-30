@@ -217,19 +217,64 @@ function normalizeAgentBackend(value: string): AgentBackendId {
 function normalizeStreamEvent(raw: unknown): AgentStreamEvent {
   const record = isRecord(raw) ? raw : {};
   const type = asString(record.type) || asString(record.kind) || 'event';
-  const detail = asString(record.message)
+  const usage = normalizeTokenUsage(record.usage)
+    ?? normalizeTokenUsage(isRecord(record.output) ? record.output.usage : undefined)
+    ?? normalizeTokenUsage(isRecord(record.result) ? record.result.usage : undefined)
+    ?? normalizeTokenUsage(isRecord(record.result) && isRecord(record.result.output) ? record.result.output.usage : undefined);
+  const baseDetail = asString(record.message)
     || asString(record.detail)
     || asString(record.status)
     || asString(record.error)
     || (Object.keys(record).length ? JSON.stringify(record) : undefined);
+  const usageDetail = formatTokenUsage(usage);
+  const detail = [baseDetail, usageDetail].filter(Boolean).join(' | ') || undefined;
   return {
     id: makeId('evt'),
     type,
     label: streamEventLabel(type),
     detail,
+    usage,
     createdAt: nowIso(),
     raw,
   };
+}
+
+function normalizeTokenUsage(value: unknown): AgentStreamEvent['usage'] | undefined {
+  if (!isRecord(value)) return undefined;
+  const usage = {
+    input: asNumber(value.input),
+    output: asNumber(value.output),
+    total: asNumber(value.total),
+    cacheRead: asNumber(value.cacheRead),
+    cacheWrite: asNumber(value.cacheWrite),
+    provider: asString(value.provider),
+    model: asString(value.model),
+    source: asString(value.source),
+  };
+  if (
+    usage.input === undefined
+    && usage.output === undefined
+    && usage.total === undefined
+    && usage.cacheRead === undefined
+    && usage.cacheWrite === undefined
+  ) {
+    return undefined;
+  }
+  return usage;
+}
+
+function formatTokenUsage(usage: AgentStreamEvent['usage'] | undefined) {
+  if (!usage) return undefined;
+  const parts = [
+    usage.input !== undefined ? `in ${usage.input}` : '',
+    usage.output !== undefined ? `out ${usage.output}` : '',
+    usage.total !== undefined ? `total ${usage.total}` : '',
+    usage.cacheRead !== undefined ? `cache read ${usage.cacheRead}` : '',
+    usage.cacheWrite !== undefined ? `cache write ${usage.cacheWrite}` : '',
+  ].filter(Boolean);
+  const model = [usage.provider, usage.model].filter(Boolean).join('/');
+  const suffix = [model, usage.source].filter(Boolean).join(' ');
+  return `tokens ${parts.join(', ')}${suffix ? ` (${suffix})` : ''}`;
 }
 
 function streamEventLabel(type: string) {
@@ -427,7 +472,8 @@ export function normalizeAgentResponse(
   const runId = asString(runRecord.id) || makeId('run');
   const runStatus = runRecord.status === 'failed' ? 'failed' : 'completed';
   const cleanOutputText = outputText.replace(/```(?:json)?[\s\S]*?```/gi, '').trim() || outputText;
-  const messageText = runStatus === 'failed'
+  const hasStructuredOutput = Object.keys(structured).length > 0;
+  const messageText = runStatus === 'failed' && !hasStructuredOutput
     ? `AgentServer 后端运行失败：${cleanOutputText}`
     : readableMessageFromStructured(structured, cleanOutputText);
   const confidence = asNumber(structured.confidence) ?? 0.78;
@@ -504,19 +550,22 @@ export function normalizeAgentResponse(
     })) : [],
     claims,
     executionUnits: normalizeExecutionUnits(structured.executionUnits, fallbackExecutionUnit),
-    artifacts: Array.isArray(structured.artifacts) ? structured.artifacts.filter(isRecord).map((artifact) => ({
-      id: asString(artifact.id) || asString(artifact.type) || makeId('artifact'),
-      type: asString(artifact.type) || 'scenario-output',
-      producerScenario: scenarioId,
-      schemaVersion: asString(artifact.schemaVersion) || '1',
-      metadata: isRecord(artifact.metadata) ? artifact.metadata : undefined,
-      data: artifact.data,
-      dataRef: asString(artifact.dataRef),
-      visibility: asTimelineVisibility(artifact.visibility),
-      audience: asStringArray(artifact.audience),
-      sensitiveDataFlags: asStringArray(artifact.sensitiveDataFlags),
-      exportPolicy: asExportPolicy(artifact.exportPolicy),
-    })) : [],
+    artifacts: Array.isArray(structured.artifacts) ? structured.artifacts.filter(isRecord).map((artifact) => {
+      const artifactType = asString(artifact.type) || 'scenario-output';
+      return {
+        id: asString(artifact.id) || artifactType || makeId('artifact'),
+        type: artifactType,
+        producerScenario: scenarioId,
+        schemaVersion: asString(artifact.schemaVersion) || '1',
+        metadata: isRecord(artifact.metadata) ? artifact.metadata : undefined,
+        data: normalizeArtifactData(artifactType, artifact),
+        dataRef: asString(artifact.dataRef),
+        visibility: asTimelineVisibility(artifact.visibility),
+        audience: asStringArray(artifact.audience),
+        sensitiveDataFlags: asStringArray(artifact.sensitiveDataFlags),
+        exportPolicy: asExportPolicy(artifact.exportPolicy),
+      };
+    }) : [],
     notebook: normalizeNotebookRecords(structured.notebook, {
       scenarioId,
       prompt,
@@ -529,6 +578,40 @@ export function normalizeAgentResponse(
       executionUnits: Array.isArray(structured.executionUnits) ? structured.executionUnits.filter(isRecord) : [],
     }),
   };
+}
+
+function normalizeArtifactData(type: string, artifact: Record<string, unknown>) {
+  const data = 'data' in artifact
+    ? artifact.data
+    : artifact.content ?? artifact.markdown ?? artifact.report ?? artifact.summary;
+  const encoding = asString(artifact.encoding) || asString(isRecord(artifact.metadata) ? artifact.metadata.encoding : undefined);
+  if (typeof data === 'string' && isTextLikeArtifact(type, encoding)) {
+    return {
+      markdown: data,
+      text: data,
+      report: data,
+    };
+  }
+  if (typeof data === 'string' && isJsonLikeArtifact(type, encoding)) {
+    try {
+      return JSON.parse(data) as unknown;
+    } catch {
+      return {
+        text: data,
+      };
+    }
+  }
+  return data;
+}
+
+function isTextLikeArtifact(type: string, encoding?: string) {
+  return /markdown|md|text/i.test(encoding || '')
+    || /report|summary|notebook|document|markdown|text|note|protocol|plan|narrative/i.test(type);
+}
+
+function isJsonLikeArtifact(type: string, encoding?: string) {
+  return /json/i.test(encoding || '')
+    || /list|table|matrix|graph|records|items|rows/i.test(type);
 }
 
 function normalizeNotebookRecords(

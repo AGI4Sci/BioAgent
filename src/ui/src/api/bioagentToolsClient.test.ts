@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe('sendBioAgentToolMessage routing', () => {
-  it('honors an explicit registered local structure skill request', async () => {
+  it('keeps the raw user prompt authoritative even when a local skill is mentioned', async () => {
     let requestBody: Record<string, unknown> | undefined;
     globalThis.fetch = (async (_url, init) => {
       requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -47,9 +47,11 @@ describe('sendBioAgentToolMessage routing', () => {
       prompt: '请使用已注册本地 workspace skill structure.rcsb_latest_or_entry；不要生成新代码，不要调用 AgentServer。对 PDB 6LUD 运行真实 RCSB metadata/coordinate retrieval。',
     });
 
-    assert.deepEqual(requestBody?.availableSkills, ['structure.rcsb_latest_or_entry']);
+    assert.equal(requestBody?.prompt, '请使用已注册本地 workspace skill structure.rcsb_latest_or_entry；不要生成新代码，不要调用 AgentServer。对 PDB 6LUD 运行真实 RCSB metadata/coordinate retrieval。');
+    assert.deepEqual(requestBody?.availableSkills, ['agentserver.generate.structure']);
     const uiState = requestBody?.uiState as Record<string, unknown>;
-    assert.equal(uiState.forceAgentServerGeneration, false);
+    assert.equal(uiState.agentDispatchPolicy, 'agentserver-decides');
+    assert.equal(uiState.rawUserPrompt, requestBody?.prompt);
   });
 
   it('keeps open-ended structure report requests on AgentServer generation', async () => {
@@ -86,8 +88,9 @@ describe('sendBioAgentToolMessage routing', () => {
     });
 
     assert.deepEqual(requestBody?.availableSkills, ['agentserver.generate.structure']);
+    assert.equal(requestBody?.prompt, '继续，结合文献证据写 EGFR L858R/T790M/C797S 奥希替尼耐药解释报告，并说明不能推断的内容。');
     const uiState = requestBody?.uiState as Record<string, unknown>;
-    assert.equal(uiState.forceAgentServerGeneration, true);
+    assert.equal(uiState.agentDispatchPolicy, 'agentserver-decides');
   });
 
   it('routes fresh arxiv literature report requests to Codex-backed AgentServer generation', async () => {
@@ -131,8 +134,171 @@ describe('sendBioAgentToolMessage routing', () => {
 
     assert.deepEqual(requestBody?.availableSkills, ['agentserver.generate.literature']);
     assert.equal(requestBody?.agentBackend, 'codex');
+    assert.equal(requestBody?.prompt, '帮我检索arxiv上最新的agent相关论文，阅读并写一份调研报告');
     const uiState = requestBody?.uiState as Record<string, unknown>;
-    assert.equal(uiState.forceAgentServerGeneration, true);
+    assert.equal(uiState.agentDispatchPolicy, 'agentserver-decides');
+  });
+
+  it('passes scenario artifact hints into the AgentServer contract without prompt keyword routing', async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          message: 'agentserver generation requested',
+          confidence: 0.5,
+          claimType: 'fact',
+          evidenceLevel: 'runtime',
+          uiManifest: [],
+          executionUnits: [{ id: 'EU-agentserver-literature', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          artifacts: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    await sendBioAgentToolMessage({
+      ...baseInput(),
+      scenarioId: 'literature-evidence-review',
+      agentName: 'Literature',
+      agentDomain: 'literature',
+      scenarioOverride: {
+        title: '文献证据评估',
+        description: '离线证据矩阵 smoke',
+        skillDomain: 'literature',
+        scenarioMarkdown: '需要 paper-list、evidence-matrix、notebook-timeline、research-report。',
+        defaultComponents: ['paper-card-list', 'evidence-matrix', 'notebook-timeline', 'report-viewer', 'execution-unit-table'],
+        allowedComponents: ['paper-card-list', 'evidence-matrix', 'notebook-timeline', 'report-viewer', 'execution-unit-table'],
+        fallbackComponent: 'unknown-artifact-inspector',
+      },
+      prompt: '请基于 mini-corpus 生成 paper-list、evidence-matrix、notebook-timeline、research-report。',
+    });
+
+    assert.deepEqual(requestBody?.expectedArtifactTypes, ['paper-list', 'evidence-matrix', 'notebook-timeline', 'research-report']);
+    const uiState = requestBody?.uiState as Record<string, unknown>;
+    assert.deepEqual(uiState.expectedArtifactTypes, ['paper-list', 'evidence-matrix', 'notebook-timeline', 'research-report']);
+    assert.deepEqual(uiState.scopeCheck, {
+      source: 'structured-scenario-hint',
+      decisionOwner: 'AgentServer',
+      note: 'BioAgent does not route or reject current-turn intent by keyword; AgentServer decides from rawUserPrompt and context.',
+    });
+  });
+
+  it('does not mark repair-needed backend results as completed', async () => {
+    const events: string[] = [];
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      ok: true,
+      result: {
+        message: 'BioAgent runtime gateway needs repair before the report can be delivered.',
+        confidence: 0.2,
+        claimType: 'fact',
+        evidenceLevel: 'runtime',
+        uiManifest: [],
+        executionUnits: [{
+          id: 'EU-agentserver-literature',
+          tool: 'bioagent.workspace-runtime-gateway',
+          status: 'repair-needed',
+          failureReason: 'AgentServer returned taskFiles path-only reference but BioAgent could not read workspace file.',
+        }],
+        artifacts: [{
+          id: 'research-report',
+          type: 'research-report',
+          schemaVersion: '1',
+          metadata: {
+            status: 'repair-needed',
+            failureReason: 'Report was not produced.',
+          },
+          data: {},
+        }],
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    const response = await sendBioAgentToolMessage({
+      ...baseInput(),
+      scenarioId: 'literature-evidence-review',
+      agentName: 'Literature',
+      agentDomain: 'literature',
+      scenarioOverride: {
+        title: '文献证据评估',
+        description: '帮我检索arxiv上最新的agent相关论文，下载、阅读全文，并撰写总结报告',
+        skillDomain: 'literature',
+        scenarioMarkdown: '需要 paper-list、research-report。',
+        defaultComponents: ['paper-card-list', 'report-viewer', 'execution-unit-table'],
+        allowedComponents: ['paper-card-list', 'report-viewer', 'execution-unit-table'],
+        fallbackComponent: 'unknown-artifact-inspector',
+      },
+      prompt: '帮我检索今天arxiv上最新的agent相关论文，下载、阅读全文，并撰写总结报告',
+    }, {
+      onEvent: (event) => {
+        if (event.type === 'project-tool-done') events.push(String(event.detail || ''));
+      },
+    });
+
+    assert.equal(response.run.status, 'failed');
+    assert.equal(response.message.status, 'failed');
+    assert.match(response.message.content, /needs repair|未完成|repair/i);
+    assert.match(events.at(-1) || '', /未完成|repair-needed|failed-with-reason/);
+    assert.equal(response.executionUnits[0]?.status, 'repair-needed');
+  });
+
+  it('does not fail context answers that mention a prior repair-needed state', async () => {
+    const events: string[] = [];
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      ok: true,
+      result: {
+        message: '上一轮进入 repair-needed，因为 AgentServer 返回了 path-only taskFiles；本轮已基于已有 paper-list 完成摘要。',
+        confidence: 0.92,
+        claimType: 'context-summary',
+        evidenceLevel: 'agentserver-context',
+        uiManifest: [{ componentId: 'report-viewer', artifactRef: 'research-report', priority: 1 }],
+        executionUnits: [{
+          id: 'agentserver-direct-context',
+          tool: 'agentserver.direct-text',
+          status: 'done',
+        }],
+        artifacts: [{
+          id: 'research-report',
+          type: 'research-report',
+          schemaVersion: '1',
+          data: { markdown: '上一轮进入 repair-needed；本轮已完成上下文摘要。' },
+        }],
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    const response = await sendBioAgentToolMessage({
+      ...baseInput(),
+      scenarioId: 'literature-evidence-review',
+      agentName: 'Literature',
+      agentDomain: 'literature',
+      scenarioOverride: {
+        title: '文献证据评估',
+        description: '基于已有文献证据回答追问',
+        skillDomain: 'literature',
+        scenarioMarkdown: '需要 paper-list、research-report。',
+        defaultComponents: ['paper-card-list', 'report-viewer', 'execution-unit-table'],
+        allowedComponents: ['paper-card-list', 'report-viewer', 'execution-unit-table'],
+        fallbackComponent: 'unknown-artifact-inspector',
+      },
+      prompt: '不要生成新脚本，也不要检索新论文。请只解释上一轮为什么 repair-needed，并总结已有证据。',
+    }, {
+      onEvent: (event) => {
+        if (event.type === 'project-tool-done') events.push(String(event.detail || ''));
+      },
+    });
+
+    assert.equal(response.run.status, 'completed');
+    assert.equal(response.message.status, 'completed');
+    assert.doesNotMatch(events.at(-1) || '', /未完成/);
+    assert.match(response.message.content, /repair-needed/);
   });
 
   it('does not treat "do not use seed skill" repair prompts as local skill requests', async () => {
@@ -176,7 +342,7 @@ describe('sendBioAgentToolMessage routing', () => {
 
     assert.deepEqual(requestBody?.availableSkills, ['agentserver.generate.literature']);
     const uiState = requestBody?.uiState as Record<string, unknown>;
-    assert.equal(uiState.forceAgentServerGeneration, true);
+    assert.equal(uiState.agentDispatchPolicy, 'agentserver-decides');
   });
 
   it('lets a Scenario Builder domain override replace the built-in scenario route', async () => {
@@ -225,7 +391,7 @@ describe('sendBioAgentToolMessage routing', () => {
     assert.deepEqual(requestBody?.availableSkills, ['agentserver.generate.omics']);
     assert.deepEqual(requestBody?.scenarioPackageRef, { id: 'omics-differential-exploration', version: '1.0.0', source: 'built-in' });
     const uiState = requestBody?.uiState as Record<string, unknown>;
-    assert.equal(uiState.forceAgentServerGeneration, true);
+    assert.equal(uiState.agentDispatchPolicy, 'agentserver-decides');
   });
 
   it('does not leak stale local conversation into a clean package first run', async () => {

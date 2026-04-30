@@ -468,6 +468,11 @@ createServer(async (req, res) => {
     return;
   }
   if (url.pathname === '/api/bioagent/tools/run/stream' && req.method === 'POST') {
+    const controller = new AbortController();
+    let completed = false;
+    res.on('close', () => {
+      if (!completed && !res.writableEnded) controller.abort();
+    });
     res.writeHead(200, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
@@ -476,6 +481,7 @@ createServer(async (req, res) => {
     try {
       const body = await readJson(req);
       const result = await runBioAgentTool(body, {
+        signal: controller.signal,
         onEvent(event) {
           writeStreamEnvelope(res, { event });
         },
@@ -484,6 +490,7 @@ createServer(async (req, res) => {
     } catch (err) {
       writeStreamEnvelope(res, { error: err instanceof Error ? err.message : String(err) });
     } finally {
+      completed = true;
       res.end();
     }
     return;

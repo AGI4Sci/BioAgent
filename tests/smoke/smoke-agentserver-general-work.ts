@@ -68,7 +68,22 @@ with open(output_path, "w", encoding="utf-8") as handle:
 `;
 
 const server = createServer(async (req, res) => {
-  if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+  if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      data: {
+        session: { id: 'general-work-session', status: 'active' },
+        operationalGuidance: { summary: ['context healthy'], items: [] },
+        workLayout: { strategy: 'live_only', safetyPointReached: true, segments: [] },
+        workBudget: { status: 'healthy' },
+        recentTurns: [],
+        currentWorkEntries: [],
+      },
+    }));
+    return;
+  }
+  if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
     return;
@@ -78,8 +93,7 @@ const server = createServer(async (req, res) => {
   sawFullIntent = promptText.includes('阅读、总结并写成系统性的报告')
     && promptText.includes('research-report')
     && promptText.includes('paper-list');
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  const result = {
     ok: true,
     data: {
       run: {
@@ -97,7 +111,14 @@ const server = createServer(async (req, res) => {
         },
       },
     },
-  }));
+  };
+  if (req.url === '/api/agent-server/runs/stream') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(JSON.stringify({ result }) + '\n');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
 });
 
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

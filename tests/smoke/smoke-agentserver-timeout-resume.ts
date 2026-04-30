@@ -18,7 +18,22 @@ const generatedTask = [
 ].join('\n');
 
 const server = createServer(async (req, res) => {
-  if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+  if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      data: {
+        session: { id: 'mock-timeout-context', status: 'active' },
+        operationalGuidance: { summary: ['context healthy'], items: [] },
+        workLayout: { strategy: 'live_only', safetyPointReached: true, segments: [] },
+        workBudget: { status: 'healthy', approxCurrentWorkTokens: 80 },
+        recentTurns: [],
+        currentWorkEntries: [],
+      },
+    }));
+    return;
+  }
+  if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
     return;
@@ -28,29 +43,29 @@ const server = createServer(async (req, res) => {
   if (callCount === 1) {
     setTimeout(() => {
       if (res.destroyed) return;
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, data: { run: { id: 'late-run', status: 'completed', output: { result: 'late response' } } } }));
+      sendRunResponse(res, req.url, { ok: true, data: { run: { id: 'late-run', status: 'completed', output: { result: 'late response' } } } });
     }, 250);
     return;
   }
 
   const input = isRecord(body.input) ? body.input : {};
   secondPromptText = typeof input.text === 'string' ? input.text : '';
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  sendRunResponse(res, req.url, {
     ok: true,
     data: {
       run: {
         id: 'mock-agentserver-resumed-run',
         status: 'completed',
         output: {
-          taskFiles: [{ path: '.bioagent/tasks/resume.py', language: 'python', content: generatedTask }],
-          entrypoint: '.bioagent/tasks/resume.py',
-          expectedArtifacts: [],
+          result: {
+            taskFiles: [{ path: '.bioagent/tasks/resume.py', language: 'python', content: generatedTask }],
+            entrypoint: '.bioagent/tasks/resume.py',
+            expectedArtifacts: [],
+          },
         },
       },
     },
-  }));
+  });
 });
 
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -110,4 +125,18 @@ function readBody(req: AsyncIterable<Buffer | string>) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sendRunResponse(
+  res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
+  requestUrl: string | undefined,
+  result: Record<string, unknown>,
+) {
+  if (requestUrl === '/api/agent-server/runs/stream') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(JSON.stringify({ result }) + '\n');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
 }

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
@@ -29,9 +29,6 @@ with open(output_path, "w", encoding="utf-8") as handle:
   json.dump(payload, handle, indent=2)
 `;
 
-await mkdir(dirname(join(workspace, taskRel)), { recursive: true });
-await writeFile(join(workspace, taskRel), taskCode);
-
 const server = createServer(async (req, res) => {
   if (req.url !== '/api/agent-server/runs/stream' || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -49,10 +46,14 @@ const server = createServer(async (req, res) => {
           result: [
             '```json',
             '{',
-            '  "taskFiles": [{ "path": ".bioagent/tasks/text-fallback/generated-task.py", "content": "malformed inline content with an unescaped newline',
-            '" }],',
-            '  "entrypoint": { "path": ".bioagent/tasks/text-fallback/generated-task.py" }',
+            '  "taskFiles": [".bioagent/tasks/text-fallback/generated-task.py"],',
+            '  "entrypoint": "python3 .bioagent/tasks/text-fallback/generated-task.py {inputPath} {outputPath}"',
             '}',
+            '```',
+            '',
+            '```python',
+            `# ${taskRel}`,
+            taskCode,
             '```',
           ].join('\n'),
         },

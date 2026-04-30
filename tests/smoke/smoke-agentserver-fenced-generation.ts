@@ -14,13 +14,27 @@ await writeFile(join(workspace, '.bioagent', 'tasks', 'fenced_generation.py'), [
 ].join('\n'));
 
 const server = createServer(async (req, res) => {
-  if (req.url !== '/api/agent-server/runs' || req.method !== 'POST') {
+  if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      data: {
+        session: { id: 'mock-fenced-context', status: 'active' },
+        operationalGuidance: { summary: ['context healthy'], items: [] },
+        workLayout: { strategy: 'live_only', safetyPointReached: true, segments: [] },
+        workBudget: { status: 'healthy', approxCurrentWorkTokens: 80 },
+        recentTurns: [],
+        currentWorkEntries: [],
+      },
+    }));
+    return;
+  }
+  if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
     return;
   }
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  const result = {
     ok: true,
     data: {
       run: {
@@ -40,7 +54,14 @@ const server = createServer(async (req, res) => {
         },
       },
     },
-  }));
+  };
+  if (req.url === '/api/agent-server/runs/stream') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(JSON.stringify({ result }) + '\n');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
 });
 
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

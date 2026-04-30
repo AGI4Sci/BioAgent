@@ -64,9 +64,9 @@ for (const item of cases) {
   const unit = result.executionUnits[0] ?? {};
   assert.equal(unit.status, 'repair-needed');
   const routeDecision = unit.routeDecision as Record<string, unknown> | undefined;
-  assert.equal(routeDecision?.selectedSkill, item.skillId);
+  assert.equal(routeDecision?.selectedSkill, `agentserver.generate.${item.skillDomain}`);
   assert.equal(routeDecision?.selectedRuntime, 'agentserver-generation');
-  assert.match(String(unit.failureReason || ''), /AgentServer base URL is not configured|No validated local skill matched/i);
-  assert.ok(result.message || unit.failureReason, `${item.skillId} should explain why generation cannot run`);
-  console.log(`[ok] ${item.skillId} seed capability requires AgentServer generation`);
+  assert.match(String(unit.failureReason || ''), /AgentServer base URL is not configured|no AgentServer base URL is configured/i);
+  assert.ok(result.message || unit.failureReason, `${item.skillId} should require AgentServer reasoning before execution`);
+  console.log(`[ok] ${item.skillId} request is routed through AgentServer generation`);
 }

@@ -5,21 +5,24 @@ import { fileExists } from './workspace-task-runner.js';
 
 export async function appendTaskAttempt(workspacePath: string, record: TaskAttemptRecord) {
   const workspace = resolve(workspacePath || process.cwd());
+  const normalizedRecord = record.status === 'done'
+    ? { ...record, failureReason: undefined }
+    : record;
   const path = join(workspace, '.bioagent', 'task-attempts', `${safeName(record.id)}.json`);
   await mkdir(dirname(path), { recursive: true });
   const previous = await readAttempts(path);
   const attempts = [
-    ...previous.filter((item) => item.attempt !== record.attempt),
-    record,
+    ...previous.filter((item) => item.attempt !== normalizedRecord.attempt),
+    normalizedRecord,
   ].sort((left, right) => left.attempt - right.attempt);
   await writeFile(path, JSON.stringify({
-    id: record.id,
-    prompt: record.prompt,
-    skillDomain: record.skillDomain,
-    scenarioPackageRef: record.scenarioPackageRef,
-    skillPlanRef: record.skillPlanRef,
-    uiPlanRef: record.uiPlanRef,
-    routeDecision: record.routeDecision,
+    id: normalizedRecord.id,
+    prompt: normalizedRecord.prompt,
+    skillDomain: normalizedRecord.skillDomain,
+    scenarioPackageRef: normalizedRecord.scenarioPackageRef,
+    skillPlanRef: normalizedRecord.skillPlanRef,
+    uiPlanRef: normalizedRecord.uiPlanRef,
+    routeDecision: normalizedRecord.routeDecision,
     updatedAt: new Date().toISOString(),
     attempts,
   }, null, 2));

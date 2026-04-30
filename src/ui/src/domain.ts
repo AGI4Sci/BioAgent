@@ -18,6 +18,7 @@ export interface BioAgentMessage {
   createdAt: string;
   updatedAt?: string;
   status?: RunStatus;
+  tokenUsage?: AgentTokenUsage;
 }
 
 export interface SessionVersionRecord {
@@ -428,8 +429,20 @@ export interface AgentStreamEvent {
   type: string;
   label: string;
   detail?: string;
+  usage?: AgentTokenUsage;
   createdAt: string;
   raw?: unknown;
+}
+
+export interface AgentTokenUsage {
+  input?: number;
+  output?: number;
+  total?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  provider?: string;
+  model?: string;
+  source?: string;
 }
 
 export type AgentBackendId = 'codex' | 'openteam_agent' | 'claude-code' | 'hermes-agent' | 'openclaw';

@@ -244,7 +244,7 @@ function useRuntimeHealth(config: BioAgentConfig, libraryCount?: number) {
           : { id: 'workspace', label: 'Workspace Writer', status: 'offline', detail: config.workspaceWriterBaseUrl, recoverAction: '启动 npm run workspace:server 后刷新' },
         agentOnline
           ? { id: 'agentserver', label: 'AgentServer', status: 'online', detail: config.agentServerBaseUrl }
-          : { id: 'agentserver', label: 'AgentServer', status: 'optional', detail: config.agentServerBaseUrl, recoverAction: '需要通用生成/修复时启动 AgentServer；workspace/evolved skill 可复用已批准任务' },
+          : { id: 'agentserver', label: 'AgentServer', status: 'offline', detail: config.agentServerBaseUrl, recoverAction: '启动或修复 AgentServer；正常用户请求必须由 AgentServer/agent backend 判断回答' },
         modelHealth(config),
         {
           id: 'library',
@@ -2306,6 +2306,8 @@ function ChatPanel({
   const [errorText, setErrorText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [composerHeight, setComposerHeight] = useState(88);
+  const [streamEventsExpanded, setStreamEventsExpanded] = useState(true);
+  const [streamEventsHeight, setStreamEventsHeight] = useState(260);
   const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
   const activeSessionRef = useRef(session);
@@ -2314,6 +2316,7 @@ function ChatPanel({
   const messagesRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const resizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const streamResizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const messages = session.messages;
   const baseScenarioId = builtInScenarioIdForInstance(scenarioId, scenarioOverride);
   const scenario = scenarios.find((item) => item.id === baseScenarioId) ?? scenarios[0];
@@ -2323,6 +2326,7 @@ function ChatPanel({
   const activeRun = activeRunId ? session.runs.find((run) => run.id === activeRunId) : undefined;
   const visibleMessageStart = Math.max(0, messages.length - 24);
   const visibleMessages = messages.slice(visibleMessageStart);
+  const liveTokenUsage = latestTokenUsage(streamEvents);
 
   useEffect(() => {
     activeSessionRef.current = session;
@@ -2402,6 +2406,11 @@ function ChatPanel({
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      let latestRoundTokenUsage: AgentStreamEvent['usage'];
+      const handleStreamEvent = (event: AgentStreamEvent) => {
+        if (event.usage) latestRoundTokenUsage = event.usage;
+        setStreamEvents((current) => coalesceStreamEvents(current, event).slice(-32));
+      };
       const request = {
         sessionId: optimisticSession.sessionId,
         scenarioId,
@@ -2422,12 +2431,13 @@ function ChatPanel({
       let response: NormalizedAgentResponse;
       try {
         response = await sendBioAgentToolMessage(request, {
-          onEvent(event) {
-            setStreamEvents((current) => coalesceStreamEvents(current, event).slice(-32));
-          },
+          onEvent: handleStreamEvent,
         }, controller.signal);
       } catch (projectToolError) {
         const detail = projectToolError instanceof Error ? projectToolError.message : String(projectToolError);
+        if (/cancel|abort|已取消|cancelled|canceled/i.test(detail)) {
+          throw projectToolError;
+        }
         setStreamEvents((current) => [...current.slice(-32), {
           id: makeId('evt'),
           type: 'project-tool-fallback',
@@ -2437,15 +2447,16 @@ function ChatPanel({
           raw: { error: detail },
         }]);
         response = await sendAgentMessageStream(request, {
-          onEvent(event) {
-            setStreamEvents((current) => coalesceStreamEvents(current, event).slice(-32));
-          },
+          onEvent: handleStreamEvent,
         }, controller.signal);
       }
-      const mergedSession = mergeAgentResponse(activeSessionRef.current, response);
+      const responseWithUsage = latestRoundTokenUsage
+        ? { ...response, message: { ...response.message, tokenUsage: latestRoundTokenUsage } }
+        : response;
+      const mergedSession = mergeAgentResponse(activeSessionRef.current, responseWithUsage);
       onSessionChange(mergedSession);
       activeSessionRef.current = mergedSession;
-      onActiveRunChange(response.run.id);
+      onActiveRunChange(responseWithUsage.run.id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setErrorText(message);
@@ -2538,6 +2549,26 @@ function ChatPanel({
     };
     const handleUp = () => {
       resizeStateRef.current = null;
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  }
+
+  function beginStreamEventsResize(event: React.MouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    streamResizeStateRef.current = { startY: event.clientY, startHeight: streamEventsHeight };
+    const handleMove = (moveEvent: MouseEvent) => {
+      const state = streamResizeStateRef.current;
+      if (!state) return;
+      const delta = state.startY - moveEvent.clientY;
+      const nextHeight = Math.max(96, Math.min(Math.round(window.innerHeight * 0.62), state.startHeight + delta));
+      setStreamEventsHeight(nextHeight);
+      setStreamEventsExpanded(true);
+    };
+    const handleUp = () => {
+      streamResizeStateRef.current = null;
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
@@ -2677,6 +2708,11 @@ function ChatPanel({
                     run {messageRunId.replace(/^run-/, '').slice(0, 8)}
                   </button>
                 ) : null}
+                {message.tokenUsage ? (
+                  <span className="message-token-usage" title="本轮 AgentServer token usage">
+                    {formatAgentTokenUsage(message.tokenUsage)}
+                  </span>
+                ) : null}
                 {message.confidence ? <ConfidenceBar value={message.confidence} /> : null}
                 {message.evidence ? <EvidenceTag level={message.evidence} /> : null}
                 {message.claimType ? <ClaimTag type={message.claimType} /> : null}
@@ -2738,6 +2774,11 @@ function ChatPanel({
               <div className="message-meta">
                 <strong>{scenario.name}</strong>
                 <Badge variant="info">running</Badge>
+                {liveTokenUsage ? (
+                  <span className="message-token-usage" title="当前运行 token usage">
+                    {formatAgentTokenUsage(liveTokenUsage)}
+                  </span>
+                ) : null}
               </div>
               <p>{latestRunningEvent(streamEvents) || '正在规划、生成或执行 workspace task...'}</p>
             </div>
@@ -2769,22 +2810,46 @@ function ChatPanel({
       ) : null}
 
       {isSending || streamEvents.length ? (
-        <div className="stream-events">
+        <div
+          className={cx('stream-events', !streamEventsExpanded && 'collapsed')}
+          style={streamEventsExpanded ? { height: `${streamEventsHeight}px` } : undefined}
+        >
+          {streamEventsExpanded ? (
+            <div className="stream-events-resize-handle" onMouseDown={beginStreamEventsResize} title="拖拽调整运行观察高度" />
+          ) : null}
           <div className="stream-events-head">
             <span>Agent Backend 运行观察</span>
-            {guidanceQueue.length ? <Badge variant="warning">{guidanceQueue.length} 条引导排队</Badge> : null}
-            <Badge variant="muted">{config.agentBackend}</Badge>
+            <div className="stream-events-actions">
+              {guidanceQueue.length ? <Badge variant="warning">{guidanceQueue.length} 条引导排队</Badge> : null}
+              {liveTokenUsage ? <Badge variant="muted">{formatAgentTokenUsage(liveTokenUsage)}</Badge> : null}
+              <Badge variant="muted">{config.agentBackend}</Badge>
+              <button
+                type="button"
+                className="stream-events-toggle"
+                onClick={() => setStreamEventsExpanded((value) => !value)}
+                title={streamEventsExpanded ? '收缩运行观察' : '展开运行观察'}
+              >
+                {streamEventsExpanded ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+              </button>
+            </div>
           </div>
-          <div className="stream-events-list">
-            {streamEvents.slice(-24).map((event) => (
-              <div className={cx('stream-event', streamEventUiClass(event.type))} key={event.id}>
-                <Badge variant={streamEventBadge(event.type)}>{event.label}</Badge>
-                <span className="stream-event-type">{event.type}</span>
-                {event.detail ? <span className="stream-event-detail">{event.detail}</span> : null}
-                <button type="button" onClick={() => void navigator.clipboard?.writeText(JSON.stringify(event.raw ?? { type: event.type, label: event.label, detail: event.detail }, null, 2))}>复制 raw</button>
-              </div>
-            ))}
-          </div>
+          {streamEventsExpanded ? (
+            <div className="stream-events-list">
+              {streamEvents.slice(-24).map((event) => {
+                const readableDetail = readableStreamEventDetail(event);
+                const usageDetail = formatAgentTokenUsage(event.usage);
+                return (
+                  <div className={cx('stream-event', streamEventUiClass(event.type))} key={event.id}>
+                    <Badge variant={streamEventBadge(event.type)}>{event.label}</Badge>
+                    <span className="stream-event-type">{streamEventTypeLabel(event.type)}</span>
+                    {usageDetail ? <span className="stream-event-usage">{usageDetail}</span> : null}
+                    {readableDetail ? <span className="stream-event-detail">{readableDetail}</span> : null}
+                    <button type="button" onClick={() => void navigator.clipboard?.writeText(JSON.stringify(event.raw ?? { type: event.type, label: event.label, detail: event.detail }, null, 2))}>复制 raw</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -2887,12 +2952,31 @@ function normalizeRunPrompt(value: string) {
 }
 
 function latestRunningEvent(events: AgentStreamEvent[]) {
-  return [...events].reverse().find((event) => event.detail)?.detail;
+  const latest = [...events].reverse().find((event) => readableStreamEventDetail(event));
+  return latest ? readableStreamEventDetail(latest) : undefined;
+}
+
+function latestTokenUsage(events: AgentStreamEvent[]) {
+  return [...events].reverse().find((event) => event.usage)?.usage;
+}
+
+function formatAgentTokenUsage(usage: AgentStreamEvent['usage'] | undefined) {
+  if (!usage) return '';
+  const parts = [
+    usage.input !== undefined ? `in ${usage.input}` : '',
+    usage.output !== undefined ? `out ${usage.output}` : '',
+    usage.total !== undefined ? `total ${usage.total}` : '',
+    usage.cacheRead !== undefined ? `cache read ${usage.cacheRead}` : '',
+    usage.cacheWrite !== undefined ? `cache write ${usage.cacheWrite}` : '',
+  ].filter(Boolean);
+  const model = [usage.provider, usage.model].filter(Boolean).join('/');
+  const suffix = [model, usage.source].filter(Boolean).join(' ');
+  return `tokens ${parts.join(', ')}${suffix ? ` (${suffix})` : ''}`;
 }
 
 function coalesceStreamEvents(events: AgentStreamEvent[], next: AgentStreamEvent) {
   if (next.type !== 'text-delta') return [...events, next];
-  const detail = next.detail?.trim();
+  const detail = normalizeStreamTextDelta(next.detail).trim();
   if (!detail) return events;
   const last = events.at(-1);
   if (!last || last.type !== 'text-delta') return [...events, { ...next, detail }];
@@ -2916,9 +3000,62 @@ function coalesceStreamEvents(events: AgentStreamEvent[], next: AgentStreamEvent
 function mergeTextDeltaDetail(previous: string, next: string) {
   if (!previous.trim()) return next;
   if (!next.trim()) return previous;
-  if (/^[,.;:!?，。；：！？)\]}]/.test(next)) return `${previous}${next}`;
+  if (/^[,.;:!?，。；：！？)\]}]/.test(next)) return tidyReadableText(`${previous}${next}`);
   if (/[(\[{]$/.test(previous)) return `${previous}${next}`;
-  return `${previous} ${next}`.replace(/\s+/g, ' ').trim();
+  return tidyReadableText(`${previous} ${next}`);
+}
+
+function streamEventTypeLabel(type: string) {
+  if (type === 'text-delta') return '生成内容';
+  if (type === 'tool-call') return '工具调用';
+  if (type === 'tool-result') return '工具结果';
+  if (type === 'run-plan') return '执行计划';
+  if (type === 'stage-start') return '阶段开始';
+  return type;
+}
+
+function readableStreamEventDetail(event: AgentStreamEvent) {
+  if (!event.detail) return '';
+  const detail = event.type === 'text-delta'
+    ? normalizeStreamTextDelta(event.detail)
+    : tidyReadableText(event.detail);
+  const usageDetail = formatAgentTokenUsage(event.usage);
+  return usageDetail ? detail.replace(` | ${usageDetail}`, '').replace(usageDetail, '').trim() : detail;
+}
+
+function normalizeStreamTextDelta(value?: string) {
+  if (!value) return '';
+  const extracted = extractProtocolText(value);
+  return tidyReadableText(extracted || value);
+}
+
+function extractProtocolText(value: string) {
+  const parts: string[] = [];
+  const textFieldPattern = /"text"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+  for (const match of value.matchAll(textFieldPattern)) {
+    try {
+      parts.push(JSON.parse(`"${match[1]}"`) as string);
+    } catch {
+      parts.push(match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'));
+    }
+  }
+  if (!parts.length) return '';
+  const protocolFragments = value.match(/"protocolVersion"\s*:\s*"v\d+"/g)?.length ?? 0;
+  return protocolFragments || parts.length > 1 ? parts.join('') : '';
+}
+
+function tidyReadableText(value: string) {
+  return value
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]{2,}/g, ' ').trim())
+    .join('\n')
+    .replace(/([A-Za-z0-9\u4e00-\u9fff])\n(?=[A-Za-z0-9\u4e00-\u9fff])/g, '$1 ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 function streamEventBadge(type: string): 'info' | 'warning' | 'danger' | 'success' | 'muted' {
@@ -3361,6 +3498,8 @@ function Workbench({
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const [mobilePane, setMobilePane] = useState<'builder' | 'chat' | 'results'>('chat');
   const [activeRunId, setActiveRunId] = useState<string | undefined>();
+  const [chatColumnWidth, setChatColumnWidth] = useState(42);
+  const workbenchResizeRef = useRef<{ startX: number; startWidth: number; gridWidth: number } | null>(null);
   const defaultResultSlots = useMemo(
     () => compileScenarioIRFromSelection(defaultElementSelectionForScenario(baseScenarioId, runtimeScenario)).uiPlan.slots,
     [baseScenarioId, runtimeScenario],
@@ -3370,6 +3509,31 @@ function Workbench({
       setActiveRunId(undefined);
     }
   }, [activeRunId, session.runs]);
+
+  function beginWorkbenchResize(event: React.MouseEvent<HTMLDivElement>) {
+    const grid = event.currentTarget.parentElement;
+    if (!grid) return;
+    event.preventDefault();
+    workbenchResizeRef.current = {
+      startX: event.clientX,
+      startWidth: chatColumnWidth,
+      gridWidth: grid.getBoundingClientRect().width,
+    };
+    const handleMove = (moveEvent: MouseEvent) => {
+      const state = workbenchResizeRef.current;
+      if (!state) return;
+      const deltaPercent = ((moveEvent.clientX - state.startX) / state.gridWidth) * 100;
+      setChatColumnWidth(Math.max(28, Math.min(72, state.startWidth + deltaPercent)));
+    };
+    const handleUp = () => {
+      workbenchResizeRef.current = null;
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  }
+
   return (
     <main className="workbench">
       <div className="workbench-header">
@@ -3415,7 +3579,10 @@ function Workbench({
         ))}
         <code>fallback={runtimeScenario.fallbackComponent}</code>
       </div>
-      <div className={cx('workbench-grid', resultsCollapsed && 'results-collapsed')}>
+      <div
+        className={cx('workbench-grid', resultsCollapsed && 'results-collapsed')}
+        style={!resultsCollapsed ? { gridTemplateColumns: `minmax(360px, ${chatColumnWidth}%) 10px minmax(360px, 1fr)` } : undefined}
+      >
         <div className={cx('mobile-pane', mobilePane !== 'chat' && 'mobile-hidden')}>
           <ChatPanel
             scenarioId={scenarioId}
@@ -3444,6 +3611,16 @@ function Workbench({
             onMarkReusableRun={(runId) => onMarkReusableRun(scenarioId, runId)}
           />
         </div>
+        {!resultsCollapsed ? (
+          <div
+            className="workbench-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整聊天区和结果区宽度"
+            onMouseDown={beginWorkbenchResize}
+            title="拖拽调整聊天区和结果区宽度"
+          />
+        ) : null}
         <div className={cx('mobile-pane', mobilePane !== 'results' && 'mobile-hidden')}>
           <ResultsRenderer
             scenarioId={baseScenarioId}
@@ -4813,8 +4990,8 @@ function MetricGrid({ metrics = {} }: { metrics?: Record<string, unknown> }) {
 
 function EvidenceMatrix({ claims }: { claims: EvidenceClaim[] }) {
   const [expandedClaim, setExpandedClaim] = useState<string | null>(null);
-  const rows = claims.map((claim) => ({
-    id: claim.id,
+  const rows = claims.map((claim, index) => ({
+    id: `${claim.id || 'claim'}-${index}`,
     claim: claim.text,
     support: `${claim.supportingRefs.length} 条支持`,
     oppose: `${claim.opposingRefs.length} 条反向`,
@@ -4843,9 +5020,9 @@ function EvidenceMatrix({ claims }: { claims: EvidenceClaim[] }) {
                 </button>
                 {expandedClaim === row.id ? (
                   <div className="source-list">
-                    {row.supportingRefs.map((ref) => <code key={`support-${ref}`}>+ {ref}</code>)}
-                    {row.opposingRefs.map((ref) => <code key={`oppose-${ref}`}>- {ref}</code>)}
-                    {row.dependencyRefs.map((ref) => <code key={`dependency-${ref}`}>depends-on {ref}</code>)}
+                    {row.supportingRefs.map((ref, index) => <code key={`support-${row.id}-${ref}-${index}`}>+ {ref}</code>)}
+                    {row.opposingRefs.map((ref, index) => <code key={`oppose-${row.id}-${ref}-${index}`}>- {ref}</code>)}
+                    {row.dependencyRefs.map((ref, index) => <code key={`dependency-${row.id}-${ref}-${index}`}>depends-on {ref}</code>)}
                   </div>
                 ) : null}
               </>

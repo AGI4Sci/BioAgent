@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -15,18 +15,17 @@ const result = await runWorkspaceRuntimeGateway({
 assert.equal(result.artifacts.length, 0);
 assert.equal(result.executionUnits.length, 1);
 assert.equal(result.executionUnits[0].status, 'repair-needed');
-assert.match(String(result.executionUnits[0].failureReason || result.message), /matrixRef|metadataRef|Task exited/);
-assert.ok(String(result.executionUnits[0].codeRef || '').startsWith('.bioagent/tasks/omics-'));
-assert.ok(String(result.executionUnits[0].stderrRef || '').startsWith('.bioagent/logs/omics-'));
+assert.match(String(result.executionUnits[0].failureReason || result.message), /AgentServer|base URL|generation/i);
+assert.equal(result.executionUnits[0].codeRef, undefined);
+assert.equal(result.executionUnits[0].stderrRef, undefined);
 
 const attemptsDir = join(workspace, '.bioagent', 'task-attempts');
-const attemptFiles = await readdir(attemptsDir);
-assert.equal(attemptFiles.length, 1);
-const attemptHistory = JSON.parse(await readFile(join(attemptsDir, attemptFiles[0]), 'utf8'));
-assert.equal(attemptHistory.attempts.length, 1);
-assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
-assert.equal(attemptHistory.attempts[0].attempt, 1);
-assert.ok(attemptHistory.attempts[0].codeRef);
-assert.ok(attemptHistory.attempts[0].stderrRef);
+let attemptFiles: string[] = [];
+try {
+  attemptFiles = await readdir(attemptsDir);
+} catch {
+  attemptFiles = [];
+}
+assert.equal(attemptFiles.length, 0);
 
-console.log('[ok] repair-needed smoke writes failed payload and attempt history');
+console.log('[ok] repair-needed smoke does not fabricate fixed omics task output without AgentServer');

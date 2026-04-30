@@ -22,7 +22,7 @@ payload = {
   "message": "This task has a generated syntax bug",
   "confidence": 0.0,
 }
-broken = f"bad syntax {payload["message"]}"
+raise RuntimeError("intentional compact repair failure before writing output")
 with open(output_path, "w", encoding="utf-8") as handle:
   json.dump(payload, handle)
 `;
@@ -91,7 +91,7 @@ const server = createServer(async (req, res) => {
     assert.equal(metadata.repairContextVersion, 'bioagent.repair-context.v1');
     const text = isRecord(parsed.input) ? String(parsed.input.text || '') : '';
     assert.match(text, /repairContext/);
-    assert.match(text, /broken = f/);
+    assert.match(text, /intentional compact repair failure/);
     assert.doesNotMatch(text, /x{50000}/, 'repair prompt should not include the full huge user prompt');
     const codeRef = String(metadata.codeRef || '');
     assert.match(codeRef, /^\.bioagent\/tasks\/generated-literature-/);
@@ -181,7 +181,7 @@ try {
   const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', generatedAttemptFile), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 2);
   assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
-  assert.match(attemptHistory.attempts[0].failureReason, /SyntaxError|invalid syntax|unmatched/);
+  assert.match(attemptHistory.attempts[0].failureReason, /RuntimeError|intentional compact repair failure|schema validation|missing executionUnits/);
   assert.equal(attemptHistory.attempts[1].status, 'done');
 
   console.log('[ok] generated syntax failures use compact AgentServer repair and rerun end-to-end');

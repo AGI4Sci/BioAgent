@@ -145,6 +145,45 @@ describe('normalizeAgentResponse', () => {
     assert.equal(response.artifacts[0].type, 'research-report');
   });
 
+  it('normalizes text-like artifact string data without changing array artifacts', () => {
+    const response = normalizeAgentResponse('literature-evidence-review', 'artifact shapes', {
+      ok: true,
+      data: {
+        run: {
+          id: 'run-artifact-shapes',
+          status: 'completed',
+          output: {
+            result: JSON.stringify({
+              message: 'artifacts ready',
+              confidence: 0.8,
+              claimType: 'fact',
+              evidenceLevel: 'runtime',
+              artifacts: [{
+                id: 'research-report',
+                type: 'research-report',
+                schemaVersion: '1',
+                data: '# Report\n\nBody',
+              }, {
+                id: 'paper-list',
+                type: 'paper-list',
+                schemaVersion: '1',
+                data: [{ title: 'Paper A' }, { title: 'Paper B' }],
+              }],
+            }),
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(response.artifacts[0].data, {
+      markdown: '# Report\n\nBody',
+      text: '# Report\n\nBody',
+      report: '# Report\n\nBody',
+    });
+    assert.ok(Array.isArray(response.artifacts[1].data));
+    assert.equal((response.artifacts[1].data as unknown[]).length, 2);
+  });
+
   it('preserves every skillDomain default artifact contract through normalization', () => {
     (Object.keys(SCENARIO_SPECS) as ScenarioId[]).forEach((scenarioId) => {
       const skillDomain = SCENARIO_SPECS[scenarioId];

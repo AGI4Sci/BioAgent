@@ -138,7 +138,7 @@ try {
   const acceptedProposalBefore = JSON.parse(await readFile(acceptedProposalPath, 'utf8'));
   const evolvedTaskPath = join(workspace, '.bioagent', 'evolved-skills', accepted.id, basename(accepted.entrypoint.path || 'task.py'));
   await writeFile(evolvedTaskPath, 'import sys\nraise RuntimeError("forced evolved skill failure")\n', 'utf8');
-  const failedEvolvedRun = await runWorkspaceRuntimeGateway({
+  const routedEvolvedRun = await runWorkspaceRuntimeGateway({
     skillDomain: 'literature',
     prompt: 'custom self evolving literature workflow with no matching seed skill',
     workspacePath: workspace,
@@ -146,8 +146,9 @@ try {
     expectedArtifactTypes: ['paper-list'],
     artifacts: [],
   });
-  assert.equal(failedEvolvedRun.executionUnits[0]?.status, 'repair-needed');
-  assert.match(String(failedEvolvedRun.executionUnits[0]?.failureReason || failedEvolvedRun.reasoningTrace), /forced evolved skill failure/);
+  assert.equal(routedEvolvedRun.executionUnits[0]?.status, 'repair-needed');
+  assert.match(String(routedEvolvedRun.executionUnits[0]?.failureReason || routedEvolvedRun.reasoningTrace), /AgentServer base URL is not configured|no AgentServer base URL/i);
+  assert.doesNotMatch(String(routedEvolvedRun.executionUnits[0]?.failureReason || routedEvolvedRun.reasoningTrace), /forced evolved skill failure/);
   const acceptedProposalAfter = JSON.parse(await readFile(acceptedProposalPath, 'utf8'));
   assert.equal(acceptedProposalAfter.status, 'accepted');
   assert.deepEqual(acceptedProposalAfter.promotionHistory, acceptedProposalBefore.promotionHistory);

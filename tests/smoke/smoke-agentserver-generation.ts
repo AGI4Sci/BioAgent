@@ -13,6 +13,8 @@ let sawPriorAttempt = false;
 let sawScopeSummary = false;
 let sawContextEnvelope = false;
 let sawContinuationRefs = false;
+let sawFullContextFallback = false;
+let contextEndpointUnavailable = false;
 let requestCount = 0;
 const agentIds: string[] = [];
 const promptLengths: number[] = [];
@@ -76,6 +78,26 @@ with open(output_path, "w", encoding="utf-8") as handle:
 `;
 
 const server = createServer(async (req, res) => {
+  if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    if (contextEndpointUnavailable) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'context unavailable' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      data: {
+        session: { id: 'session-smoke-context', status: 'active' },
+        operationalGuidance: { summary: ['context healthy'], items: [] },
+        workLayout: { strategy: 'live_only', safetyPointReached: true, segments: [] },
+        workBudget: { status: 'healthy', approxCurrentWorkTokens: 120 },
+        recentTurns: [],
+        currentWorkEntries: [],
+      },
+    }));
+    return;
+  }
   if (!['/api/agent-server/runs', '/api/agent-server/runs/stream'].includes(String(req.url)) || req.method !== 'POST') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'not found' }));
@@ -88,7 +110,7 @@ const server = createServer(async (req, res) => {
   assert.equal(metadata.skillId, 'agentserver.generate.literature');
   assert.equal(metadata.contextEnvelopeVersion, 'bioagent.context-envelope.v1');
   const agentId = String(isRecord(body.agent) ? body.agent.id : '');
-  assert.match(agentId, /^bioagent-literature-task-generation-/);
+  assert.match(agentId, /^bioagent-literature-[a-f0-9]{12}$/);
   agentIds.push(agentId);
   const promptText = isRecord(body.input) && typeof body.input.text === 'string' ? body.input.text : '';
   promptLengths.push(promptText.length);
@@ -102,7 +124,7 @@ const server = createServer(async (req, res) => {
   if (requestCount === 2) {
     const contextPolicy = isRecord(body.contextPolicy) ? body.contextPolicy : {};
     assert.equal(metadata.contextMode, 'delta');
-    assert.equal(contextPolicy.includeRecentTurns, false);
+    assert.equal(contextPolicy.includeRecentTurns, true);
     sawContinuationRefs = promptText.includes('Where did the generated files go?')
       && promptText.includes('"mode": "delta"')
       && promptText.includes('"workspaceTreeHash"')
@@ -112,6 +134,96 @@ const server = createServer(async (req, res) => {
       && promptText.includes('"stdoutRef"')
       && promptText.includes('"stderrRef"')
       && promptText.includes('"outputRef"');
+    const result = {
+      ok: true,
+      data: {
+        run: {
+          id: 'mock-agentserver-generation-run-2',
+          status: 'completed',
+          output: {
+            result: {
+              message: 'The generated task code is under .bioagent/tasks/generated-literature.py and the executed archive/output/log refs are listed in recentExecutionRefs.',
+              confidence: 0.9,
+              claimType: 'context-answer',
+              evidenceLevel: 'agentserver-context',
+              reasoningTrace: 'AgentServer generation endpoint answered from existing context without a separate BioAgent intent route.',
+              claims: [],
+              uiManifest: [{ componentId: 'report-viewer', artifactRef: 'research-report', priority: 1 }],
+              executionUnits: [{
+                id: 'agentserver-direct-context',
+                tool: 'agentserver.direct-context',
+                status: 'done',
+              }],
+              artifacts: [{
+                id: 'research-report',
+                type: 'research-report',
+                schemaVersion: '1',
+                data: {
+                  markdown: 'The generated task code is under .bioagent/tasks/generated-literature.py and the executed archive/output/log refs are listed in recentExecutionRefs.',
+                },
+              }],
+            },
+          },
+        },
+      },
+    };
+    if (req.url === '/api/agent-server/runs/stream') {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      res.end(JSON.stringify({ result }) + '\n');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+    return;
+  }
+  if (requestCount === 3) {
+    assert.equal(metadata.contextMode, 'full');
+    sawFullContextFallback = promptText.includes('"mode": "full"')
+      && promptText.includes('"workspaceTreeSummary"')
+      && promptText.includes('"decisionOwner": "AgentServer"')
+      && promptText.includes('"agentServerCoreSnapshotAvailable": false')
+      && promptText.includes('"currentUserRequest": "Continue from prior refs even when AgentServer Core context is temporarily unavailable."');
+    const result = {
+      ok: true,
+      data: {
+        run: {
+          id: 'mock-agentserver-generation-run-3',
+          status: 'completed',
+          output: {
+            result: {
+              message: 'Continued from full BioAgent handoff after AgentServer Core context was unavailable.',
+              confidence: 0.91,
+              claimType: 'context-answer',
+              evidenceLevel: 'agentserver-full-handoff',
+              reasoningTrace: 'AgentServer received full handoff instead of delta context.',
+              claims: [],
+              uiManifest: [{ componentId: 'report-viewer', artifactRef: 'research-report', priority: 1 }],
+              executionUnits: [{
+                id: 'agentserver-full-context-fallback',
+                tool: 'agentserver.direct-context',
+                status: 'done',
+              }],
+              artifacts: [{
+                id: 'research-report',
+                type: 'research-report',
+                schemaVersion: '1',
+                data: {
+                  markdown: 'Full BioAgent context handoff preserved prior refs while AgentServer Core context was unavailable.',
+                },
+              }],
+            },
+          },
+        },
+      },
+    };
+    if (req.url === '/api/agent-server/runs/stream') {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      res.end(JSON.stringify({ result }) + '\n');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+    return;
   }
   sawGenerationRequest = true;
 
@@ -194,6 +306,9 @@ try {
   assert.equal(sawContextEnvelope, true);
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].type, 'paper-list');
+  const generatedArtifactMetadata = isRecord(result.artifacts[0].metadata) ? result.artifacts[0].metadata : {};
+  assert.match(String(generatedArtifactMetadata.artifactRef), /^\.bioagent\/artifacts\/session-smoke-context-paper-list-/);
+  assert.equal(typeof generatedArtifactMetadata.outputRef, 'string');
   assert.equal(result.executionUnits.length, 1);
   assert.equal(result.executionUnits[0].status, 'done');
   assert.equal(result.executionUnits[0].agentServerGenerated, true);
@@ -202,6 +317,8 @@ try {
   assert.match(String(result.reasoningTrace), /Generated a literature fallback task/);
 
   const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
+  const artifactFiles = await readdir(join(workspace, '.bioagent', 'artifacts'));
+  assert.ok(artifactFiles.some((file) => file.includes('session-smoke-context-paper-list')));
   assert.equal(attemptFiles.length, 2);
   const generatedAttemptFile = attemptFiles.find((file) => file.startsWith('generated-literature-'));
   assert.ok(generatedAttemptFile);
@@ -232,12 +349,39 @@ try {
     },
   });
 
-  assert.equal(continuation.executionUnits[0].tool, 'bioagent.context-ref-inspector');
+  assert.notEqual(continuation.executionUnits[0].tool, 'bioagent.context-ref-inspector');
   assert.equal(continuation.executionUnits[0].status, 'done');
   assert.match(continuation.message, /generated-literature/);
-  assert.equal(requestCount, 1);
+  assert.equal(requestCount, 2);
 
-  console.log('[ok] agentserver generation smoke writes generated task code, carries refs into turn two, and reuses the session agent key');
+  contextEndpointUnavailable = true;
+  const fallbackContinuation = await runWorkspaceRuntimeGateway({
+    skillDomain: 'literature',
+    prompt: 'Continue from prior refs even when AgentServer Core context is temporarily unavailable.',
+    workspacePath: workspace,
+    agentServerBaseUrl: baseUrl,
+    availableSkills: ['missing.skill'],
+    expectedArtifactTypes: ['research-report'],
+    artifacts: result.artifacts as Array<Record<string, unknown>>,
+    uiState: {
+      sessionId: 'session-smoke-context',
+      currentPrompt: 'Continue from prior refs even when AgentServer Core context is temporarily unavailable.',
+      recentConversation: [
+        'user: create a generated literature task',
+        'assistant: generated task code and produced a paper-list artifact',
+        'user: Continue from prior refs even when AgentServer Core context is temporarily unavailable.',
+      ],
+      recentExecutionRefs: [attemptHistory.attempts[0]],
+      forceAgentServerGeneration: true,
+    },
+  });
+
+  assert.equal(sawFullContextFallback, true);
+  assert.equal(fallbackContinuation.executionUnits[0].status, 'done');
+  assert.match(fallbackContinuation.reasoningTrace, /full handoff/i);
+  assert.equal(requestCount, 3);
+
+  console.log('[ok] agentserver generation smoke writes generated task code, carries refs into turn two through the general generation endpoint, and reuses the session agent key');
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

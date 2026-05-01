@@ -2,11 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { ChevronDown, ChevronUp, CircleStop, Clock, Copy, Download, MessageSquare, Plus, Quote, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
 import { scenarios, type ScenarioId } from '../data';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
-import { compactAgentContext, sendAgentMessageStream } from '../api/agentClient';
+import { compactAgentContext, sendAgentMessageStream, validateSemanticTurnAcceptance } from '../api/agentClient';
 import { sendBioAgentToolMessage } from '../api/bioagentToolsClient';
+import { buildContextCompactionFailureResult, buildContextCompactionOutcome } from '../contextCompaction';
+import { buildContextWindowMeterModel, estimateContextWindowState, latestContextWindowState, shouldAutoCompact, shouldStartContextCompaction } from '../contextWindow';
 import { builtInScenarioPackageRef } from '../scenarioCompiler/scenarioPackage';
 import { resetSession } from '../sessionStore';
-import { acceptAndRepairAgentResponse, buildUserGoalSnapshot } from '../turnAcceptance';
+import { acceptAndRepairAgentResponse, buildBackendAcceptanceRepairPrompt, buildUserGoalSnapshot, shouldRunBackendAcceptanceRepair } from '../turnAcceptance';
 import { makeId, nowIso, type AgentContextWindowState, type AgentStreamEvent, type BioAgentConfig, type BioAgentMessage, type BioAgentReference, type BioAgentRun, type BioAgentSession, type NormalizedAgentResponse, type ObjectReference, type RuntimeExecutionUnit, type ScenarioInstanceId, type ScenarioRuntimeOverride, type TimelineEventRecord } from '../domain';
 import { exportJsonFile } from './exportUtils';
 import { ActionButton, Badge, ClaimTag, ConfidenceBar, EvidenceTag, IconButton, cx } from './uiPrimitives';
@@ -110,6 +112,7 @@ export function ChatPanel({
   const autoScrollRef = useRef(true);
   const resizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const streamResizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const contextCompactionInFlightRef = useRef(false);
   const messages = session.messages;
   const baseScenarioId = builtInScenarioIdForInstance(scenarioId, scenarioOverride);
   const scenario = scenarios.find((item) => item.id === baseScenarioId) ?? scenarios[0];
@@ -218,7 +221,7 @@ export function ChatPanel({
     if (shouldAutoCompact(contextWindowState)) {
       await runContextCompaction('auto-threshold-before-send', prompt, session, pendingReferences);
     }
-    await runPrompt(prompt, session, pendingReferences);
+    await runPrompt(prompt, activeSessionRef.current, pendingReferences);
   }
 
   function addPendingReference(reference: BioAgentReference) {
@@ -333,15 +336,38 @@ export function ChatPanel({
           goalSnapshot,
         },
       };
-      const acceptedResponse = acceptAndRepairAgentResponse({
+      const deterministicAcceptedResponse = acceptAndRepairAgentResponse({
         snapshot: goalSnapshot,
         response: responseWithReferences,
         session: activeSessionRef.current,
       });
-      const mergedSession = mergeAgentResponse(activeSessionRef.current, acceptedResponse);
+      const semanticAcceptance = await validateSemanticTurnAcceptance(request, {
+        snapshot: goalSnapshot,
+        response: deterministicAcceptedResponse,
+        deterministicAcceptance: deterministicAcceptedResponse.message.acceptance!,
+      }, controller.signal);
+      const acceptedResponse = semanticAcceptance
+        ? acceptAndRepairAgentResponse({
+          snapshot: goalSnapshot,
+          response: deterministicAcceptedResponse,
+          session: activeSessionRef.current,
+          semanticAcceptance,
+        })
+        : deterministicAcceptedResponse;
+      const finalResponse = await maybeRunBackendAcceptanceRepair({
+        prompt,
+        references,
+        request,
+        acceptedResponse,
+        goalSnapshot,
+        sessionBeforeMerge: activeSessionRef.current,
+        onStreamEvent: handleStreamEvent,
+        signal: controller.signal,
+      });
+      const mergedSession = mergeAgentResponse(activeSessionRef.current, finalResponse);
       onSessionChange(mergedSession);
       activeSessionRef.current = mergedSession;
-      onActiveRunChange(acceptedResponse.run.id);
+      onActiveRunChange(finalResponse.run.id);
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : String(err);
       const wasInterrupted = controller.signal.aborted || /cancel|abort|已取消|cancelled|canceled/i.test(rawMessage);
@@ -440,7 +466,18 @@ export function ChatPanel({
   }
 
   async function runContextCompaction(reason: string, prompt = input.trim(), baseSession = activeSessionRef.current, references = pendingReferences) {
+    if (!shouldStartContextCompaction({
+      state: contextWindowState,
+      running: isSending,
+      inFlight: contextCompactionInFlightRef.current,
+      reason,
+    })) {
+      if (reason === 'auto-threshold-before-send' && isSending) setPendingCompact(true);
+      return false;
+    }
+    contextCompactionInFlightRef.current = true;
     const startedAt = nowIso();
+    const beforeState = contextWindowState;
     const request = {
       sessionId: baseSession.sessionId,
       scenarioId,
@@ -475,27 +512,42 @@ export function ChatPanel({
       },
       createdAt: startedAt,
     }]);
-    const result = await compactAgentContext(request, reason, abortRef.current?.signal);
-    const completedAt = nowIso();
-    setStreamEvents((current) => [...current.slice(-31), {
-      id: makeId('evt'),
-      type: 'contextCompaction',
-      label: '上下文压缩',
-      detail: result?.message || (result?.status === 'completed' ? '上下文压缩完成' : `上下文压缩 ${result?.status ?? 'skipped'}`),
-      contextCompaction: {
-        ...result,
-        completedAt: result?.completedAt ?? completedAt,
-        lastCompactedAt: result?.lastCompactedAt ?? (result?.status === 'completed' ? completedAt : contextWindowState.lastCompactedAt),
-      },
-      contextWindowState: {
-        ...contextWindowState,
-        pendingCompact: false,
-        lastCompactedAt: result?.lastCompactedAt ?? (result?.status === 'completed' ? completedAt : contextWindowState.lastCompactedAt),
-        compactCapability: result?.compactCapability ?? contextWindowState.compactCapability,
-      },
-      createdAt: completedAt,
-      raw: result,
-    }]);
+    try {
+      let result: NonNullable<AgentStreamEvent['contextCompaction']>;
+      try {
+        result = await compactAgentContext(request, reason, abortRef.current?.signal);
+      } catch (error) {
+        result = buildContextCompactionFailureResult({
+          error,
+          reason,
+          backend: config.agentBackend,
+          compactCapability: beforeState.compactCapability,
+          startedAt,
+        });
+      }
+      const completedAt = nowIso();
+      const outcome = buildContextCompactionOutcome({
+        eventId: makeId('evt'),
+        messageId: makeId('msg'),
+        result,
+        beforeState,
+        reason,
+        startedAt,
+        completedAt,
+        fallbackBackend: config.agentBackend,
+      });
+      setStreamEvents((current) => [...current.slice(-31), outcome.event]);
+      const nextSession: BioAgentSession = {
+        ...activeSessionRef.current,
+        messages: [...activeSessionRef.current.messages, outcome.message],
+        updatedAt: completedAt,
+      };
+      activeSessionRef.current = nextSession;
+      onSessionChange(nextSession);
+      return true;
+    } finally {
+      contextCompactionInFlightRef.current = false;
+    }
   }
 
   function beginComposerResize(event: React.MouseEvent<HTMLDivElement>) {
@@ -535,6 +587,126 @@ export function ChatPanel({
     };
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
+  }
+
+  async function maybeRunBackendAcceptanceRepair({
+    prompt,
+    references,
+    request,
+    acceptedResponse,
+    goalSnapshot,
+    sessionBeforeMerge,
+    onStreamEvent,
+    signal,
+  }: {
+    prompt: string;
+    references: BioAgentReference[];
+    request: {
+      artifacts?: NormalizedAgentResponse['artifacts'];
+      executionUnits?: NormalizedAgentResponse['executionUnits'];
+      runs?: NormalizedAgentResponse['run'][];
+      messages: BioAgentMessage[];
+    } & Parameters<typeof sendBioAgentToolMessage>[0];
+    acceptedResponse: NormalizedAgentResponse;
+    goalSnapshot: NonNullable<BioAgentMessage['goalSnapshot']>;
+    sessionBeforeMerge: BioAgentSession;
+    onStreamEvent: (event: AgentStreamEvent) => void;
+    signal: AbortSignal;
+  }): Promise<NormalizedAgentResponse> {
+    const acceptance = acceptedResponse.message.acceptance;
+    if (!shouldRunBackendAcceptanceRepair(acceptance, 1)) return acceptedResponse;
+
+    const startedAt = nowIso();
+    const repairPrompt = buildBackendAcceptanceRepairPrompt({
+      snapshot: goalSnapshot,
+      acceptance: acceptance!,
+      response: acceptedResponse,
+      session: sessionBeforeMerge,
+    });
+    const action = acceptance!.failures.find((failure) => /artifact-repair|execution-repair/.test(failure.repairAction ?? ''))?.repairAction ?? 'artifact-repair';
+    const baseHistory = acceptance!.repairHistory ?? [];
+    setStreamEvents((current) => [...current.slice(-31), {
+      id: makeId('evt'),
+      type: 'acceptance-repair-start',
+      label: '验收修复',
+      detail: 'TurnAcceptanceGate 触发一次 backend artifact/execution repair rerun。',
+      createdAt: startedAt,
+      raw: { sourceRunId: acceptedResponse.run.id, failures: acceptance!.failures },
+    }]);
+
+    try {
+      const repairResponse = await sendBioAgentToolMessage({
+        ...request,
+        prompt: repairPrompt,
+        references,
+        messages: [
+          ...request.messages,
+          {
+            id: makeId('msg'),
+            role: 'system',
+            content: `Acceptance repair rerun for original user prompt: ${prompt}`,
+            createdAt: startedAt,
+            status: 'running',
+            goalSnapshot,
+          },
+        ],
+        artifacts: mergeRuntimeArtifacts(acceptedResponse.artifacts, request.artifacts ?? []),
+        executionUnits: mergeExecutionUnits(acceptedResponse.executionUnits, request.executionUnits ?? []),
+        runs: mergeRuns([acceptedResponse.run], request.runs ?? []),
+      }, {
+        onEvent: onStreamEvent,
+      }, signal);
+      const repairAccepted = acceptAndRepairAgentResponse({
+        snapshot: goalSnapshot,
+        response: {
+          ...repairResponse,
+          run: {
+            ...repairResponse.run,
+            references,
+            goalSnapshot,
+          },
+          message: {
+            ...repairResponse.message,
+            goalSnapshot,
+          },
+        },
+        session: {
+          ...sessionBeforeMerge,
+          artifacts: mergeRuntimeArtifacts(acceptedResponse.artifacts, sessionBeforeMerge.artifacts),
+          executionUnits: mergeExecutionUnits(acceptedResponse.executionUnits, sessionBeforeMerge.executionUnits),
+          runs: mergeRuns([acceptedResponse.run], sessionBeforeMerge.runs),
+        },
+      });
+      const completedAt = nowIso();
+      if (repairAccepted.message.acceptance?.pass && repairAccepted.run.status !== 'failed') {
+        const repairHistory = [...baseHistory, {
+          attempt: baseHistory.length + 1,
+          action,
+          status: 'completed' as const,
+          startedAt,
+          completedAt,
+          sourceRunId: acceptedResponse.run.id,
+          repairRunId: repairAccepted.run.id,
+          failureCodes: acceptance!.failures.map((failure) => failure.code),
+        }];
+        return mergeRepairSuccessResponse(acceptedResponse, repairAccepted, repairHistory);
+      }
+      return failedAcceptanceRepairResponse(
+        acceptedResponse,
+        repairAccepted,
+        action,
+        startedAt,
+        completedAt,
+        baseHistory,
+        repairAccepted.message.acceptance?.failures.map((failure) => `${failure.code}: ${failure.detail}`).join('; ')
+          || repairAccepted.executionUnits.find((unit) => unit.failureReason)?.failureReason
+          || 'repair rerun did not satisfy TurnAcceptanceGate',
+      );
+    } catch (error) {
+      const completedAt = nowIso();
+      const reason = error instanceof Error ? error.message : String(error);
+      return failedAcceptanceRepairResponse(acceptedResponse, undefined, action, startedAt, completedAt, baseHistory, reason);
+    }
   }
 
   function mergeAgentResponse(baseSession: BioAgentSession, response: NormalizedAgentResponse): BioAgentSession {
@@ -893,6 +1065,153 @@ export function ChatPanel({
   );
 }
 
+function mergeRepairSuccessResponse(
+  original: NormalizedAgentResponse,
+  repair: NormalizedAgentResponse,
+  repairHistory: NonNullable<NonNullable<NormalizedAgentResponse['message']['acceptance']>['repairHistory']>,
+): NormalizedAgentResponse {
+  const objectReferences = mergeObjectReferences(repair.message.objectReferences ?? [], original.message.objectReferences ?? []);
+  const acceptance = repair.message.acceptance ? {
+    ...repair.message.acceptance,
+    objectReferences,
+    repairAttempt: repairHistory.length,
+    repairHistory,
+  } : undefined;
+  return {
+    ...repair,
+    message: {
+      ...repair.message,
+      objectReferences,
+      acceptance,
+    },
+    run: {
+      ...repair.run,
+      objectReferences,
+      acceptance,
+      raw: enrichRepairRaw(repair.run.raw, repairHistory, original.run.id),
+    },
+    uiManifest: repair.uiManifest.length ? repair.uiManifest : original.uiManifest,
+    claims: [...repair.claims, ...original.claims].slice(0, 24),
+    executionUnits: mergeExecutionUnits(repair.executionUnits, original.executionUnits),
+    artifacts: mergeRuntimeArtifacts(repair.artifacts, original.artifacts),
+    notebook: [...repair.notebook, ...original.notebook].slice(0, 24),
+  };
+}
+
+function failedAcceptanceRepairResponse(
+  original: NormalizedAgentResponse,
+  repair: NormalizedAgentResponse | undefined,
+  action: string,
+  startedAt: string,
+  completedAt: string,
+  baseHistory: NonNullable<NonNullable<NormalizedAgentResponse['message']['acceptance']>['repairHistory']>,
+  reason: string,
+): NormalizedAgentResponse {
+  const failureUnit: RuntimeExecutionUnit = {
+    id: makeId('EU-acceptance-repair'),
+    tool: 'bioagent.acceptance-repair-rerun',
+    params: `sourceRunId=${original.run.id}`,
+    status: 'failed-with-reason',
+    hash: original.run.id.slice(0, 10),
+    attempt: baseHistory.length + 1,
+    parentAttempt: 0,
+    failureReason: reason,
+    recoverActions: ['Review failureReason/stdoutRef/stderrRef/codeRef and rerun manually if needed.'],
+    nextStep: 'Repair rerun failed; return failed-with-reason to the user instead of presenting partial success.',
+  };
+  const repairHistory = [...baseHistory, {
+    attempt: baseHistory.length + 1,
+    action,
+    status: 'failed-with-reason' as const,
+    startedAt,
+    completedAt,
+    sourceRunId: original.run.id,
+    repairRunId: repair?.run.id,
+    failureCodes: original.message.acceptance?.failures.map((failure) => failure.code) ?? [],
+    reason,
+  }];
+  const objectReferences = mergeObjectReferences(repair?.message.objectReferences ?? [], original.message.objectReferences ?? []);
+  const acceptance = original.message.acceptance ? {
+    ...original.message.acceptance,
+    pass: false,
+    severity: 'failed' as const,
+    checkedAt: completedAt,
+    objectReferences,
+    repairAttempt: repairHistory.length,
+    repairHistory,
+    failures: [
+      ...original.message.acceptance.failures,
+      {
+        code: 'backend-repair-failed',
+        detail: reason,
+        repairAction: action,
+      },
+    ],
+  } : undefined;
+  const content = `failed-with-reason: 后台 artifact/execution repair 未能完成。${reason}`;
+  return {
+    ...original,
+    message: {
+      ...original.message,
+      content,
+      status: 'failed',
+      objectReferences,
+      acceptance,
+    },
+    run: {
+      ...original.run,
+      status: 'failed',
+      response: content,
+      completedAt,
+      objectReferences,
+      acceptance,
+      raw: enrichRepairRaw(original.run.raw, repairHistory, original.run.id, reason),
+    },
+    uiManifest: repair?.uiManifest.length ? repair.uiManifest : original.uiManifest,
+    claims: [...(repair?.claims ?? []), ...original.claims].slice(0, 24),
+    executionUnits: mergeExecutionUnits([failureUnit, ...(repair?.executionUnits ?? [])], original.executionUnits),
+    artifacts: mergeRuntimeArtifacts(repair?.artifacts ?? [], original.artifacts),
+    notebook: [...(repair?.notebook ?? []), ...original.notebook].slice(0, 24),
+  };
+}
+
+function mergeObjectReferences(primary: ObjectReference[], secondary: ObjectReference[]) {
+  const byRef = new Map<string, ObjectReference>();
+  for (const reference of [...primary, ...secondary]) {
+    byRef.set(reference.ref || reference.id, { ...byRef.get(reference.ref || reference.id), ...reference });
+  }
+  return Array.from(byRef.values()).slice(0, 24);
+}
+
+function mergeRuntimeArtifacts(primary: NormalizedAgentResponse['artifacts'], secondary: NormalizedAgentResponse['artifacts']) {
+  const byKey = new Map<string, NormalizedAgentResponse['artifacts'][number]>();
+  for (const artifact of [...primary, ...secondary]) {
+    byKey.set(artifact.id || artifact.path || artifact.dataRef || `${artifact.type}-${byKey.size}`, { ...byKey.get(artifact.id || artifact.path || artifact.dataRef || ''), ...artifact });
+  }
+  return Array.from(byKey.values()).slice(0, 32);
+}
+
+function mergeExecutionUnits(primary: NormalizedAgentResponse['executionUnits'], secondary: NormalizedAgentResponse['executionUnits']) {
+  const byId = new Map<string, NormalizedAgentResponse['executionUnits'][number]>();
+  for (const unit of [...primary, ...secondary]) {
+    byId.set(unit.id || `${unit.tool}-${byId.size}`, { ...byId.get(unit.id || ''), ...unit });
+  }
+  return Array.from(byId.values()).slice(0, 32);
+}
+
+function mergeRuns(primary: NormalizedAgentResponse['run'][], secondary: NormalizedAgentResponse['run'][]) {
+  const byId = new Map<string, NormalizedAgentResponse['run']>();
+  for (const run of [...primary, ...secondary]) byId.set(run.id, { ...byId.get(run.id), ...run });
+  return Array.from(byId.values()).slice(-12);
+}
+
+function enrichRepairRaw(raw: unknown, repairHistory: unknown, sourceRunId: string, failureReason?: string) {
+  const repairMetadata = { acceptanceRepair: { sourceRunId, repairHistory, failureReason } };
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...raw, ...repairMetadata }
+    : { raw, ...repairMetadata };
+}
+
 function ContextWindowMeter({
   state,
   running,
@@ -902,36 +1221,23 @@ function ContextWindowMeter({
   running: boolean;
   onCompact: () => void;
 }) {
-  const ratio = state.ratio ?? 0;
-  const level = contextWindowLevel(state);
-  const sourceLabel = contextWindowSourceLabel(state.source);
-  const used = state.usedTokens !== undefined ? formatCompactNumber(state.usedTokens) : 'unknown';
-  const windowSize = state.windowTokens !== undefined ? formatCompactNumber(state.windowTokens) : 'unknown';
-  const ratioLabel = state.ratio !== undefined ? `${Math.round(state.ratio * 100)}%` : 'unknown';
-  const title = [
-    `used/window: ${used}/${windowSize}`,
-    `ratio: ${ratioLabel}`,
-    `source: ${sourceLabel}`,
-    `backend: ${state.backend || 'unknown'}`,
-    `compact: ${state.compactCapability || 'unknown'}`,
-    `last compacted: ${state.lastCompactedAt || 'never'}`,
-  ].join('\n');
+  const meter = buildContextWindowMeterModel(state, running);
   return (
     <button
       type="button"
-      className={cx('context-window-meter', level, state.source === 'estimate' && 'estimated', state.source === 'unknown' && 'unknown')}
+      className={cx('context-window-meter', meter.level, meter.isEstimated && 'estimated', meter.isUnknown && 'unknown')}
       onClick={onCompact}
-      title={running ? `${title}\n运行中达到阈值时只标记 pending compact。` : `${title}\n点击触发统一 compact API。`}
-      style={{ '--context-window-ratio': `${Math.min(100, Math.max(0, ratio * 100))}%` } as CSSProperties}
+      title={meter.title}
+      style={{ '--context-window-ratio': meter.ratioStyle } as CSSProperties}
     >
       <span className="context-window-ring" aria-hidden="true">
-        <span>{ratioLabel}</span>
+        <span>{meter.ratioLabel}</span>
       </span>
       <span className="context-window-copy">
-        <strong>{used}/{windowSize}</strong>
-        <em>{sourceLabel} · {state.backend || 'unknown'}</em>
-        <em>compact {state.compactCapability || 'unknown'}{state.pendingCompact ? ' · pending' : ''}</em>
-        <em>last {state.lastCompactedAt ? formatShortTime(state.lastCompactedAt) : 'never'}</em>
+        <strong>{meter.used}/{meter.windowSize}</strong>
+        <em>{meter.sourceLabel} · {state.backend || 'unknown'} · {meter.statusLabel}</em>
+        <em>{meter.compactLine}</em>
+        <em>{meter.lastLine}</em>
       </span>
       <RefreshCw size={13} />
     </button>
@@ -1241,93 +1547,6 @@ function latestTokenUsage(events: AgentStreamEvent[]) {
   return [...events].reverse().find((event) => event.usage)?.usage;
 }
 
-function latestContextWindowState(events: AgentStreamEvent[]) {
-  const compaction = [...events].reverse().find((event) => event.contextCompaction?.lastCompactedAt)?.contextCompaction;
-  const state = [...events].reverse().find((event) => event.contextWindowState)?.contextWindowState;
-  if (!state && !compaction) return undefined;
-  return {
-    ...(state ?? { source: 'unknown' as const }),
-    lastCompactedAt: state?.lastCompactedAt ?? compaction?.lastCompactedAt,
-    compactCapability: state?.compactCapability ?? compaction?.compactCapability,
-    backend: state?.backend ?? compaction?.backend,
-  };
-}
-
-function estimateContextWindowState(session: BioAgentSession, config: BioAgentConfig, events: AgentStreamEvent[]): AgentContextWindowState {
-  const usage = latestTokenUsage(events);
-  const modelWindow = estimateModelContextWindow(config.modelName);
-  const textChars = session.messages.slice(-24).reduce((sum, message) => sum + message.content.length + (message.expandable?.length ?? 0), 0);
-  const artifactChars = session.artifacts.slice(-12).reduce((sum, artifact) => sum + JSON.stringify({
-    id: artifact.id,
-    type: artifact.type,
-    metadata: artifact.metadata,
-    dataRef: artifact.dataRef,
-    path: artifact.path,
-  }).length, 0);
-  const usedTokens = usage?.total ?? usage?.input ?? Math.ceil((textChars + artifactChars) / 4);
-  return {
-    usedTokens: usedTokens || undefined,
-    windowTokens: modelWindow,
-    ratio: modelWindow && usedTokens ? usedTokens / modelWindow : undefined,
-    source: modelWindow || usedTokens ? 'estimate' : 'unknown',
-    backend: config.agentBackend || 'unknown',
-    compactCapability: compactCapabilityForBackend(config.agentBackend),
-    autoCompactThreshold: 0.82,
-    watchThreshold: 0.68,
-    nearLimitThreshold: 0.86,
-  };
-}
-
-function estimateModelContextWindow(modelName: string) {
-  const model = modelName.toLowerCase();
-  if (!model) return undefined;
-  if (/1m|1000k|gemini-1\.5-pro|gemini-2\./.test(model)) return 1_000_000;
-  if (/400k|claude.*sonnet-4|claude.*opus-4/.test(model)) return 400_000;
-  if (/200k|claude|gpt-4\.1|gpt-5|o3|o4/.test(model)) return 200_000;
-  if (/128k|gpt-4o|gemini/.test(model)) return 128_000;
-  if (/32k/.test(model)) return 32_000;
-  if (/16k/.test(model)) return 16_000;
-  return undefined;
-}
-
-function compactCapabilityForBackend(backend: string): AgentContextWindowState['compactCapability'] {
-  if (backend === 'codex') return 'native';
-  if (backend === 'openteam_agent' || backend === 'hermes-agent') return 'agentserver';
-  if (backend === 'gemini' || backend === 'claude-code' || backend === 'openclaw') return 'handoff-slimming';
-  return 'unknown';
-}
-
-function shouldAutoCompact(state: AgentContextWindowState) {
-  const threshold = state.autoCompactThreshold ?? 0.82;
-  return state.ratio !== undefined && state.ratio >= threshold && state.compactCapability !== 'none';
-}
-
-function contextWindowLevel(state: AgentContextWindowState) {
-  if (state.ratio === undefined) return 'unknown';
-  if (state.ratio >= (state.nearLimitThreshold ?? 0.86)) return 'near-limit';
-  if (state.ratio >= (state.watchThreshold ?? 0.68)) return 'watch';
-  return 'ok';
-}
-
-function contextWindowSourceLabel(source: AgentContextWindowState['source']) {
-  if (source === 'estimate') return '估算';
-  if (source === 'unknown') return '未知';
-  if (source === 'native') return 'native';
-  return 'AgentServer';
-}
-
-function formatCompactNumber(value: number) {
-  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
-  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
-  return String(value);
-}
-
-function formatShortTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
 function formatAgentTokenUsage(usage: AgentStreamEvent['usage'] | undefined) {
   if (!usage) return '';
   const parts = [
@@ -1387,10 +1606,8 @@ function streamEventTypeLabel(type: string) {
 function readableStreamEventDetail(event: AgentStreamEvent) {
   if (event.contextWindowState) {
     const state = event.contextWindowState;
-    const used = state.usedTokens !== undefined ? formatCompactNumber(state.usedTokens) : 'unknown';
-    const windowSize = state.windowTokens !== undefined ? formatCompactNumber(state.windowTokens) : 'unknown';
-    const ratio = state.ratio !== undefined ? `${Math.round(state.ratio * 100)}%` : 'unknown';
-    return `used/window ${used}/${windowSize}, ratio ${ratio}, source ${contextWindowSourceLabel(state.source)}, backend ${state.backend || 'unknown'}, compact ${state.compactCapability || 'unknown'}, last ${state.lastCompactedAt || 'never'}`;
+    const meter = buildContextWindowMeterModel(state, false);
+    return `used/window ${meter.used}/${meter.windowSize}, ratio ${meter.ratioLabel}, source ${meter.sourceLabel}, status ${meter.statusLabel}, backend ${state.backend || 'unknown'}, ${meter.compactLine}, last ${state.lastCompactedAt || 'never'}`;
   }
   if (event.contextCompaction) {
     const compaction = event.contextCompaction;

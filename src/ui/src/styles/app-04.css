@@ -913,17 +913,20 @@
 .context-window-meter {
   --context-window-color: var(--teal);
   display: inline-grid;
-  grid-template-columns: 42px minmax(88px, 128px) auto;
+  grid-template-columns: 38px minmax(0, 1fr) 14px;
   align-items: center;
   gap: 8px;
   min-height: 48px;
-  max-width: 220px;
+  width: 272px;
+  max-width: 272px;
+  flex: 0 0 272px;
   padding: 4px 7px 4px 4px;
   color: var(--bio-100);
   background: rgba(5, 8, 16, 0.34);
   border: 1px solid rgba(46, 61, 85, 0.62);
   border-radius: 8px;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .context-window-meter.watch {
@@ -1069,6 +1072,86 @@
 .result-details-panel.subtle {
   border-color: rgba(46, 61, 85, 0.42);
   background: rgba(8, 13, 24, 0.32);
+}
+
+.audit-details-panel {
+  border-color: rgba(0, 229, 160, 0.22);
+}
+
+.audit-overview,
+.run-status-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.run-status-summary.failed {
+  border-color: rgba(255, 107, 107, 0.38);
+  background: rgba(255, 107, 107, 0.07);
+}
+
+.run-status-summary.recoverable {
+  border-color: rgba(255, 209, 102, 0.28);
+  background: rgba(255, 209, 102, 0.06);
+}
+
+.run-status-lines,
+.run-recover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.run-status-lines span,
+.run-recover-actions code {
+  color: var(--bio-200);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 5px 8px;
+  border: 1px solid rgba(46, 61, 85, 0.58);
+  border-radius: 6px;
+  background: rgba(5, 8, 16, 0.46);
+}
+
+.run-failure-card {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(255, 107, 107, 0.28);
+  border-radius: 7px;
+  background: rgba(5, 8, 16, 0.38);
+}
+
+.run-failure-card strong {
+  color: var(--bio-100);
+  font-size: 12px;
+}
+
+.run-failure-card p {
+  margin: 0;
+  color: var(--bio-300);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.audit-raw-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-raw-item {
+  min-width: 0;
+}
+
+.audit-raw-item summary {
+  cursor: pointer;
+  color: var(--bio-300);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.audit-raw-item[open] summary {
+  margin-bottom: 8px;
+  color: var(--bio-100);
 }
 
 .result-content {

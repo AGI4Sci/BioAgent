@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, Copy, Download, Eye, FileCode, FileText, Lock, Save, Shield, Sparkles, Target, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock, Copy, Download, Eye, FileCode, FileText, Lock, Save, Shield, Sparkles, Target, Terminal, X } from 'lucide-react';
 import { scenarios, type EvidenceLevel, type ScenarioId } from '../data';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
 import { elementRegistry } from '../scenarioCompiler/elementRegistry';
@@ -383,9 +383,7 @@ export function ResultsRenderer({
   const tabs = [
     { id: 'primary', label: '结果视图' },
     { id: 'evidence', label: '证据矩阵' },
-    { id: 'execution', label: 'ExecutionUnit' },
     { id: 'ui-design', label: 'UI设计' },
-    { id: 'notebook', label: '研究记录' },
   ];
   const focusModes: Array<{ id: ResultFocusMode; label: string }> = [
     { id: 'all', label: '全部' },
@@ -473,7 +471,7 @@ export function ResultsRenderer({
                   onClick={() => {
                     setFocusMode(mode.id);
                     if (mode.id === 'evidence') setResultTab('evidence');
-                    if (mode.id === 'execution') setResultTab('execution');
+                    if (mode.id === 'execution') setResultTab('primary');
                     if (mode.id === 'visual') setResultTab('primary');
                   }}
                 >
@@ -525,6 +523,7 @@ export function ResultsRenderer({
                 scenarioId={scenarioId}
                 config={config}
                 session={session}
+                activeRun={activeRun}
                 viewPlan={viewPlan}
                 focusMode={focusMode}
                 onArtifactHandoff={onArtifactHandoff}
@@ -532,13 +531,9 @@ export function ResultsRenderer({
               />
             ) : resultTab === 'evidence' ? (
               <EvidenceMatrix claims={session.claims} />
-            ) : resultTab === 'execution' ? (
-              <ExecutionPanel session={session} executionUnits={session.executionUnits} />
             ) : resultTab === 'ui-design' ? (
               <UIDesignStudioPanel viewPlan={viewPlan} />
-            ) : (
-              <NotebookTimeline scenarioId={scenario.id} notebook={session.notebook} />
-            )}
+            ) : null}
           </div>
           {inspectedArtifact ? (
             <ArtifactInspectorDrawer
@@ -2012,6 +2007,7 @@ function PrimaryResult({
   scenarioId,
   config,
   session,
+  activeRun,
   viewPlan,
   focusMode,
   onArtifactHandoff,
@@ -2020,6 +2016,7 @@ function PrimaryResult({
   scenarioId: ScenarioId;
   config: BioAgentConfig;
   session: BioAgentSession;
+  activeRun?: BioAgentRun;
   viewPlan: RuntimeResolvedViewPlan;
   focusMode: ResultFocusMode;
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
@@ -2028,10 +2025,12 @@ function PrimaryResult({
   const slotLimit = focusMode === 'visual' || focusMode === 'all' ? 8 : 4;
   const planItems = itemsForFocusMode(viewPlan, focusMode).slice(0, slotLimit);
   const { visibleItems, deferredItems } = selectDefaultResultItems(planItems, focusMode);
+  const auditOpen = shouldOpenRunAuditDetails(session, activeRun);
   return (
     <div className="stack">
       <SectionHeader icon={FileText} title="结果视图" subtitle="优先展示用户本轮要看的结果；更多内容默认收起" />
       {viewPlan.blockedDesign ? <UIDesignBlockerCard blocker={viewPlan.blockedDesign} /> : null}
+      <RunStatusSummary session={session} activeRun={activeRun} />
       {!planItems.length ? (
         <EmptyArtifactState
           title={focusMode === 'all' ? '还没有可展示的关键结果' : '当前筛选没有匹配内容'}
@@ -2073,6 +2072,13 @@ function PrimaryResult({
           })}
         </details>
       ) : null}
+      <RunAuditDetails
+        scenarioId={scenarioId}
+        session={session}
+        activeRun={activeRun}
+        viewPlan={viewPlan}
+        defaultOpen={auditOpen || focusMode === 'execution'}
+      />
       {viewPlan.allItems.length ? (
         <details className="result-details-panel subtle">
           <summary>
@@ -2084,6 +2090,167 @@ function PrimaryResult({
       ) : null}
     </div>
   );
+}
+
+function RunStatusSummary({ session, activeRun }: { session: BioAgentSession; activeRun?: BioAgentRun }) {
+  const failures = failedExecutionUnits(session, activeRun);
+  const run = activeRun ?? session.runs.at(-1);
+  const blockers = runAuditBlockers(session, activeRun);
+  const recoverActions = runRecoverActions(session, activeRun).slice(0, 4);
+  if (!failures.length && !blockers.length && !recoverActions.length && run?.status !== 'failed') return null;
+  return (
+    <Card className={cx('run-status-summary', failures.length || run?.status === 'failed' ? 'failed' : 'recoverable')}>
+      <SectionHeader
+        icon={AlertTriangle}
+        title={failures.length || run?.status === 'failed' ? '运行需要处理' : '可恢复建议'}
+        subtitle={run ? `${run.id} · ${run.status}` : '当前 session'}
+      />
+      {blockers.length ? (
+        <div className="run-status-lines">
+          {blockers.map((line) => <span key={line}>{line}</span>)}
+        </div>
+      ) : null}
+      {failures.map((unit) => (
+        <div className="run-failure-card" key={unit.id}>
+          <strong>{unit.id}</strong>
+          <p>{unit.failureReason || unit.selfHealReason || unit.nextStep || '执行失败，详情已保留在运行审计中。'}</p>
+          <div className="inspector-ref-list">
+            {[unit.codeRef, unit.stdoutRef, unit.stderrRef, unit.outputRef, unit.diffRef].filter(Boolean).map((ref) => <code key={ref}>{ref}</code>)}
+          </div>
+        </div>
+      ))}
+      {recoverActions.length ? (
+        <div className="run-recover-actions">
+          {recoverActions.map((action) => <code key={action}>{action}</code>)}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function RunAuditDetails({
+  scenarioId,
+  session,
+  activeRun,
+  viewPlan,
+  defaultOpen,
+}: {
+  scenarioId: ScenarioId;
+  session: BioAgentSession;
+  activeRun?: BioAgentRun;
+  viewPlan: RuntimeResolvedViewPlan;
+  defaultOpen?: boolean;
+}) {
+  const rawItems = rawAuditItems(session, activeRun, viewPlan);
+  const failureCount = failedExecutionUnits(session, activeRun).length;
+  return (
+    <details className="result-details-panel audit-details-panel" open={defaultOpen}>
+      <summary>
+        <span>查看运行细节</span>
+        <Badge variant={failureCount ? 'danger' : 'muted'}>
+          {failureCount ? `${failureCount} failure` : `${session.executionUnits.length} EU`}
+        </Badge>
+      </summary>
+      <RunAuditOverview session={session} activeRun={activeRun} />
+      <ExecutionPanel session={session} executionUnits={session.executionUnits} embedded />
+      <NotebookTimeline scenarioId={scenarioId} notebook={session.notebook} embedded />
+      <Card className="code-card">
+        <SectionHeader icon={Terminal} title="Raw JSON / stdout / stderr refs" />
+        <div className="audit-raw-grid">
+          {rawItems.map((item) => (
+            <details key={item.id} className="audit-raw-item">
+              <summary>{item.label}</summary>
+              <pre className="inspector-json">{item.value}</pre>
+            </details>
+          ))}
+        </div>
+      </Card>
+    </details>
+  );
+}
+
+function RunAuditOverview({ session, activeRun }: { session: BioAgentSession; activeRun?: BioAgentRun }) {
+  const blockers = runAuditBlockers(session, activeRun);
+  const refs = runAuditRefs(session, activeRun);
+  const recoverActions = runRecoverActions(session, activeRun);
+  return (
+    <Card className="audit-overview">
+      <SectionHeader icon={Shield} title="审计摘要" subtitle="失败原因、恢复动作和可复现引用" />
+      {blockers.length ? (
+        <div className="run-status-lines">
+          {blockers.map((line) => <span key={line}>{line}</span>)}
+        </div>
+      ) : <p className="empty-state">没有阻塞项；完整执行单元、timeline 和 raw payload 已在下方保留。</p>}
+      {recoverActions.length ? (
+        <div className="run-recover-actions">
+          {recoverActions.map((action) => <code key={action}>{action}</code>)}
+        </div>
+      ) : null}
+      {refs.length ? (
+        <div className="inspector-ref-list">
+          {refs.map((ref) => <code key={ref}>{ref}</code>)}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+export function shouldOpenRunAuditDetails(session: BioAgentSession, activeRun?: BioAgentRun) {
+  return Boolean((activeRun ?? session.runs.at(-1))?.status === 'failed' || failedExecutionUnits(session, activeRun).length);
+}
+
+function failedExecutionUnits(session: BioAgentSession, activeRun?: BioAgentRun) {
+  const runRefs = new Set([activeRun?.id].filter((id): id is string => Boolean(id)));
+  return session.executionUnits.filter((unit) => {
+    const failed = unit.status === 'failed' || unit.status === 'failed-with-reason' || unit.status === 'repair-needed' || Boolean(unit.failureReason);
+    if (!failed) return false;
+    if (!runRefs.size) return true;
+    return !unit.outputRef || Array.from(runRefs).some((runId) => unit.outputRef?.includes(runId));
+  });
+}
+
+function runAuditBlockers(session: BioAgentSession, activeRun?: BioAgentRun) {
+  const run = activeRun ?? session.runs.at(-1);
+  const raw = isRecord(run?.raw) ? run?.raw : undefined;
+  const lines = [
+    run?.status === 'failed' ? `blocker: run ${run.id} failed` : undefined,
+    asString(raw?.blocker) ? `blocker: ${asString(raw?.blocker)}` : undefined,
+    asString(raw?.failureReason) ? `failureReason: ${asString(raw?.failureReason)}` : undefined,
+    ...failedExecutionUnits(session, activeRun).map((unit) => `failureReason: ${unit.failureReason || unit.id}`),
+  ].filter((line): line is string => Boolean(line));
+  return Array.from(new Set(lines));
+}
+
+function runRecoverActions(session: BioAgentSession, activeRun?: BioAgentRun) {
+  const run = activeRun ?? session.runs.at(-1);
+  const raw = isRecord(run?.raw) ? run?.raw : undefined;
+  return Array.from(new Set([
+    ...asStringList(raw?.recoverActions),
+    ...failedExecutionUnits(session, activeRun).flatMap((unit) => unit.recoverActions ?? []),
+    ...session.executionUnits.flatMap((unit) => unit.status === 'repair-needed' ? unit.recoverActions ?? [] : []),
+  ]));
+}
+
+function runAuditRefs(session: BioAgentSession, activeRun?: BioAgentRun) {
+  const run = activeRun ?? session.runs.at(-1);
+  const raw = isRecord(run?.raw) ? run?.raw : undefined;
+  return Array.from(new Set([
+    ...asStringList(raw?.refs),
+    ...asStringList(raw?.auditRefs),
+    ...(run?.references ?? []).map((ref) => ref.ref),
+    ...session.executionUnits.flatMap((unit) => [unit.codeRef, unit.stdoutRef, unit.stderrRef, unit.outputRef, unit.diffRef]).filter((ref): ref is string => Boolean(ref)),
+  ]));
+}
+
+function rawAuditItems(session: BioAgentSession, activeRun: BioAgentRun | undefined, viewPlan: RuntimeResolvedViewPlan) {
+  const run = activeRun ?? session.runs.at(-1);
+  return [
+    run ? { id: `run-${run.id}`, label: `run ${run.id}`, value: JSON.stringify(run.raw ?? run, null, 2) } : undefined,
+    session.artifacts.length ? { id: 'artifacts', label: `artifacts (${session.artifacts.length})`, value: JSON.stringify(session.artifacts, null, 2) } : undefined,
+    session.executionUnits.length ? { id: 'execution-units', label: `ExecutionUnit JSON (${session.executionUnits.length})`, value: JSON.stringify(session.executionUnits, null, 2) } : undefined,
+    session.notebook.length ? { id: 'notebook', label: `timeline JSON (${session.notebook.length})`, value: JSON.stringify(session.notebook, null, 2) } : undefined,
+    viewPlan.allItems.length ? { id: 'view-plan', label: `resolved view plan (${viewPlan.allItems.length})`, value: JSON.stringify(viewPlan.allItems, null, 2) } : undefined,
+  ].filter((item): item is { id: string; label: string; value: string } => Boolean(item));
 }
 
 function ViewPlanSummary({ viewPlan }: { viewPlan: RuntimeResolvedViewPlan }) {
@@ -2472,7 +2639,7 @@ function viewPlanSectionLabel(section: ViewPlanSection) {
   return '原始数据 / fallback';
 }
 
-function selectDefaultResultItems(items: ResolvedViewPlanItem[], focusMode: ResultFocusMode) {
+export function selectDefaultResultItems(items: ResolvedViewPlanItem[], focusMode: ResultFocusMode) {
   const sorted = [...items].sort(resultPresentationRank);
   if (focusMode === 'evidence' || focusMode === 'execution') {
     const visibleItems: ResolvedViewPlanItem[] = [];
@@ -2483,7 +2650,8 @@ function selectDefaultResultItems(items: ResolvedViewPlanItem[], focusMode: Resu
       deferredItems: sorted.filter((item) => !visibleIds.has(item.id)),
     };
   }
-  const primary = sorted.filter((item) => item.section === 'primary');
+  const userFacing = sorted.filter((item) => !isAuditOnlyResultItem(item));
+  const primary = userFacing.filter((item) => item.section === 'primary');
   const usefulPrimary = primary.filter((item) => item.status === 'bound' || item.status === 'missing-fields');
   const visibleItems: ResolvedViewPlanItem[] = [];
   pushUniqueVisibleItems(visibleItems, usefulPrimary.length ? usefulPrimary : primary, 2);
@@ -2491,15 +2659,23 @@ function selectDefaultResultItems(items: ResolvedViewPlanItem[], focusMode: Resu
     const visibleIds = new Set(visibleItems.map((item) => item.id));
     pushUniqueVisibleItems(
       visibleItems,
-      sorted.filter((item) => !visibleIds.has(item.id) && item.section === 'supporting' && item.status === 'bound'),
+      userFacing.filter((item) => !visibleIds.has(item.id) && item.section === 'supporting' && item.status === 'bound'),
       2,
     );
   }
   const visibleIds = new Set(visibleItems.map((item) => item.id));
   return {
     visibleItems,
-    deferredItems: items.filter((item) => !visibleIds.has(item.id)),
+    deferredItems: userFacing.filter((item) => !visibleIds.has(item.id)),
   };
+}
+
+function isAuditOnlyResultItem(item: ResolvedViewPlanItem) {
+  return item.module.componentId === 'execution-unit-table'
+    || item.module.componentId === 'notebook-timeline'
+    || item.module.componentId === 'unknown-artifact-inspector'
+    || item.section === 'provenance'
+    || item.section === 'raw';
 }
 
 function pushUniqueVisibleItems(target: ResolvedViewPlanItem[], candidates: ResolvedViewPlanItem[], limit: number) {
@@ -2940,7 +3116,7 @@ function ExecutionPanel({
       <SectionHeader
         icon={Lock}
         title="可复现执行单元"
-        subtitle={embedded ? '当前组件来自 UIManifest registry' : '代码 + 参数 + 环境 + 数据指纹'}
+        subtitle={embedded ? '完整 ExecutionUnit、stdout/stderr refs 和数据指纹' : '代码 + 参数 + 环境 + 数据指纹'}
         action={<ActionButton icon={Download} variant="secondary" onClick={() => exportExecutionBundle(session)}>导出 JSON Bundle</ActionButton>}
       />
       {rows.length ? (
@@ -3045,11 +3221,11 @@ function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
   ].join('\n')).join('\n\n');
 }
 
-function NotebookTimeline({ scenarioId, notebook = [] }: { scenarioId: ScenarioId; notebook?: NotebookRecord[] }) {
+function NotebookTimeline({ scenarioId, notebook = [], embedded = false }: { scenarioId: ScenarioId; notebook?: NotebookRecord[]; embedded?: boolean }) {
   const filtered = notebook;
   return (
     <div className="stack">
-      <SectionHeader icon={Clock} title="研究记录" subtitle="从对话到可审计 notebook timeline" />
+      <SectionHeader icon={Clock} title="研究记录" subtitle={embedded ? '完整 notebook timeline 审计记录' : '从对话到可审计 notebook timeline'} />
       {!filtered.length ? <EmptyArtifactState title="等待真实 notebook 记录" detail="Notebook 只展示当前会话运行产生的记录；全局 demo timeline 仅保留在研究时间线页面。" /> : null}
       <div className="timeline-list">
         {filtered.map((item, index) => {

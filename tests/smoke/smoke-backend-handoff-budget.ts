@@ -66,6 +66,13 @@ const payload = result.payload as Record<string, unknown>;
 const manifest = payload._bioagentHandoffManifest as Record<string, unknown>;
 assert.equal(manifest.rawRef, result.rawRef);
 assert.equal(typeof manifest.rawSha1, 'string');
+assert.ok(result.auditRefs.includes(result.rawRef), 'handoff audit refs should include raw ref');
+assert.ok(result.contextEstimate.rawTokens > result.contextEstimate.normalizedTokens, 'handoff context estimate should reflect slimming');
+assert.equal(result.contextEstimate.normalizedTokens, Math.ceil(result.normalizedBytes / 4));
+assert.ok(result.contextEstimate.normalizedBudgetRatio <= 1, 'normalized handoff should fit payload budget');
+assert.ok(result.decisions.some((decision) => decision.kind === 'tool-output'), 'stdout/stderr slimming should produce budget decisions');
+assert.ok(result.decisions.some((decision) => decision.kind === 'binary' || decision.reason === 'binary-artifact-data'), 'binary slimming should produce budget decisions');
+assert.ok(result.decisions.some((decision) => decision.kind === 'prior-attempts' && decision.omittedCount && decision.omittedCount > 0), 'prior attempt slimming should produce budget decisions');
 const input = payload.input as Record<string, unknown>;
 assert.equal(typeof input.text, 'string', 'backend input.text must remain a string for AgentServer compatibility');
 assert.ok(isRecord(input.textSummary), 'large backend input.text should carry a structured summary');
@@ -89,7 +96,55 @@ assert.equal(attempts.kind, 'prior-attempts');
 assert.equal(attempts.itemCount, 40);
 assert.ok((attempts.attempts as unknown[]).length <= DEFAULT_BACKEND_HANDOFF_BUDGET.maxPriorAttempts);
 
-console.log('[ok] backend handoff budget keeps large artifacts, binary images, stdout, and prior attempts compact with raw refs');
+const retryResult = await normalizeBackendHandoff({
+  retryAudit: {
+    schemaVersion: 'bioagent.agentserver-generation-retry.v1',
+    attempt: 2,
+    maxAttempts: 2,
+    trigger: {
+      kind: 'http-429',
+      categories: ['http-429', 'rate-limit', 'retry-budget'],
+      provider: 'mock-provider',
+      model: 'mock-model',
+      httpStatus: 429,
+      retryAfterMs: 0,
+      message: '429 Too Many Requests / retry budget exhausted',
+    },
+    firstFailedAt: new Date().toISOString(),
+    backoffMs: 0,
+    recoveryActions: ['wait for reset', 'reduce context'],
+    contextPolicy: { mode: 'delta', handoff: 'slimmed', compactBeforeRetry: true, maxRetryCount: 1 },
+    priorHandoff: { rawRef: result.rawRef, rawBytes: result.rawBytes, normalizedBytes: result.normalizedBytes },
+  },
+  agent: { id: 'bioagent-test', backend: 'test' },
+  input: {
+    text: `Retry after 429 with compact context\n${hugeText}`,
+    metadata: { purpose: 'rate-limit-retry' },
+  },
+  artifacts: result.payload && isRecord(result.payload) ? (result.payload.artifacts as unknown[]) : [],
+  priorAttempts,
+}, {
+  workspacePath: workspace,
+  purpose: 'contract-rate-limit-retry',
+  budget: {
+    maxPayloadBytes: 96_000,
+    maxInlineStringChars: 6_000,
+    maxInlineJsonBytes: 18_000,
+    maxArrayItems: 10,
+    maxObjectKeys: 48,
+    maxDepth: 5,
+    headChars: 1_200,
+    tailChars: 1_200,
+    maxPriorAttempts: 1,
+  },
+});
+
+const retrySerialized = JSON.stringify(retryResult.payload);
+assert.ok(retryResult.normalizedBytes <= 96_000, `retry handoff exceeded compact retry budget: ${retryResult.normalizedBytes}`);
+assert.ok(retrySerialized.includes('bioagent.agentserver-generation-retry.v1'), 'retry audit should survive handoff slimming');
+assert.ok(!retrySerialized.includes(hugeText.slice(0, 50_000)), 'retry handoff should not re-inline large prior context');
+
+console.log('[ok] backend handoff budget keeps large artifacts, binary images, stdout, prior attempts, and rate-limit retry handoffs compact with raw refs');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

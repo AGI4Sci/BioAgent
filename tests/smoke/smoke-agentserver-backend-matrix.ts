@@ -10,14 +10,19 @@ import type { WorkspaceRuntimeEvent } from '../../src/runtime/runtime-types.js';
 const AGENT_BACKENDS = ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw', 'gemini'] as const;
 type AgentBackend = typeof AGENT_BACKENDS[number];
 type TokenUsage = NonNullable<WorkspaceRuntimeEvent['usage']>;
+type ContextWindowState = NonNullable<WorkspaceRuntimeEvent['contextWindowState']>;
 
 const expectedArtifacts = ['paper-list', 'research-report'];
 const selectedComponents = ['paper-card-list', 'report-viewer', 'execution-unit-table', 'notebook-timeline'];
 const requestsByBackend = new Map<AgentBackend, Array<{ text: string; purpose: string }>>();
 const usageByBackend = new Map<AgentBackend, Required<Pick<TokenUsage, 'input' | 'output' | 'total'>>>();
+const contextWindowsByBackend = new Map<AgentBackend, ContextWindowState[]>();
+const contextReadsByBackend = new Map<AgentBackend, number>();
+let activeBackend: AgentBackend = 'codex';
 
 const server = createServer(async (req, res) => {
   if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+    contextReadsByBackend.set(activeBackend, (contextReadsByBackend.get(activeBackend) ?? 0) + 1);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ok: true,
@@ -109,6 +114,7 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 
 try {
   for (const backend of AGENT_BACKENDS) {
+    activeBackend = backend;
     const workspace = await mkdtemp(join(tmpdir(), `bioagent-backend-matrix-${backend}-`));
     const sessionId = `backend-matrix-${backend}`;
     const round1 = await runWorkspaceRuntimeGateway({
@@ -195,6 +201,22 @@ try {
     assert.ok(seen.every((entry) => entry.purpose === 'workspace-task-generation'), `${backend} should use generation dispatch for each turn`);
     const usage = usageByBackend.get(backend);
     assert.ok(usage && usage.total > 0, `${backend} should report token usage`);
+    const contextWindows = contextWindowsByBackend.get(backend) ?? [];
+    assert.ok((contextReadsByBackend.get(backend) ?? 0) >= 1, `${backend} should call readContextWindowState during backend matrix dispatch`);
+    const preflightState = contextWindows.find((state) => state.backend === backend && state.source !== 'provider-usage');
+    assert.ok(preflightState, `${backend} should expose an explicit AgentServer estimate/fallback context source before usage arrives`);
+    assert.ok(typeof preflightState.source === 'string' && preflightState.source.length > 0, `${backend} preflight context source should be explicit`);
+    assert.equal(preflightState.compactCapability, preflightCompactCapabilityForBackend(backend));
+    const usageState = contextWindows.find((state) => state.source === 'provider-usage' && state.backend === backend);
+    assert.ok(usageState, `${backend} should normalize stream usage into BackendContextWindowState`);
+    assert.equal(usageState.provider, backend);
+    assert.equal(usageState.model, `${backend}-mock-model`);
+    assert.equal(usageState.usedTokens, usageState.input! + usageState.output!);
+    assert.equal(usageState.status, 'unknown');
+    assert.equal(usageState.compactCapability, compactCapabilityForBackend(backend));
+    if (backend === 'openclaw') {
+      assert.equal(usageState.compactCapability, 'handoff-only', 'OpenClaw should advertise handoff-only compact fallback unless native compact is proven');
+    }
   }
   const reportPath = join(process.cwd(), 'docs', 'AgentBackendMultiturnTestReport.md');
   await writeFile(reportPath, buildMarkdownReport(), 'utf8');
@@ -375,6 +397,9 @@ function assertPromptContract(text: string, round: number) {
 function usageCollector(backend: AgentBackend) {
   return {
     onEvent(event: WorkspaceRuntimeEvent) {
+      if (event.contextWindowState) {
+        contextWindowsByBackend.set(backend, [...(contextWindowsByBackend.get(backend) ?? []), event.contextWindowState]);
+      }
       if (!event.usage) return;
       const current = usageByBackend.get(backend) ?? { input: 0, output: 0, total: 0 };
       current.input += event.usage.input ?? 0;
@@ -404,7 +429,9 @@ function buildMarkdownReport() {
   const rows = AGENT_BACKENDS.map((backend) => {
     const seen = requestsByBackend.get(backend) ?? [];
     const usage = usageByBackend.get(backend) ?? { input: 0, output: 0, total: 0 };
-    return `| ${backend} | ${seen.length}/3 | Pass | ${usage.input} | ${usage.output} | ${usage.total} |`;
+    const contextReads = contextReadsByBackend.get(backend) ?? 0;
+    const source = (contextWindowsByBackend.get(backend) ?? []).find((state) => state.backend === backend && state.source !== 'provider-usage')?.source ?? 'missing';
+    return `| ${backend} | ${seen.length}/3 | ${contextReads} | ${source} | Pass | ${usage.input} | ${usage.output} | ${usage.total} |`;
   }).join('\n');
   return `# AgentBackend Multi-turn Test Report
 
@@ -420,8 +447,8 @@ Same three-round conversation for every AgentBackend:
 
 ## Results
 
-| Backend | Completed turns | Completion | Input tokens | Output tokens | Total tokens |
-| --- | ---: | --- | ---: | ---: | ---: |
+| Backend | Completed turns | Context reads | Preflight source | Completion | Input tokens | Output tokens | Total tokens |
+| --- | ---: | ---: | --- | --- | ---: | ---: | ---: |
 ${rows}
 
 ## Findings
@@ -429,6 +456,7 @@ ${rows}
 - All tested backends completed the same three-turn workflow through AgentServer generation/direct-context dispatch.
 - Round 3 verified context reuse by reusing the prior \`paper-list\` artifact without rerunning the workspace task.
 - Token usage is collected from AgentServer stream usage events; this smoke uses deterministic mock token accounting so regressions are reproducible in CI.
+- OpenClaw is verified as a compatibility backend with handoff-only compact fallback unless native compact is explicitly exposed.
 - Gemini is now included in frontend/backend normalization and appears as a selectable AgentBackend.
 `;
 }
@@ -448,6 +476,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isAgentBackend(value: string): value is AgentBackend {
   return AGENT_BACKENDS.includes(value as AgentBackend);
+}
+
+function compactCapabilityForBackend(backend: AgentBackend): ContextWindowState['compactCapability'] {
+  if (backend === 'codex') return 'native';
+  if (backend === 'openteam_agent' || backend === 'hermes-agent') return 'agentserver';
+  if (backend === 'gemini') return 'session-rotate';
+  return 'handoff-only';
+}
+
+function preflightCompactCapabilityForBackend(backend: AgentBackend): ContextWindowState['compactCapability'] {
+  if (backend === 'hermes-agent') return 'native';
+  return compactCapabilityForBackend(backend);
 }
 
 function sendAgentServerRun(

@@ -20,6 +20,7 @@
     "smoke:agentserver-unavailable": "tsx tests/smoke/smoke-agentserver-unavailable-diagnostics.ts",
     "smoke:agentserver-generation": "tsx tests/smoke/smoke-agentserver-generation.ts",
     "smoke:agentserver-context-window": "tsx tests/smoke/smoke-agentserver-context-window-contract.ts",
+    "smoke:backend-handoff-budget": "tsx tests/smoke/smoke-backend-handoff-budget.ts",
     "smoke:agentserver-artifact-followup": "tsx tests/smoke/smoke-artifact-reference-followup.ts",
     "smoke:agentserver-compact-repair": "tsx tests/smoke/smoke-agentserver-compact-repair.ts",
     "smoke:agentserver-supplement": "tsx tests/smoke/smoke-agentserver-supplement.ts && tsx tests/smoke/smoke-agentserver-supplement-scoped.ts",

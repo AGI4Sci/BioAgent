@@ -38,6 +38,31 @@ export interface BackendHandoffNormalizationResult<T = unknown> {
   rawBytes: number;
   normalizedBytes: number;
   budget: BackendHandoffBudget;
+  decisions: BackendHandoffBudgetDecision[];
+  auditRefs: string[];
+  contextEstimate: BackendHandoffContextEstimate;
+}
+
+export interface BackendHandoffBudgetDecision {
+  kind: string;
+  reason?: string;
+  pointer?: string;
+  rawRef: string;
+  estimatedBytes?: number;
+  originalCount?: number;
+  keptCount?: number;
+  omittedCount?: number;
+}
+
+export interface BackendHandoffContextEstimate {
+  source: 'estimate';
+  rawTokens: number;
+  normalizedTokens: number;
+  savedTokens: number;
+  rawBytes: number;
+  normalizedBytes: number;
+  budgetMaxPayloadBytes: number;
+  normalizedBudgetRatio: number;
 }
 
 export const DEFAULT_BACKEND_HANDOFF_BUDGET: BackendHandoffBudget = {
@@ -80,6 +105,7 @@ export async function normalizeBackendHandoff<T = unknown>(
   },
 ): Promise<BackendHandoffNormalizationResult<T>> {
   const budget = { ...DEFAULT_BACKEND_HANDOFF_BUDGET, ...options.budget };
+  const decisions: BackendHandoffBudgetDecision[] = [];
   const rawJson = stringifyJson(input);
   const rawSha1 = sha1Text(rawJson);
   const rawRef = join(
@@ -102,6 +128,7 @@ export async function normalizeBackendHandoff<T = unknown>(
     path: [],
     depth: 0,
     siblingRefs: {},
+    decisions,
   }) as T;
   payload = attachHandoffManifest(payload, {
     budget,
@@ -128,6 +155,7 @@ export async function normalizeBackendHandoff<T = unknown>(
       path: [],
       depth: 0,
       siblingRefs: {},
+      decisions,
     }), {
       budget,
       rawRef,
@@ -138,6 +166,12 @@ export async function normalizeBackendHandoff<T = unknown>(
     normalizedBytes = estimateBytes(payload);
   }
   if (normalizedBytes > budget.maxPayloadBytes) {
+    decisions.push({
+      kind: 'backend-handoff',
+      reason: 'payload-budget',
+      rawRef,
+      estimatedBytes: Buffer.byteLength(rawJson, 'utf8'),
+    });
     payload = attachHandoffManifest({
       _bioagentCompacted: true,
       kind: 'backend-handoff',
@@ -165,6 +199,16 @@ export async function normalizeBackendHandoff<T = unknown>(
     rawBytes: Buffer.byteLength(rawJson, 'utf8'),
     normalizedBytes,
     budget,
+    decisions,
+    auditRefs: [
+      `backend-handoff:${safeToken(options.purpose)}:${rawSha1.slice(0, 12)}`,
+      rawRef,
+    ],
+    contextEstimate: estimateHandoffContext({
+      rawBytes: Buffer.byteLength(rawJson, 'utf8'),
+      normalizedBytes,
+      maxPayloadBytes: budget.maxPayloadBytes,
+    }),
   };
 }
 
@@ -174,6 +218,7 @@ function normalizeHandoffValue(value: unknown, context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === 'string') return normalizeHandoffString(value, context);
@@ -190,6 +235,7 @@ function normalizeHandoffObject(value: Record<string, unknown>, context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }) {
   const lowerPath = context.path.map((part) => part.toLowerCase());
   if (looksLikeArtifact(value) || lowerPath.includes('artifacts')) return normalizeHandoffArtifact(value, context);
@@ -233,6 +279,13 @@ function normalizeHandoffObject(value: Record<string, unknown>, context: {
       rawRef: context.rawRef,
       pointer: jsonPointer(context.path),
     };
+    context.decisions.push({
+      kind: 'object-fields',
+      rawRef: context.rawRef,
+      pointer: jsonPointer(context.path),
+      originalCount: Object.keys(value).length,
+      keptCount: entries.length,
+    });
   }
   if (estimateBytes(out) > context.budget.maxInlineJsonBytes && context.path.length > 0 && !shouldPreserveHandoffContainer(context.path)) {
     return {
@@ -249,6 +302,7 @@ function normalizeHandoffArtifact(value: Record<string, unknown>, context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }) {
   const out: Record<string, unknown> = {};
   for (const key of ['id', 'type', 'title', 'name', 'schemaVersion', 'dataRef', 'path', 'ref', 'outputRef', 'artifactRef', 'mimeType', 'contentType']) {
@@ -278,6 +332,7 @@ function normalizeHandoffArray(value: unknown[], context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }) {
   const normalizedItems = value.slice(0, context.budget.maxArrayItems).map((item, index) => normalizeHandoffValue(item, {
     ...context,
@@ -315,6 +370,7 @@ function normalizeHandoffString(value: string, context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }) {
   const key = context.path.at(-1)?.toLowerCase() || '';
   const logRef = key === 'stdout'
@@ -325,6 +381,12 @@ function normalizeHandoffString(value: string, context: {
   const binaryLike = isBinaryLikeString(value) || /^(pdf|image|binary|blob|base64|content)$/i.test(key) && value.length > 512;
   const mustCompact = value.length > context.budget.maxInlineStringChars || binaryLike || key === 'stdout' || key === 'stderr';
   if (!mustCompact) return value;
+  context.decisions.push({
+    kind: binaryLike ? 'binary' : key === 'stdout' || key === 'stderr' ? 'tool-output' : 'string',
+    rawRef: logRef ?? context.rawRef,
+    pointer: logRef ? undefined : jsonPointer(context.path),
+    estimatedBytes: Buffer.byteLength(value, 'utf8'),
+  });
   return {
     _bioagentCompacted: true,
     kind: binaryLike ? 'binary' : key === 'stdout' || key === 'stderr' ? 'tool-output' : 'string',
@@ -345,8 +407,15 @@ function compactBackendInputText(value: string, context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }) {
   if (value.length <= context.budget.maxInlineStringChars) return value;
+  context.decisions.push({
+    kind: 'backend-input-text',
+    rawRef: context.rawRef,
+    pointer: jsonPointer(context.path),
+    estimatedBytes: Buffer.byteLength(value, 'utf8'),
+  });
   return [
     '[BioAgent compacted backend input.text to stay within handoff budget.]',
     `rawRef: ${context.rawRef}`,
@@ -368,6 +437,7 @@ function normalizePriorAttempts(value: unknown[], context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }) {
   const kept = value.slice(-context.budget.maxPriorAttempts).map((attempt, index) => {
     if (!isRecord(attempt)) return normalizeHandoffValue(attempt, { ...context, path: [...context.path, String(index)], depth: context.depth + 1 });
@@ -394,6 +464,14 @@ function normalizePriorAttempts(value: unknown[], context: {
     out.hash = sha1Json(attempt);
     return out;
   });
+  context.decisions.push({
+    kind: 'prior-attempts',
+    rawRef: context.rawRef,
+    pointer: jsonPointer(context.path),
+    originalCount: value.length,
+    keptCount: kept.length,
+    omittedCount: Math.max(0, value.length - kept.length),
+  });
   return {
     _bioagentCompacted: value.length > kept.length,
     kind: 'prior-attempts',
@@ -411,8 +489,16 @@ function handoffSummary(value: unknown, context: {
   path: string[];
   depth: number;
   siblingRefs: Record<string, string | undefined>;
+  decisions: BackendHandoffBudgetDecision[];
 }, reason: string) {
   const json = stringifyJson(value);
+  context.decisions.push({
+    kind: Array.isArray(value) ? 'array' : typeof value,
+    reason,
+    rawRef: context.rawRef,
+    pointer: jsonPointer(context.path),
+    estimatedBytes: Buffer.byteLength(json, 'utf8'),
+  });
   return {
     _bioagentCompacted: true,
     kind: Array.isArray(value) ? 'array' : typeof value,
@@ -424,6 +510,25 @@ function handoffSummary(value: unknown, context: {
     schema: inferJsonSchema(value),
     head: json.slice(0, context.budget.headChars),
     tail: json.length > context.budget.headChars ? json.slice(-context.budget.tailChars) : undefined,
+  };
+}
+
+function estimateHandoffContext(params: {
+  rawBytes: number;
+  normalizedBytes: number;
+  maxPayloadBytes: number;
+}): BackendHandoffContextEstimate {
+  const rawTokens = Math.ceil(params.rawBytes / 4);
+  const normalizedTokens = Math.ceil(params.normalizedBytes / 4);
+  return {
+    source: 'estimate',
+    rawTokens,
+    normalizedTokens,
+    savedTokens: Math.max(0, rawTokens - normalizedTokens),
+    rawBytes: params.rawBytes,
+    normalizedBytes: params.normalizedBytes,
+    budgetMaxPayloadBytes: params.maxPayloadBytes,
+    normalizedBudgetRatio: params.maxPayloadBytes ? params.normalizedBytes / params.maxPayloadBytes : 0,
   };
 }
 

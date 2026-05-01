@@ -17,6 +17,12 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+  return entries.length ? entries : undefined;
+}
+
 export async function sendBioAgentToolMessage(
   input: SendAgentMessageInput,
   callbacks: { onEvent?: (event: AgentStreamEvent) => void } = {},
@@ -274,12 +280,12 @@ function normalizeWorkspaceRuntimeEvent(raw: unknown): AgentStreamEvent {
   const type = asString(record.type) || asString(record.kind) || 'workspace-runtime-event';
   const source = asString(record.source);
   const toolName = asString(record.toolName);
-  const contextWindowState = normalizeContextWindowState(record.contextWindowState ?? record.contextWindow ?? record.context_window, type, record);
-  const contextCompaction = normalizeContextCompaction(record.contextCompaction ?? record.compaction ?? record.context_compaction, type, record);
   const usage = normalizeTokenUsage(record.usage)
     ?? normalizeTokenUsage(isRecord(record.output) ? record.output.usage : undefined)
     ?? normalizeTokenUsage(isRecord(record.result) ? record.result.usage : undefined)
     ?? normalizeTokenUsage(isRecord(record.result) && isRecord(record.result.output) ? record.result.output.usage : undefined);
+  const contextWindowState = normalizeContextWindowState(record.contextWindowState ?? record.contextWindow ?? record.context_window ?? record.usage, type, record);
+  const contextCompaction = normalizeContextCompaction(record.contextCompaction ?? record.compaction ?? record.context_compaction, type, record);
   const baseDetail = asString(record.detail)
     || asString(record.message)
     || asString(record.text)
@@ -305,25 +311,51 @@ function normalizeWorkspaceRuntimeEvent(raw: unknown): AgentStreamEvent {
 function normalizeContextWindowState(value: unknown, type: string, fallback: Record<string, unknown>): AgentStreamEvent['contextWindowState'] | undefined {
   const record = isRecord(value) ? value : type === 'contextWindowState' && isRecord(fallback) ? fallback : undefined;
   if (!record) return undefined;
-  const usedTokens = asNumber(record.usedTokens) ?? asNumber(record.used) ?? asNumber(record.inputTokens) ?? asNumber(record.total);
-  const windowTokens = asNumber(record.windowTokens) ?? asNumber(record.window) ?? asNumber(record.limit) ?? asNumber(record.contextWindow);
+  const usage = isRecord(record.usage) ? record.usage : record;
+  const input = asNumber(record.input) ?? asNumber(record.inputTokens) ?? asNumber(usage.input) ?? asNumber(usage.promptTokens);
+  const output = asNumber(record.output) ?? asNumber(record.outputTokens) ?? asNumber(usage.output) ?? asNumber(usage.completionTokens);
+  const cacheRead = asNumber(record.cacheRead) ?? asNumber(record.cacheReadTokens) ?? asNumber(usage.cacheRead);
+  const cacheWrite = asNumber(record.cacheWrite) ?? asNumber(record.cacheWriteTokens) ?? asNumber(usage.cacheWrite);
+  const cache = asNumber(record.cache) ?? asNumber(record.cacheTokens) ?? asNumber(usage.cache) ?? (
+    cacheRead !== undefined || cacheWrite !== undefined ? (cacheRead ?? 0) + (cacheWrite ?? 0) : undefined
+  );
+  const usedTokens = asNumber(record.usedTokens) ?? asNumber(record.used) ?? asNumber(record.contextWindowTokens) ?? asNumber(record.tokens) ?? asNumber(record.inputTokens) ?? asNumber(record.total) ?? asNumber(usage.total) ?? (
+    input !== undefined || output !== undefined || cache !== undefined ? (input ?? 0) + (output ?? 0) + (cache ?? 0) : undefined
+  );
+  const windowTokens = asNumber(record.windowTokens) ?? asNumber(record.window) ?? asNumber(record.contextWindowLimit) ?? asNumber(record.limit) ?? asNumber(record.contextWindow);
   const ratio = clampRatio(asNumber(record.ratio) ?? asNumber(record.contextWindowRatio) ?? (
     usedTokens !== undefined && windowTokens ? usedTokens / windowTokens : undefined
   ));
-  const source = normalizeContextWindowSource(asString(record.source) ?? asString(record.contextWindowSource));
+  const hasUsage = input !== undefined || output !== undefined || cache !== undefined || asNumber(usage.total) !== undefined;
+  const explicitSource = asString(record.source) ?? asString(record.contextWindowSource);
+  const source = explicitSource
+    ? (normalizeContextWindowSource(explicitSource) === 'unknown' && hasUsage ? 'provider-usage' : normalizeContextWindowSource(explicitSource))
+    : (hasUsage ? 'provider-usage' : 'unknown');
   const state = {
+    backend: asString(record.backend) ?? asString(usage.provider),
+    provider: asString(record.provider) ?? asString(usage.provider),
+    model: asString(record.model) ?? asString(usage.model),
     usedTokens,
+    input,
+    output,
+    cache,
+    window: windowTokens,
     windowTokens,
     ratio,
     source,
-    backend: asString(record.backend),
+    status: normalizeContextWindowStatus(asString(record.status), ratio, clampRatio(asNumber(record.autoCompactThreshold))),
     compactCapability: normalizeCompactCapability(asString(record.compactCapability) ?? asString(record.compactionCapability)),
+    budget: normalizeContextBudget(record.budget),
+    auditRefs: asStringArray(record.auditRefs),
     autoCompactThreshold: clampRatio(asNumber(record.autoCompactThreshold)),
     watchThreshold: clampRatio(asNumber(record.watchThreshold)),
     nearLimitThreshold: clampRatio(asNumber(record.nearLimitThreshold)),
     lastCompactedAt: asString(record.lastCompactedAt),
     pendingCompact: typeof record.pendingCompact === 'boolean' ? record.pendingCompact : undefined,
   };
+  if (state.compactCapability === 'unknown' && state.backend) {
+    state.compactCapability = compactCapabilityForBackend(state.backend);
+  }
   return state.usedTokens !== undefined || state.windowTokens !== undefined || state.ratio !== undefined || state.source !== 'unknown'
     ? state
     : undefined;
@@ -337,26 +369,76 @@ function normalizeContextCompaction(value: unknown, type: string, fallback: Reco
     source: normalizeContextWindowSource(asString(record.source)),
     backend: asString(record.backend),
     compactCapability: normalizeCompactCapability(asString(record.compactCapability) ?? asString(record.compactionCapability)),
+    before: normalizeContextWindowState(record.before, 'contextWindowState', {}),
+    after: normalizeContextWindowState(record.after, 'contextWindowState', {}),
+    auditRefs: asStringArray(record.auditRefs),
     startedAt: asString(record.startedAt),
     completedAt: asString(record.completedAt),
     lastCompactedAt: asString(record.lastCompactedAt) ?? asString(record.completedAt),
     reason: asString(record.reason),
-    message: asString(record.message) ?? asString(record.detail),
+    message: asString(record.message) ?? asString(record.userVisibleSummary) ?? asString(record.detail),
   };
 }
 
 function normalizeContextWindowSource(value?: string): NonNullable<AgentStreamEvent['contextWindowState']>['source'] {
-  if (value === 'native' || value === 'agentserver' || value === 'estimate' || value === 'unknown') return value;
+  if (value === 'native' || value === 'provider-usage' || value === 'agentserver-estimate' || value === 'agentserver' || value === 'estimate' || value === 'unknown') return value;
+  if (value === 'usage' || value === 'provider') return 'provider-usage';
+  if (value === 'backend') return 'native';
+  if (value === 'handoff') return 'agentserver-estimate';
   return 'unknown';
 }
 
 function normalizeCompactCapability(value?: string): NonNullable<AgentStreamEvent['contextWindowState']>['compactCapability'] {
-  if (value === 'native' || value === 'agentserver' || value === 'handoff-slimming' || value === 'session-rotate' || value === 'none' || value === 'unknown') return value;
+  if (value === 'native' || value === 'agentserver' || value === 'handoff-only' || value === 'handoff-slimming' || value === 'session-rotate' || value === 'none' || value === 'unknown') return value;
   return 'unknown';
+}
+
+function compactCapabilityForBackend(backend: string): NonNullable<AgentStreamEvent['contextWindowState']>['compactCapability'] {
+  if (backend === 'codex') return 'native';
+  if (backend === 'openteam_agent' || backend === 'hermes-agent') return 'agentserver';
+  if (backend === 'gemini') return 'session-rotate';
+  if (backend === 'claude-code' || backend === 'openclaw') return 'handoff-only';
+  return 'unknown';
+}
+
+function normalizeContextWindowStatus(
+  value: string | undefined,
+  ratio: number | undefined,
+  autoCompactThreshold: number | undefined,
+): NonNullable<AgentStreamEvent['contextWindowState']>['status'] {
+  if (value === 'healthy' || value === 'watch' || value === 'near-limit' || value === 'exceeded' || value === 'compacting' || value === 'blocked' || value === 'unknown') return value;
+  if (value && /exceeded|overflow|max|full/i.test(value)) return 'exceeded';
+  if (value && /compact/i.test(value)) return 'compacting';
+  if (value && /blocked|rate/i.test(value)) return 'blocked';
+  if (value && /near|critical|warning/i.test(value)) return 'near-limit';
+  if (value && /watch/i.test(value)) return 'watch';
+  if (value && /healthy|ok|normal/i.test(value)) return 'healthy';
+  if (ratio !== undefined && ratio >= 1) return 'exceeded';
+  if (ratio !== undefined && ratio >= (autoCompactThreshold ?? 0.82)) return 'near-limit';
+  if (ratio !== undefined && ratio >= 0.68) return 'watch';
+  return ratio === undefined ? 'unknown' : 'healthy';
+}
+
+function normalizeContextBudget(value: unknown): NonNullable<AgentStreamEvent['contextWindowState']>['budget'] | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    rawRef: asString(value.rawRef),
+    rawSha1: asString(value.rawSha1),
+    rawBytes: asNumber(value.rawBytes),
+    normalizedBytes: asNumber(value.normalizedBytes),
+    maxPayloadBytes: asNumber(value.maxPayloadBytes),
+    rawTokens: asNumber(value.rawTokens),
+    normalizedTokens: asNumber(value.normalizedTokens),
+    savedTokens: asNumber(value.savedTokens),
+    normalizedBudgetRatio: clampRatio(asNumber(value.normalizedBudgetRatio)),
+    decisions: Array.isArray(value.decisions) ? value.decisions.filter(isRecord) : undefined,
+  };
 }
 
 function normalizeCompactionStatus(value?: string): NonNullable<AgentStreamEvent['contextCompaction']>['status'] {
   if (value === 'started' || value === 'completed' || value === 'failed' || value === 'pending' || value === 'skipped') return value;
+  if (value === 'compacted') return 'completed';
+  if (value === 'unsupported') return 'skipped';
   return 'pending';
 }
 

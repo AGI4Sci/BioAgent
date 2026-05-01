@@ -128,6 +128,19 @@ export const runtimeContractSchemas = {
       objectReferences: { type: 'array', items: { $ref: 'bioagent.object-reference.schema.json' } },
       repairPrompt: { type: 'string' },
       repairAttempt: { type: 'number' },
+      semantic: {
+        type: 'object',
+        required: ['pass', 'confidence', 'unmetCriteria', 'missingArtifacts', 'referencedEvidence'],
+        properties: {
+          pass: { type: 'boolean' },
+          confidence: { type: 'number' },
+          unmetCriteria: { type: 'array', items: { type: 'string' } },
+          missingArtifacts: { type: 'array', items: { type: 'string' } },
+          referencedEvidence: { type: 'array', items: { type: 'string' } },
+          repairPrompt: { type: 'string' },
+          backendRunRef: { type: 'string' },
+        },
+      },
     },
   },
 } as const;
@@ -222,6 +235,19 @@ function validateTurnAcceptance(value: unknown): string[] {
       for (const error of validateObjectReference(reference)) errors.push(`turnAcceptance.objectReferences.${index}: ${error}`);
     });
   }
+  if (record.semantic !== undefined) errors.push(...validateSemanticTurnAcceptance(record.semantic));
+  return errors;
+}
+
+function validateSemanticTurnAcceptance(value: unknown): string[] {
+  const errors = requireRecord(value, 'semanticTurnAcceptance');
+  if (errors.length) return errors;
+  const record = value as Record<string, unknown>;
+  if (typeof record.pass !== 'boolean') errors.push('semanticTurnAcceptance.pass must be a boolean');
+  if (typeof record.confidence !== 'number') errors.push('semanticTurnAcceptance.confidence must be a number');
+  validateOptionalStringArray(record.unmetCriteria, 'semanticTurnAcceptance.unmetCriteria', errors);
+  validateOptionalStringArray(record.missingArtifacts, 'semanticTurnAcceptance.missingArtifacts', errors);
+  validateOptionalStringArray(record.referencedEvidence, 'semanticTurnAcceptance.referencedEvidence', errors);
   return errors;
 }
 

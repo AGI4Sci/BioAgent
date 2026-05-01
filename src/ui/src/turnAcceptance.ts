@@ -9,6 +9,7 @@ import type {
   RuntimeExecutionUnit,
   ScenarioInstanceId,
   ScenarioRuntimeOverride,
+  SemanticTurnAcceptance,
   TurnAcceptance,
   TurnAcceptanceFailure,
   UserGoalSnapshot,
@@ -30,7 +31,10 @@ type AcceptanceInput = {
   snapshot: UserGoalSnapshot;
   response: NormalizedAgentResponse;
   session: BioAgentSession;
+  semanticAcceptance?: SemanticTurnAcceptance;
 };
+
+const BACKEND_REPAIR_ACTIONS = new Set(['artifact-repair', 'execution-repair']);
 
 export function buildUserGoalSnapshot({
   turnId,
@@ -80,15 +84,17 @@ export function acceptAndRepairAgentResponse({
   snapshot,
   response,
   session,
+  semanticAcceptance,
 }: AcceptanceInput): NormalizedAgentResponse {
   const extractedReferences = extractObjectReferencesFromTurnText(response, session);
   const existingReferences = response.message.objectReferences ?? [];
   const objectReferences = mergeObjectReferences([...existingReferences, ...extractedReferences]);
-  const acceptance = evaluateTurnAcceptance(snapshot, {
+  const deterministicAcceptance = evaluateTurnAcceptance(snapshot, {
     ...response,
     message: { ...response.message, objectReferences },
     run: { ...response.run, objectReferences },
   }, session, objectReferences);
+  const acceptance = mergeSemanticAcceptance(deterministicAcceptance, semanticAcceptance);
   const repairedMessage = presentationRepairMessage(response.message.content, acceptance);
   const repairedRaw = enrichRaw(response.run.raw, snapshot, acceptance, objectReferences);
   return {
@@ -109,6 +115,68 @@ export function acceptAndRepairAgentResponse({
       raw: repairedRaw,
     },
   };
+}
+
+export function shouldRunBackendAcceptanceRepair(acceptance: TurnAcceptance | undefined, maxAttempts = 1) {
+  if (!acceptance || acceptance.pass) return false;
+  if (!acceptance.failures.some((failure) => BACKEND_REPAIR_ACTIONS.has(failure.repairAction ?? ''))) return false;
+  const backendAttempts = (acceptance.repairHistory ?? []).filter((attempt) => BACKEND_REPAIR_ACTIONS.has(attempt.action)).length;
+  return backendAttempts < maxAttempts;
+}
+
+export function buildBackendAcceptanceRepairPrompt({
+  snapshot,
+  acceptance,
+  response,
+  session,
+}: {
+  snapshot: UserGoalSnapshot;
+  acceptance: TurnAcceptance;
+  response: NormalizedAgentResponse;
+  session: BioAgentSession;
+}) {
+  const backendFailures = acceptance.failures.filter((failure) => BACKEND_REPAIR_ACTIONS.has(failure.repairAction ?? ''));
+  const payload = {
+    kind: 'BioAgentAcceptanceRepairRequest',
+    UserGoalSnapshot: snapshot,
+    acceptanceFailures: {
+      deterministic: backendFailures,
+      semantic: acceptance.semantic ? {
+        pass: acceptance.semantic.pass,
+        confidence: acceptance.semantic.confidence,
+        unmetCriteria: acceptance.semantic.unmetCriteria,
+        missingArtifacts: acceptance.semantic.missingArtifacts,
+        referencedEvidence: acceptance.semantic.referencedEvidence,
+        repairPrompt: acceptance.semantic.repairPrompt,
+        backendRunRef: acceptance.semantic.backendRunRef,
+      } : [],
+    },
+    currentArtifacts: summarizeArtifactsForRepair([...response.artifacts, ...session.artifacts]),
+    objectReferences: acceptance.objectReferences,
+    runReferences: summarizeRunsForRepair([response.run, ...session.runs]),
+    executionReferences: summarizeExecutionsForRepair([...response.executionUnits, ...session.executionUnits]),
+    failureReferences: summarizeFailureRefsForRepair(response, session),
+    expectedOutputFormat: {
+      message: 'User-readable final answer in Chinese, without raw ToolPayload JSON.',
+      artifacts: snapshot.requiredArtifacts,
+      formats: snapshot.requiredFormats,
+      objectReferences: 'Return objectReferences for every generated artifact/file/run/execution-unit. Markdown reports must include a .md file/ref when requested.',
+      executionUnits: 'Return ExecutionUnit records with status done or failed-with-reason. If repair cannot complete, include failureReason plus stdoutRef/stderrRef/codeRef.',
+      failureBehavior: 'If the repair cannot satisfy the acceptance failures, return failed-with-reason and do not present partial work as success.',
+    },
+    constraints: {
+      maxBackendRepairAttemptsThisTurn: 1,
+      sourceRunId: response.run.id,
+      preserveAttemptHistory: true,
+      repairActions: Array.from(new Set(backendFailures.map((failure) => failure.repairAction).filter(Boolean))),
+    },
+  };
+  return [
+    'BioAgent acceptance gate requires one backend artifact/execution repair rerun.',
+    'Do not repeat broad research unless required; repair only the missing artifact/file/visualization/execution result.',
+    'Return a normal BioAgent JSON-compatible result with message, artifacts, executionUnits, objectReferences, and uiManifest when useful.',
+    JSON.stringify(payload, null, 2),
+  ].join('\n\n');
 }
 
 export function extractObjectReferencesFromTurnText(response: NormalizedAgentResponse, session: BioAgentSession): ObjectReference[] {
@@ -251,6 +319,21 @@ function evaluateTurnAcceptance(
 ): TurnAcceptance {
   const failures: TurnAcceptanceFailure[] = [];
   const content = response.message.content.trim();
+  const failedExecutionUnits = response.executionUnits.filter((unit) => isFailedExecutionStatus(unit.status));
+  if (response.run.status === 'failed' || failedExecutionUnits.length) {
+    const details = failedExecutionUnits.map((unit) => [
+      unit.id,
+      unit.status,
+      unit.failureReason,
+      unit.stderrRef ? `stderrRef=${unit.stderrRef}` : '',
+      unit.codeRef ? `codeRef=${unit.codeRef}` : '',
+    ].filter(Boolean).join(' '));
+    failures.push({
+      code: 'execution-failed',
+      detail: details.length ? `Execution did not complete: ${details.join('; ')}` : 'Agent run failed before producing a completed execution result.',
+      repairAction: 'execution-repair',
+    });
+  }
   if (!content) {
     failures.push({ code: 'empty-final-response', detail: 'Agent final response is empty.', repairAction: 'artifact-repair' });
   }
@@ -269,11 +352,24 @@ function evaluateTurnAcceptance(
       failures.push({ code: 'missing-readable-report', detail: 'Report request did not produce readable markdown/report content or a clickable .md reference.', repairAction: 'artifact-repair' });
     }
   }
+  if (snapshot.goalType === 'visualization' || snapshot.requiredArtifacts.some((artifact) => /visual|plot|chart|figure|image/i.test(artifact))) {
+    if (!hasVisualization(response, objectReferences)) {
+      failures.push({ code: 'missing-visualization', detail: 'Visualization request did not produce a visual artifact, image/html ref, or usable UI module.', repairAction: 'artifact-repair' });
+    }
+  }
   if (snapshot.uiExpectations.includes('clickable-object-references') && !objectReferences.length) {
     failures.push({ code: 'missing-object-references', detail: 'User-visible paths or artifacts were not normalized into clickable object references.', repairAction: 'presentation-repair' });
   }
   const repairable = failures.length && failures.every((failure) => failure.repairAction === 'presentation-repair');
-  const severity = !failures.length ? 'pass' : repairable ? 'repairable' : failures.some((failure) => failure.repairAction === 'artifact-repair') ? 'warning' : 'failed';
+  const severity = !failures.length
+    ? 'pass'
+    : repairable
+      ? 'repairable'
+      : failures.some((failure) => failure.repairAction === 'execution-repair')
+        ? 'failed'
+        : failures.some((failure) => failure.repairAction === 'artifact-repair')
+          ? 'warning'
+          : 'failed';
   return {
     pass: failures.length === 0,
     severity,
@@ -285,8 +381,69 @@ function evaluateTurnAcceptance(
   };
 }
 
+function mergeSemanticAcceptance(
+  deterministic: TurnAcceptance,
+  semantic: SemanticTurnAcceptance | undefined,
+): TurnAcceptance {
+  if (!semantic) return deterministic;
+  const semanticFailures = semantic.pass ? [] : semanticFailuresFromAcceptance(semantic);
+  const failures = [...deterministic.failures, ...semanticFailures];
+  const deterministicVeto = !deterministic.pass;
+  const semanticRepairPrompt = semantic.pass ? undefined : semantic.repairPrompt;
+  const repairPrompt = deterministic.repairPrompt ?? semanticRepairPrompt;
+  const semanticRepairable = semanticFailures.length > 0 && Boolean(semanticRepairPrompt);
+  const severity: TurnAcceptance['severity'] = deterministicVeto
+    ? deterministic.severity
+    : semanticFailures.length === 0
+      ? 'pass'
+      : semanticRepairable
+        ? 'repairable'
+        : 'failed';
+  return {
+    ...deterministic,
+    pass: deterministic.pass && semantic.pass,
+    severity,
+    failures,
+    repairPrompt,
+    repairAttempt: semanticRepairable ? Math.max(deterministic.repairAttempt ?? 0, 1) : deterministic.repairAttempt,
+    semantic,
+  };
+}
+
+function semanticFailuresFromAcceptance(semantic: SemanticTurnAcceptance): TurnAcceptanceFailure[] {
+  const failures: TurnAcceptanceFailure[] = [];
+  if (semantic.unmetCriteria.length) {
+    failures.push({
+      code: 'semantic-unmet-criteria',
+      detail: `Semantic acceptance found unmet criteria: ${semantic.unmetCriteria.join('; ')}`,
+      repairAction: semantic.repairPrompt ? 'artifact-repair' : 'execution-repair',
+    });
+  }
+  if (semantic.missingArtifacts.length) {
+    failures.push({
+      code: 'semantic-missing-artifacts',
+      detail: `Semantic acceptance found missing artifacts: ${semantic.missingArtifacts.join('; ')}`,
+      repairAction: 'artifact-repair',
+    });
+  }
+  if (!failures.length) {
+    failures.push({
+      code: 'semantic-goal-unmet',
+      detail: 'Semantic acceptance judged that the final answer does not satisfy the user goal.',
+      repairAction: semantic.repairPrompt ? 'artifact-repair' : 'execution-repair',
+    });
+  }
+  return failures;
+}
+
+function isFailedExecutionStatus(status: RuntimeExecutionUnit['status']) {
+  return status === 'failed' || status === 'failed-with-reason' || status === 'repair-needed';
+}
+
 function hasReadableReport(response: NormalizedAgentResponse, objectReferences: ObjectReference[]) {
-  if (/^#{1,3}\s|\n#{1,3}\s|\.md\b|markdown|报告/i.test(response.message.content) && !looksLikeRawPayload(response.message.content)) return true;
+  if ((/^#{1,3}\s|\n#{1,3}\s|\.md\b|markdown/i.test(response.message.content)
+    || (response.message.content.length > 400 && /摘要|方法|结果|结论|局限|证据/.test(response.message.content)))
+    && !looksLikeRawPayload(response.message.content)) return true;
   for (const artifact of response.artifacts) {
     if (!/report|markdown|document|summary/i.test(artifact.type)) continue;
     const data = artifact.data;
@@ -295,6 +452,12 @@ function hasReadableReport(response: NormalizedAgentResponse, objectReferences: 
     if (artifact.path?.match(/\.md$/i) || artifact.dataRef?.match(/\.md$/i)) return true;
   }
   return objectReferences.some((reference) => reference.kind === 'file' && /\.md($|[?#])/i.test(reference.ref));
+}
+
+function hasVisualization(response: NormalizedAgentResponse, objectReferences: ObjectReference[]) {
+  if (response.uiManifest.some((slot) => /plot|chart|visual|image|viewer|graph/i.test(slot.componentId) && slot.artifactRef)) return true;
+  if (response.artifacts.some((artifact) => /visual|plot|chart|figure|image|png|svg|html/i.test(`${artifact.type} ${artifact.path ?? ''} ${artifact.dataRef ?? ''}`))) return true;
+  return objectReferences.some((reference) => /\.(png|jpe?g|gif|webp|svg|html?)($|[?#])/i.test(reference.ref) || /visual|plot|chart|figure|image/i.test(reference.artifactType ?? ''));
 }
 
 function presentationRepairMessage(content: string, acceptance: TurnAcceptance) {
@@ -325,6 +488,72 @@ function buildRepairPrompt(snapshot: UserGoalSnapshot, failures: TurnAcceptanceF
     `Current response: ${response.message.content.slice(0, 1200)}`,
     'Repair requirement: return user-readable final content and required artifacts/objectReferences without exposing raw ToolPayload JSON.',
   ].join('\n');
+}
+
+function summarizeArtifactsForRepair(artifacts: RuntimeArtifact[]) {
+  return artifacts.slice(0, 16).map((artifact) => ({
+    id: artifact.id,
+    type: artifact.type,
+    path: artifact.path,
+    dataRef: artifact.dataRef,
+    status: stringFromRecord(artifact.metadata, 'status') || stringFromRecord(artifact.data, 'status'),
+    failureReason: stringFromRecord(artifact.metadata, 'failureReason') || stringFromRecord(artifact.data, 'failureReason'),
+    refs: compactRefs(artifact),
+  }));
+}
+
+function summarizeRunsForRepair(runs: NormalizedAgentResponse['run'][]) {
+  return runs.slice(0, 8).map((run) => ({
+    id: run.id,
+    status: run.status,
+    prompt: run.prompt?.slice(0, 600),
+    responsePreview: run.response?.slice(0, 600),
+    objectReferences: run.objectReferences?.map((reference) => reference.ref),
+  }));
+}
+
+function summarizeExecutionsForRepair(units: RuntimeExecutionUnit[]) {
+  return units.slice(0, 16).map((unit) => ({
+    id: unit.id,
+    status: unit.status,
+    tool: unit.tool,
+    attempt: unit.attempt,
+    parentAttempt: unit.parentAttempt,
+    codeRef: unit.codeRef,
+    stdoutRef: unit.stdoutRef,
+    stderrRef: unit.stderrRef,
+    outputRef: unit.outputRef,
+    failureReason: unit.failureReason,
+    recoverActions: unit.recoverActions,
+    nextStep: unit.nextStep,
+  }));
+}
+
+function summarizeFailureRefsForRepair(response: NormalizedAgentResponse, session: BioAgentSession) {
+  return summarizeExecutionsForRepair([...response.executionUnits, ...session.executionUnits])
+    .filter((unit) => unit.status === 'failed' || unit.status === 'failed-with-reason' || unit.status === 'repair-needed' || unit.failureReason || unit.stderrRef || unit.stdoutRef || unit.codeRef);
+}
+
+function compactRefs(value: unknown) {
+  const refs = new Set<string>();
+  const visit = (entry: unknown, key = '') => {
+    if (refs.size >= 16) return;
+    if (typeof entry === 'string') {
+      if (/\.bioagent\/|file:|folder:|artifact:|run:|execution-unit:|stdout|stderr|output|code|\.md|\.csv|\.json|\.png|\.svg|\.html/i.test(entry)
+        || /path|ref|file|dir|stdout|stderr|output|code|failure/i.test(key)) {
+        refs.add(entry);
+      }
+      return;
+    }
+    if (Array.isArray(entry)) {
+      for (const item of entry.slice(0, 24)) visit(item, key);
+      return;
+    }
+    if (!isRecord(entry)) return;
+    for (const [childKey, childValue] of Object.entries(entry).slice(0, 48)) visit(childValue, childKey);
+  };
+  visit(value);
+  return refs.size ? Array.from(refs) : undefined;
 }
 
 function enrichRaw(raw: unknown, snapshot: UserGoalSnapshot, acceptance: TurnAcceptance, objectReferences: ObjectReference[]) {

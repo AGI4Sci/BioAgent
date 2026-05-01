@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { agentServerGenerationSkill, loadSkillRegistry } from './skill-registry.js';
 import { appendTaskAttempt, readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
-import type { AgentBackendAdapter, AgentBackendCapabilities, AgentServerGenerationResponse, BackendContextCompactionResult, BackendContextWindowState, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
+import type { AgentBackendAdapter, AgentBackendCapabilities, AgentServerGenerationResponse, BackendContextCompactionResult, BackendContextWindowState, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeContextBudget, WorkspaceRuntimeContextWindowSource, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
 import { fileExists, runWorkspaceTask, sha1 } from './workspace-task-runner.js';
 import { maybeWriteSkillPromotionProposal } from './skill-promotion.js';
 import { emitWorkspaceRuntimeEvent, throwIfRuntimeAborted } from './workspace-runtime-events.js';
@@ -17,6 +17,68 @@ const AGENT_BACKEND_ANSWER_PRINCIPLE = [
 ].join(' ');
 
 type AgentServerContextMode = 'full' | 'delta';
+
+type AgentServerBackendFailureKind =
+  | 'context-window'
+  | 'http-429'
+  | 'rate-limit'
+  | 'retry-budget'
+  | 'too-many-failed-attempts';
+
+interface AgentServerBackendFailureDiagnostic {
+  kind: AgentServerBackendFailureKind;
+  categories: AgentServerBackendFailureKind[];
+  backend?: string;
+  provider?: string;
+  model?: string;
+  httpStatus?: number;
+  retryAfterMs?: number;
+  resetAt?: string;
+  message: string;
+}
+
+interface AgentServerGenerationRetryAudit {
+  schemaVersion: 'bioagent.agentserver-generation-retry.v1';
+  attempt: 2;
+  maxAttempts: 2;
+  trigger: AgentServerBackendFailureDiagnostic;
+  firstFailedAt: string;
+  backoffMs: number;
+  recoveryActions: string[];
+  contextPolicy: {
+    mode: 'delta';
+    handoff: 'slimmed';
+    compactBeforeRetry: true;
+    maxRetryCount: 1;
+  };
+  compaction?: ReturnType<typeof contextCompactionMetadata>;
+  priorHandoff?: {
+    rawRef: string;
+    rawBytes: number;
+    normalizedBytes: number;
+  };
+}
+type AgentServerGenerationFailureDiagnostics = {
+  kind: 'contextWindowExceeded' | 'rateLimit' | 'agentserver';
+  categories?: AgentServerBackendFailureKind[];
+  retryAfterMs?: number;
+  resetAt?: string;
+  retryAudit?: AgentServerGenerationRetryAudit;
+  backend?: string;
+  provider?: string;
+  model?: string;
+  agentId?: string;
+  sessionRef?: string;
+  originalErrorSummary: string;
+  compaction?: BackendContextCompactionResult;
+  priorHandoff?: AgentServerGenerationRetryAudit['priorHandoff'];
+  retryAttempted?: boolean;
+  retrySucceeded?: boolean;
+};
+type AgentServerGenerationResult =
+  | { ok: true; runId?: string; response: AgentServerGenerationResponse }
+  | { ok: true; runId?: string; directPayload: ToolPayload }
+  | { ok: false; error: string; diagnostics?: AgentServerGenerationFailureDiagnostics };
 
 export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>, callbacks: WorkspaceRuntimeCallbacks = {}): Promise<ToolPayload> {
   const request = normalizeGatewayRequest(body);
@@ -52,19 +114,31 @@ async function runAgentServerGeneratedTask(
     callbacks,
   });
   if (!generation.ok) {
+    const failureReason = agentServerGenerationFailureReason(generation.error, generation.diagnostics);
     const failedRequestId = `agentserver-generation-${request.skillDomain}-${sha1(`${request.prompt}:${generation.error}`).slice(0, 12)}`;
     await appendTaskAttempt(workspace, {
       id: failedRequestId,
       prompt: request.prompt,
       skillDomain: request.skillDomain,
-      ...attemptPlanRefs(request, skill, generation.error),
+      ...attemptPlanRefs(request, skill, failureReason),
       skillId: skill.id,
       attempt: 1,
       status: 'repair-needed',
-      failureReason: generation.error,
+      failureReason,
+      contextRecovery: generation.diagnostics?.kind === 'contextWindowExceeded' ? {
+        kind: 'contextWindowExceeded',
+        backend: generation.diagnostics.backend,
+        provider: generation.diagnostics.provider,
+        agentId: generation.diagnostics.agentId,
+        sessionRef: generation.diagnostics.sessionRef,
+        originalErrorSummary: generation.diagnostics.originalErrorSummary,
+        compaction: generation.diagnostics.compaction,
+        retryAttempted: generation.diagnostics.retryAttempted,
+        retrySucceeded: generation.diagnostics.retrySucceeded,
+      } : undefined,
       createdAt: new Date().toISOString(),
     });
-    return repairNeededPayload(request, skill, generation.error);
+    return repairNeededPayload(request, skill, failureReason, agentServerFailurePayloadRefs(generation.diagnostics));
   }
   if ('directPayload' in generation) {
     const directGeneration = generation;
@@ -859,6 +933,7 @@ async function preflightAgentServerContextWindow(params: {
       status: state.status,
       message: `AgentServer context window ${state.status}`,
       detail: formatContextWindowState(state),
+      contextWindowState: workspaceContextWindowStateFromBackend(state),
       raw: state,
     });
   }
@@ -868,10 +943,13 @@ async function preflightAgentServerContextWindow(params: {
   const reason = `preflight:${state.status}:${formatContextWindowState(state)}`;
   const compaction = await params.adapter.compactContext?.(sessionRef, reason);
   if (compaction) {
+    const compactionStatus = compaction.status === 'unsupported' || compaction.status === 'skipped'
+      ? 'skipped'
+      : compaction.ok ? 'completed' : 'failed';
     emitWorkspaceRuntimeEvent(params.callbacks, {
       type: 'agentserver-context-compaction',
       source: 'workspace-runtime',
-      status: compaction.ok ? 'completed' : 'failed',
+      status: compactionStatus,
       message: `AgentServer context compaction ${compaction.strategy}`,
       detail: compaction.message || compaction.reason,
       raw: compaction,
@@ -881,7 +959,7 @@ async function preflightAgentServerContextWindow(params: {
   return {
     state: after,
     compaction,
-    forceSlimHandoff: !compaction?.ok || compaction.strategy === 'handoff-slimming',
+    forceSlimHandoff: !compaction?.ok || compaction.strategy === 'handoff-slimming' || compaction.strategy === 'session-rotate',
   };
 }
 
@@ -917,24 +995,44 @@ async function compactBackendContext(
   reason: string,
 ): Promise<BackendContextCompactionResult> {
   const before = await readBackendContextWindowState(sessionRef, backend, capabilities);
+  const managedByAgentServer = isAgentServerManagedCompactionBackend(backend);
   if (!capabilities.nativeCompaction) {
     const agentServerCompaction = await requestAgentServerCompact(sessionRef, backend, reason, before);
     if (agentServerCompaction.ok) return agentServerCompaction;
+    if (managedByAgentServer) {
+      return {
+        ok: false,
+        status: agentServerCompaction.status === 'unsupported' ? 'unsupported' : 'failed',
+        backend,
+        agentId: sessionRef.agentId,
+        strategy: 'agentserver',
+        reason,
+        before,
+        after: markAgentServerManagedFallbackState(before, sessionRef.agentId, backend),
+        message: agentServerCompaction.message || 'AgentServer session/current-work compaction was unavailable for this managed backend.',
+        auditRefs: agentServerCompaction.auditRefs,
+      };
+    }
     return {
-      ok: true,
+      ok: false,
+      status: agentServerCompaction.status === 'unsupported' ? 'unsupported' : 'skipped',
       backend,
       agentId: sessionRef.agentId,
-      strategy: capabilities.sessionRotationSafe ? 'handoff-slimming' : 'none',
+      strategy: backend === 'gemini' && capabilities.sessionRotationSafe ? 'session-rotate' : capabilities.sessionRotationSafe ? 'handoff-slimming' : 'none',
       reason,
       before,
       after: markHandoffSlimmingState(before, sessionRef.agentId, backend),
-      message: agentServerCompaction.message || 'Backend has no native compaction; using compact handoff refs for this turn.',
+      message: agentServerCompaction.message || (backend === 'gemini'
+        ? 'Gemini SDK/API has no native compaction/reset; using AgentServer context compaction and session rotation fallback.'
+        : 'Backend has no native compaction; using compact handoff refs for this turn.'),
+      auditRefs: agentServerCompaction.auditRefs,
     };
   }
   const native = await requestAgentServerCompact(sessionRef, backend, reason, before);
   if (native.ok) return native;
   return {
-    ok: true,
+    ok: false,
+    status: native.status === 'unsupported' ? 'unsupported' : 'skipped',
     backend,
     agentId: sessionRef.agentId,
     strategy: 'handoff-slimming',
@@ -942,6 +1040,7 @@ async function compactBackendContext(
     before,
     after: markHandoffSlimmingState(before, sessionRef.agentId, backend),
     message: native.message || 'Native compaction was unavailable; using compact handoff refs for this turn.',
+    auditRefs: native.auditRefs,
   };
 }
 
@@ -962,6 +1061,8 @@ async function requestAgentServerCompact(
         reason,
         backend,
         workspace: sessionRef.workspace,
+        compactionScope: isAgentServerManagedCompactionBackend(backend) ? 'session-current-work' : 'backend-context',
+        strategy: isAgentServerManagedCompactionBackend(backend) ? 'agentserver-session-current-work' : undefined,
         contextWindow: before ? contextWindowMetadata(before) : undefined,
       }),
     });
@@ -973,14 +1074,22 @@ async function requestAgentServerCompact(
       // Compact endpoints may be absent or plain-text in older AgentServer builds.
     }
     if (!response.ok) {
+      const compactStatus = response.status === 404 || response.status === 405 || response.status === 501
+        ? 'unsupported'
+        : 'failed';
       return {
         ok: false,
+        status: compactStatus,
         backend,
         agentId: sessionRef.agentId,
         strategy: 'agentserver',
         reason,
         before,
         message: isRecord(json) ? String(json.error || json.message || '') : String(text).slice(0, 500),
+        auditRefs: [
+          `agentserver:${sessionRef.agentId}:compact:${response.status}`,
+          `${sessionRef.baseUrl}/api/agent-server/agents/${encodeURIComponent(sessionRef.agentId)}/compact`,
+        ],
       };
     }
     const data = isRecord(json) && isRecord(json.data) ? json.data : isRecord(json) ? json : {};
@@ -988,6 +1097,7 @@ async function requestAgentServerCompact(
     const after = normalizeBackendContextWindowState(stateData, before?.snapshot, sessionRef.agentId, backend, agentBackendCapabilities(backend));
     return {
       ok: true,
+      status: 'compacted',
       backend,
       agentId: sessionRef.agentId,
       strategy: before?.compactCapability === 'native' ? 'native' : 'agentserver',
@@ -1000,12 +1110,14 @@ async function requestAgentServerCompact(
   } catch (error) {
     return {
       ok: false,
+      status: 'failed',
       backend,
       agentId: sessionRef.agentId,
       strategy: 'agentserver',
       reason,
       before,
       message: errorMessage(error),
+      auditRefs: [`agentserver:${sessionRef.agentId}:compact:error`],
     };
   } finally {
     clearTimeout(timeout);
@@ -1019,37 +1131,95 @@ function normalizeBackendContextWindowState(
   backend: string,
   capabilities: AgentBackendCapabilities,
 ): BackendContextWindowState {
-  const contextWindow = firstRecord(data.contextWindow, data.contextWindowState, data.tokenUsage, data.usage);
+  const hermesCompat = backend === 'hermes-agent' ? hermesCompatContextRecord(data) : {};
+  const contextWindow = firstRecord(data.contextWindow, data.contextWindowState, data.tokenUsage, data.usage, hermesCompat);
+  const usage = firstRecord(data.usage, data.tokenUsage, contextWindow.usage, hermesCompat);
   const workBudget = isRecord(data.workBudget) ? data.workBudget : {};
+  const input = firstFiniteNumber(usage.input, usage.inputTokens, usage.promptTokens, usage.prompt_tokens, contextWindow.input, contextWindow.inputTokens, contextWindow.prompt_tokens);
+  const output = firstFiniteNumber(usage.output, usage.outputTokens, usage.completionTokens, usage.completion_tokens, contextWindow.output, contextWindow.outputTokens, contextWindow.completion_tokens);
+  const cacheRead = firstFiniteNumber(usage.cacheRead, usage.cache_read, usage.cacheReadTokens, contextWindow.cacheRead, contextWindow.cache_read, contextWindow.cacheReadTokens);
+  const cacheWrite = firstFiniteNumber(usage.cacheWrite, usage.cache_write, usage.cacheWriteTokens, contextWindow.cacheWrite, contextWindow.cache_write, contextWindow.cacheWriteTokens);
+  const cache = firstFiniteNumber(usage.cache, usage.cacheTokens, usage.cache_tokens, contextWindow.cache, contextWindow.cacheTokens, contextWindow.cache_tokens)
+    ?? (cacheRead !== undefined || cacheWrite !== undefined ? (cacheRead ?? 0) + (cacheWrite ?? 0) : undefined);
   const tokens = finiteNumber(contextWindow.tokens)
+    ?? finiteNumber(contextWindow.usedTokens)
+    ?? finiteNumber(contextWindow.used_tokens)
     ?? finiteNumber(contextWindow.contextWindowTokens)
+    ?? finiteNumber(contextWindow.context_window_tokens)
+    ?? finiteNumber(contextWindow.contextLength)
+    ?? finiteNumber(contextWindow.context_length)
+    ?? finiteNumber(contextWindow.currentContextLength)
+    ?? finiteNumber(contextWindow.current_context_length)
     ?? finiteNumber(contextWindow.total)
+    ?? finiteNumber(usage.total)
+    ?? finiteNumber(usage.total_tokens)
+    ?? (input !== undefined || output !== undefined || cache !== undefined ? (input ?? 0) + (output ?? 0) + (cache ?? 0) : undefined)
     ?? finiteNumber(workBudget.approxCurrentWorkTokens);
   const limit = finiteNumber(contextWindow.limit)
+    ?? finiteNumber(contextWindow.window)
+    ?? finiteNumber(contextWindow.windowTokens)
+    ?? finiteNumber(contextWindow.window_tokens)
     ?? finiteNumber(contextWindow.contextWindowLimit)
+    ?? finiteNumber(contextWindow.context_window_limit)
     ?? finiteNumber(contextWindow.modelContextWindow)
+    ?? finiteNumber(contextWindow.model_context_window)
+    ?? finiteNumber(contextWindow.maxContextLength)
+    ?? finiteNumber(contextWindow.max_context_length)
+    ?? finiteNumber(contextWindow.contextLimit)
+    ?? finiteNumber(contextWindow.context_limit)
     ?? finiteNumber(workBudget.contextWindowLimit);
   const ratio = finiteNumber(contextWindow.ratio)
     ?? finiteNumber(contextWindow.contextWindowRatio)
+    ?? finiteNumber(contextWindow.context_window_ratio)
+    ?? finiteNumber(contextWindow.usageRatio)
+    ?? finiteNumber(contextWindow.usage_ratio)
     ?? (tokens !== undefined && limit ? tokens / limit : undefined);
-  const autoCompactThreshold = finiteNumber(contextWindow.autoCompactThreshold)
+  const rawAutoCompactThreshold = finiteNumber(contextWindow.autoCompactThreshold)
+    ?? finiteNumber(contextWindow.auto_compact_threshold)
+    ?? finiteNumber(contextWindow.compressionThreshold)
+    ?? finiteNumber(contextWindow.compression_threshold)
     ?? finiteNumber(contextWindow.modelAutoCompactTokenLimit)
-    ?? (limit && finiteNumber(workBudget.autoCompactTokenLimit) ? finiteNumber(workBudget.autoCompactTokenLimit)! / limit : undefined)
-    ?? 0.82;
+    ?? (limit && finiteNumber(workBudget.autoCompactTokenLimit) ? finiteNumber(workBudget.autoCompactTokenLimit)! / limit : undefined);
+  const autoCompactThreshold = rawAutoCompactThreshold && rawAutoCompactThreshold > 1 && limit
+    ? rawAutoCompactThreshold / limit
+    : rawAutoCompactThreshold ?? 0.82;
   const rawStatus = stringField(contextWindow.status) ?? stringField(workBudget.status);
   const status = normalizeContextWindowStatus(rawStatus, ratio, autoCompactThreshold);
+  const provider = stringField(contextWindow.provider) ?? stringField(usage.provider) ?? providerForBackend(backend);
+  const model = stringField(contextWindow.model) ?? stringField(usage.model) ?? stringField(data.model) ?? stringField(data.modelName);
+  const source = normalizeBackendContextWindowSource(
+    stringField(contextWindow.source) ?? stringField(usage.source) ?? stringField(data.source),
+    backend,
+    capabilities,
+    Boolean(tokens !== undefined || limit !== undefined || ratio !== undefined),
+    Boolean(input !== undefined || output !== undefined || cache !== undefined || finiteNumber(usage.total) !== undefined),
+  );
   return {
     backend,
     agentId,
-    source: capabilities.contextWindowTelemetry ? 'backend' : 'agentserver',
+    provider,
+    model,
+    usedTokens: tokens,
+    input,
+    output,
+    cache,
+    window: limit,
+    ratio,
+    source,
     status,
     contextWindowTokens: tokens,
     contextWindowLimit: limit,
     contextWindowRatio: ratio,
     autoCompactThreshold,
-    lastCompactedAt: stringField(contextWindow.lastCompactedAt) ?? stringField(workBudget.lastCompactedAt),
-    rateLimit: normalizeRateLimit(data.rateLimit ?? contextWindow.rateLimit),
-    compactCapability: capabilities.nativeCompaction ? 'native' : 'agentserver',
+    lastCompactedAt: stringField(contextWindow.lastCompactedAt) ?? stringField(contextWindow.last_compacted_at) ?? stringField(contextWindow.lastCompressedAt) ?? stringField(contextWindow.last_compressed_at) ?? stringField(workBudget.lastCompactedAt),
+    rateLimit: normalizeRateLimit(data.rateLimit ?? data.rate_limit ?? contextWindow.rateLimit ?? contextWindow.rate_limit ?? hermesCompatRateLimitRecord(data)),
+    compactCapability: capabilities.nativeCompaction
+      ? 'native'
+      : compactCapabilityForBackend(backend) === 'session-rotate'
+        ? 'session-rotate'
+        : compactCapabilityForBackend(backend) === 'handoff-only'
+          ? 'handoff-only'
+          : 'agentserver',
     snapshot,
   };
 }
@@ -1058,9 +1228,48 @@ function fallbackContextWindowState(agentId: string, backend: string, capabiliti
   return {
     backend,
     agentId,
+    provider: providerForBackend(backend),
     source: 'unknown',
     status: 'unknown',
-    compactCapability: capabilities.nativeCompaction ? 'native' : capabilities.sessionRotationSafe ? 'handoff-only' : 'none',
+    compactCapability: fallbackCompactCapabilityForBackend(backend, capabilities),
+  };
+}
+
+function fallbackCompactCapabilityForBackend(
+  backend: string,
+  capabilities: AgentBackendCapabilities,
+): BackendContextWindowState['compactCapability'] {
+  if (capabilities.nativeCompaction) return 'native';
+  const capability = compactCapabilityForBackend(backend);
+  if (capability === 'agentserver' || capability === 'handoff-only' || capability === 'session-rotate' || capability === 'none') {
+    return capability;
+  }
+  if (backend === 'gemini' && capabilities.sessionRotationSafe) return 'session-rotate';
+  return capabilities.sessionRotationSafe ? 'handoff-only' : 'none';
+}
+
+function isAgentServerManagedCompactionBackend(backend: string) {
+  return backend === 'openteam_agent';
+}
+
+function markAgentServerManagedFallbackState(
+  state: BackendContextWindowState | undefined,
+  agentId: string,
+  backend: string,
+): BackendContextWindowState {
+  return {
+    ...(state ?? {
+      backend,
+      agentId,
+      source: 'agentserver-estimate' as const,
+      status: 'unknown' as const,
+      compactCapability: 'agentserver' as const,
+    }),
+    backend,
+    agentId,
+    source: state?.source ?? 'agentserver-estimate',
+    status: state?.status ?? 'unknown',
+    compactCapability: 'agentserver',
   };
 }
 
@@ -1073,16 +1282,32 @@ function markHandoffSlimmingState(
     ...(state ?? {
       backend,
       agentId,
-      source: 'handoff' as const,
+      source: 'agentserver-estimate' as const,
       status: 'watch' as const,
       compactCapability: 'handoff-only' as const,
     }),
     backend,
     agentId,
-    source: 'handoff',
+    source: 'agentserver-estimate',
     status: 'watch',
-    compactCapability: 'handoff-only',
+    compactCapability: backend === 'gemini' ? 'session-rotate' : 'handoff-only',
   };
+}
+
+function normalizeBackendContextWindowSource(
+  value: string | undefined,
+  backend: string,
+  capabilities: AgentBackendCapabilities,
+  hasContextWindowTelemetry: boolean,
+  hasUsage: boolean,
+): BackendContextWindowState['source'] {
+  if (value === 'native') return 'native';
+  if (value === 'provider-usage' || value === 'usage' || value === 'provider') return 'provider-usage';
+  if (value === 'agentserver-estimate' || value === 'agentserver' || value === 'estimate' || value === 'handoff') return 'agentserver-estimate';
+  if (hasContextWindowTelemetry && capabilities.nativeCompaction && (backend === 'codex' || backend === 'hermes-agent')) return 'native';
+  if (hasUsage) return 'provider-usage';
+  if (hasContextWindowTelemetry) return 'agentserver-estimate';
+  return 'unknown';
 }
 
 function firstRecord(...values: unknown[]) {
@@ -1092,11 +1317,46 @@ function firstRecord(...values: unknown[]) {
 function normalizeRateLimit(value: unknown): BackendContextWindowState['rateLimit'] | undefined {
   if (!isRecord(value)) return undefined;
   const rateLimit = {
-    limited: typeof value.limited === 'boolean' ? value.limited : undefined,
-    retryAfterMs: finiteNumber(value.retryAfterMs),
-    resetAt: stringField(value.resetAt),
+    limited: typeof value.limited === 'boolean' ? value.limited : typeof value.rate_limited === 'boolean' ? value.rate_limited : undefined,
+    retryAfterMs: finiteNumber(value.retryAfterMs) ?? finiteNumber(value.retry_after_ms) ?? retryAfterMsFromText(JSON.stringify(value)),
+    resetAt: stringField(value.resetAt) ?? stringField(value.reset_at) ?? stringField(value.rateLimitResetAt) ?? stringField(value.rate_limit_reset_at) ?? stringField(value.rate_limit_reset),
   };
   return rateLimit.limited !== undefined || rateLimit.retryAfterMs !== undefined || rateLimit.resetAt ? rateLimit : undefined;
+}
+
+function hermesCompatContextRecord(data: Record<string, unknown>): Record<string, unknown> {
+  const hermes = firstRecord(data.hermes, data.hermesAgent, data.hermes_agent, data.compat, data.supervisorCompat, data.supervisor_compat);
+  const event = firstRecord(data.event, data.payload, data.data);
+  return firstRecord(
+    data.context_compressor,
+    data.contextCompressor,
+    data.hermesContextCompressor,
+    data.hermes_context_compressor,
+    hermes.context_compressor,
+    hermes.contextCompressor,
+    event.context_compressor,
+    event.contextCompressor,
+    /context_compressor|context-compressor|hermes/i.test(String(data.type || data.kind || event.type || event.kind || '')) ? event : undefined,
+  );
+}
+
+function hermesCompatRateLimitRecord(data: Record<string, unknown>): Record<string, unknown> {
+  const hermes = firstRecord(data.hermes, data.hermesAgent, data.hermes_agent, data.compat, data.supervisorCompat, data.supervisor_compat);
+  const event = firstRecord(data.event, data.payload, data.data);
+  return firstRecord(
+    data.rate_limit,
+    data.rateLimit,
+    data.rateLimitDiagnostics,
+    data.rate_limit_diagnostics,
+    hermes.rate_limit,
+    hermes.rateLimit,
+    event.rate_limit,
+    event.rateLimit,
+    event.rateLimitDiagnostics,
+    event.rate_limit_diagnostics,
+    data.rate_limit_reset || data.rate_limit_reset_at || data.retry_after_ms ? data : undefined,
+    event.rate_limit_reset || event.rate_limit_reset_at || event.retry_after_ms ? event : undefined,
+  );
 }
 
 function normalizeContextWindowStatus(
@@ -1130,6 +1390,14 @@ function formatContextWindowState(state: BackendContextWindowState) {
 function contextWindowMetadata(state: BackendContextWindowState) {
   return {
     backend: state.backend,
+    provider: state.provider,
+    model: state.model,
+    usedTokens: state.usedTokens,
+    input: state.input,
+    output: state.output,
+    cache: state.cache,
+    window: state.window,
+    ratio: state.ratio,
     source: state.source,
     status: state.status,
     contextWindowTokens: state.contextWindowTokens,
@@ -1138,16 +1406,42 @@ function contextWindowMetadata(state: BackendContextWindowState) {
     autoCompactThreshold: state.autoCompactThreshold,
     compactCapability: state.compactCapability,
     rateLimit: state.rateLimit,
+    budget: state.budget,
+    auditRefs: state.auditRefs,
+  };
+}
+
+function workspaceContextWindowStateFromBackend(state: BackendContextWindowState): WorkspaceRuntimeEvent['contextWindowState'] {
+  return {
+    backend: state.backend,
+    provider: state.provider,
+    model: state.model,
+    usedTokens: state.usedTokens,
+    input: state.input,
+    output: state.output,
+    cache: state.cache,
+    window: state.window,
+    windowTokens: state.window,
+    ratio: state.ratio,
+    source: state.source,
+    status: state.status,
+    compactCapability: state.compactCapability,
+    budget: state.budget,
+    auditRefs: state.auditRefs,
+    autoCompactThreshold: state.autoCompactThreshold,
+    lastCompactedAt: state.lastCompactedAt,
   };
 }
 
 function contextCompactionMetadata(compaction: BackendContextCompactionResult) {
   return {
     ok: compaction.ok,
+    status: compaction.status,
     strategy: compaction.strategy,
     reason: compaction.reason,
     message: compaction.message,
     runId: compaction.runId,
+    auditRefs: compaction.auditRefs,
     before: compaction.before ? contextWindowMetadata(compaction.before) : undefined,
     after: compaction.after ? contextWindowMetadata(compaction.after) : undefined,
   };
@@ -1179,19 +1473,67 @@ function estimateWorkspaceContextWindowState(params: {
   modelName?: string;
   usedTokens: number;
   source: 'estimate' | 'unknown';
+  budget?: WorkspaceRuntimeContextBudget;
+  auditRefs?: string[];
 }) {
   const windowTokens = estimateModelContextWindow(params.modelName);
+  const ratio = windowTokens ? params.usedTokens / windowTokens : undefined;
   return {
-    usedTokens: params.usedTokens,
-    windowTokens,
-    ratio: windowTokens ? params.usedTokens / windowTokens : undefined,
-    source: windowTokens ? params.source : 'unknown',
     backend: params.backend,
+    provider: providerForBackend(params.backend),
+    model: params.modelName,
+    usedTokens: params.usedTokens,
+    window: windowTokens,
+    windowTokens,
+    ratio,
+    source: windowTokens ? params.source : 'unknown',
+    status: normalizeContextWindowStatus(undefined, ratio, 0.82),
     compactCapability: compactCapabilityForBackend(params.backend),
+    budget: params.budget,
+    auditRefs: params.auditRefs,
     autoCompactThreshold: 0.82,
     watchThreshold: 0.68,
     nearLimitThreshold: 0.86,
   };
+}
+
+function handoffContextWindowState(params: {
+  backend: string;
+  modelName?: string;
+  rawRef: string;
+  rawSha1: string;
+  rawBytes: number;
+  normalizedBytes: number;
+  maxPayloadBytes: number;
+  normalizedTokens: number;
+  rawTokens: number;
+  savedTokens: number;
+  decisions: Array<Record<string, unknown>>;
+  auditRefs: string[];
+}) {
+  return estimateWorkspaceContextWindowState({
+    backend: params.backend,
+    modelName: params.modelName,
+    usedTokens: params.normalizedTokens,
+    source: 'estimate',
+    auditRefs: params.auditRefs,
+    budget: {
+      rawRef: params.rawRef,
+      rawSha1: params.rawSha1,
+      rawBytes: params.rawBytes,
+      normalizedBytes: params.normalizedBytes,
+      maxPayloadBytes: params.maxPayloadBytes,
+      rawTokens: params.rawTokens,
+      normalizedTokens: params.normalizedTokens,
+      savedTokens: params.savedTokens,
+      normalizedBudgetRatio: params.maxPayloadBytes ? params.normalizedBytes / params.maxPayloadBytes : undefined,
+      decisions: params.decisions,
+    },
+  });
+}
+
+function handoffBudgetDecisionRecords(decisions: unknown[]): Array<Record<string, unknown>> {
+  return decisions.filter(isRecord).map((decision) => ({ ...decision }));
 }
 
 function estimateModelContextWindow(modelName?: string) {
@@ -1206,10 +1548,11 @@ function estimateModelContextWindow(modelName?: string) {
   return undefined;
 }
 
-function compactCapabilityForBackend(backend: string): 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown' {
+function compactCapabilityForBackend(backend: string): 'native' | 'agentserver' | 'handoff-only' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown' {
   if (backend === 'codex') return 'native';
   if (backend === 'openteam_agent' || backend === 'hermes-agent') return 'agentserver';
-  if (backend === 'gemini' || backend === 'claude-code' || backend === 'openclaw') return 'handoff-slimming';
+  if (backend === 'gemini') return 'session-rotate';
+  if (backend === 'claude-code' || backend === 'openclaw') return 'handoff-only';
   return 'unknown';
 }
 
@@ -1736,11 +2079,12 @@ async function requestAgentServerGeneration(params: {
   workspace: string;
   callbacks?: WorkspaceRuntimeCallbacks;
   strictTaskFilesReason?: string;
-}): Promise<{ ok: true; runId?: string; response: AgentServerGenerationResponse } | { ok: true; runId?: string; directPayload: ToolPayload } | { ok: false; error: string }> {
+}): Promise<AgentServerGenerationResult> {
   const controller = new AbortController();
   const timeoutMs = Number(process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS || 900000);
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let runPayload: unknown;
+  let contextRecovery: AgentServerGenerationFailureDiagnostics | undefined;
   try {
     const { llmEndpointSource, ...llmRuntime } = await agentServerLlmRuntime(params.request, params.workspace);
     const backend = agentServerBackend(params.request, llmRuntime.llmEndpoint);
@@ -1749,6 +2093,7 @@ async function requestAgentServerGeneration(params: {
     }
     const adapter = agentBackendAdapter(backend);
     const agentId = agentServerAgentId(params.request, 'task-generation');
+    for (let dispatchAttempt = 1; dispatchAttempt <= 2; dispatchAttempt += 1) {
     const preflight = await preflightAgentServerContextWindow({
       adapter,
       baseUrl: params.baseUrl,
@@ -1765,7 +2110,7 @@ async function requestAgentServerGeneration(params: {
     const agentServerSnapshot = preflight.state?.snapshot ?? await fetchAgentServerContextSnapshot(params.baseUrl, agentId);
     const contextMode = contextEnvelopeMode(params.request, {
       agentServerCoreAvailable: Boolean(agentServerSnapshot),
-      forceSlimHandoff: preflight.forceSlimHandoff,
+      forceSlimHandoff: preflight.forceSlimHandoff || Boolean(contextRecovery),
     });
     const contextEnvelope: Record<string, unknown> = buildContextEnvelope(params.request, {
       workspace: params.workspace,
@@ -1778,6 +2123,10 @@ async function requestAgentServerGeneration(params: {
     });
     if (agentServerSnapshot) {
       contextEnvelope.agentServerCoreSnapshot = agentServerSnapshot;
+    }
+    if (contextRecovery?.retryAudit) {
+      contextEnvelope.backendRetryAudit = contextRecovery.retryAudit;
+      contextEnvelope.retryReason = 'Previous AgentServer generation attempt hit provider/rate-limit or retry-budget pressure; this is the only compact retry.';
     }
     const compactContext = buildAgentServerCompactContext(params.request, {
       contextEnvelope,
@@ -1802,6 +2151,7 @@ async function requestAgentServerGeneration(params: {
       selectedComponentIds: params.request.selectedComponentIds ?? toStringList(params.request.uiState?.selectedComponentIds),
       priorAttempts: compactContext.priorAttempts,
       strictTaskFilesReason: params.strictTaskFilesReason,
+      retryAudit: contextRecovery?.retryAudit,
     };
     const generationPrompt = buildAgentServerGenerationPrompt(generationRequest);
     const contextEnvelopeBytes = Buffer.byteLength(JSON.stringify(contextEnvelope), 'utf8');
@@ -1843,6 +2193,7 @@ async function requestAgentServerGeneration(params: {
           priorAttemptCount: generationRequest.priorAttempts.length,
           contextEnvelopeVersion: 'bioagent.context-envelope.v1',
           contextMode: compactContext.mode,
+          retryAudit: contextRecovery?.retryAudit,
           contextEnvelopeBytes,
           promptChars: generationPrompt.length,
           workspaceTreeEntryCount: workspaceTree.length,
@@ -1863,6 +2214,7 @@ async function requestAgentServerGeneration(params: {
           purpose: 'workspace-task-generation',
           requiresNativeWorkspaceCapabilities: true,
           llmEndpointSource: llmRuntime.llmEndpoint ? llmEndpointSource : undefined,
+          retryAudit: contextRecovery?.retryAudit,
         },
       },
       metadata: {
@@ -1877,18 +2229,53 @@ async function requestAgentServerGeneration(params: {
           failureStrategy: 'retry_stage',
           maxRetries: 1,
         },
+        retryAudit: contextRecovery?.retryAudit,
       },
     };
     const normalizedHandoff = await normalizeBackendHandoff(runPayload, {
       workspacePath: params.workspace,
-      purpose: 'agentserver-generation',
-      budget: {
+      purpose: contextRecovery ? 'agentserver-generation-rate-limit-retry' : 'agentserver-generation',
+      budget: contextRecovery ? {
+        maxPayloadBytes: 96_000,
+        maxInlineStringChars: 6_000,
+        maxInlineJsonBytes: 18_000,
+        maxArrayItems: 10,
+        maxObjectKeys: 48,
+        maxDepth: 5,
+        headChars: 1_200,
+        tailChars: 1_200,
+        maxPriorAttempts: 1,
+      } : {
         maxInlineStringChars: 24_000,
         headChars: 4_000,
         tailChars: 4_000,
       },
     });
     runPayload = normalizedHandoff.payload;
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'contextWindowState',
+      source: 'workspace-runtime',
+      message: 'Estimated context window after handoff slimming',
+      contextWindowState: handoffContextWindowState({
+        backend,
+        modelName: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        rawRef: normalizedHandoff.rawRef,
+        rawSha1: normalizedHandoff.rawSha1,
+        rawBytes: normalizedHandoff.rawBytes,
+        normalizedBytes: normalizedHandoff.normalizedBytes,
+        maxPayloadBytes: normalizedHandoff.budget.maxPayloadBytes,
+        rawTokens: normalizedHandoff.contextEstimate.rawTokens,
+        normalizedTokens: normalizedHandoff.contextEstimate.normalizedTokens,
+        savedTokens: normalizedHandoff.contextEstimate.savedTokens,
+        decisions: handoffBudgetDecisionRecords(normalizedHandoff.decisions),
+        auditRefs: normalizedHandoff.auditRefs,
+      }),
+      raw: {
+        handoffBudget: normalizedHandoff.budget,
+        handoffDecisions: normalizedHandoff.decisions,
+        auditRefs: normalizedHandoff.auditRefs,
+      },
+    });
     emitWorkspaceRuntimeEvent(params.callbacks, {
       type: 'agentserver-dispatch',
       source: 'workspace-runtime',
@@ -1907,22 +2294,91 @@ async function requestAgentServerGeneration(params: {
     await writeAgentServerDebugArtifact(params.workspace, 'generation', runPayload, response.status, json);
     if (!response.ok) {
       const detail = isRecord(json) ? String(json.error || json.message || '') : '';
-      return { ok: false, error: sanitizeAgentServerError(detail || error || `AgentServer generation HTTP ${response.status}`) };
+      const failure = await recoverOrReturnAgentServerGenerationFailure({
+        error: detail || error || `AgentServer generation HTTP ${response.status}`,
+        sanitizedError: sanitizeAgentServerError(detail || error || `AgentServer generation HTTP ${response.status}`),
+        dispatchAttempt,
+        contextRecovery,
+        adapter,
+        baseUrl: params.baseUrl,
+        workspace: params.workspace,
+        agentId,
+        provider: llmRuntime.llmEndpoint?.provider,
+        model: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        request: params.request,
+        skill: params.skill,
+        callbacks: params.callbacks,
+        httpStatus: response.status,
+        headers: response.headers,
+        priorHandoff: normalizedHandoff,
+      });
+      if (failure.retry) {
+        contextRecovery = failure.diagnostics;
+        continue;
+      }
+      return failure.result;
     }
     if (error) {
-      return { ok: false, error: sanitizeAgentServerError(error) };
+      const failure = await recoverOrReturnAgentServerGenerationFailure({
+        error,
+        sanitizedError: sanitizeAgentServerError(error),
+        dispatchAttempt,
+        contextRecovery,
+        adapter,
+        baseUrl: params.baseUrl,
+        workspace: params.workspace,
+        agentId,
+        provider: llmRuntime.llmEndpoint?.provider,
+        model: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        request: params.request,
+        skill: params.skill,
+        callbacks: params.callbacks,
+        priorHandoff: normalizedHandoff,
+      });
+      if (failure.retry) {
+        contextRecovery = failure.diagnostics;
+        continue;
+      }
+      return failure.result;
     }
     const runFailure = agentServerRunFailure(run);
     if (runFailure) {
-      return { ok: false, error: runFailure };
+      const failure = await recoverOrReturnAgentServerGenerationFailure({
+        error: runFailure,
+        sanitizedError: runFailure,
+        dispatchAttempt,
+        contextRecovery,
+        adapter,
+        baseUrl: params.baseUrl,
+        workspace: params.workspace,
+        agentId,
+        provider: llmRuntime.llmEndpoint?.provider,
+        model: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        request: params.request,
+        skill: params.skill,
+        callbacks: params.callbacks,
+        priorHandoff: normalizedHandoff,
+      });
+      if (failure.retry) {
+        contextRecovery = failure.diagnostics;
+        continue;
+      }
+      return failure.result;
     }
     const directPayload = parseToolPayloadResponse(run);
     if (directPayload) {
-      return {
+      return await finalizeAgentServerGenerationSuccess({
+        result: {
         ok: true,
         runId: typeof run.id === 'string' ? run.id : undefined,
         directPayload,
-      };
+        },
+        contextRecovery,
+        workspace: params.workspace,
+        request: params.request,
+        skill: params.skill,
+        callbacks: params.callbacks,
+      });
     }
     const directText = extractAgentServerOutputText(run);
     const parsed = parseGenerationResponse(run.output) ?? parseGenerationResponse(run);
@@ -1930,24 +2386,51 @@ async function requestAgentServerGeneration(params: {
       if (directText) {
         const parsedTextGeneration = parseGenerationResponseFromStandaloneText(directText);
         if (parsedTextGeneration) {
-          return {
+          return await finalizeAgentServerGenerationSuccess({
+            result: {
             ok: true,
             runId: typeof run.id === 'string' ? run.id : undefined,
             response: parsedTextGeneration,
-          };
+            },
+            contextRecovery,
+            workspace: params.workspace,
+        request: params.request,
+        skill: params.skill,
+        callbacks: params.callbacks,
+      });
         }
-        return {
+        return await finalizeAgentServerGenerationSuccess({
+          result: {
           ok: true,
           runId: typeof run.id === 'string' ? run.id : undefined,
           directPayload: toolPayloadFromPlainAgentOutput(directText, params.request),
-        };
+          },
+          contextRecovery,
+          workspace: params.workspace,
+        request: params.request,
+        skill: params.skill,
+        callbacks: params.callbacks,
+      });
       }
       return { ok: false, error: 'AgentServer generation response did not include taskFiles and entrypoint or a BioAgent ToolPayload.' };
     }
-    return {
+    return await finalizeAgentServerGenerationSuccess({
+      result: {
       ok: true,
       runId: typeof run.id === 'string' ? run.id : undefined,
       response: parsed,
+      },
+      contextRecovery,
+      workspace: params.workspace,
+      request: params.request,
+      skill: params.skill,
+      callbacks: params.callbacks,
+    });
+    }
+    return {
+      ok: false,
+      error: contextRecovery?.originalErrorSummary ?? 'AgentServer generation failed after context recovery.',
+      diagnostics: contextRecovery,
     };
   } catch (error) {
     await writeAgentServerDebugArtifact(params.workspace, 'generation', runPayload, 0, { error: errorMessage(error) });
@@ -1955,6 +2438,39 @@ async function requestAgentServerGeneration(params: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function appendContextRecoveryAuditAttempt(params: {
+  workspace: string;
+  request: GatewayRequest;
+  skill: SkillAvailability;
+  diagnostics: AgentServerGenerationFailureDiagnostics;
+  status: 'repair-needed' | 'self-healed';
+  failureReason: string;
+}) {
+  const id = `agentserver-context-recovery-${params.request.skillDomain}-${sha1(`${params.request.prompt}:${params.status}:${Date.now()}`).slice(0, 12)}`;
+  await appendTaskAttempt(params.workspace, {
+    id,
+    prompt: params.request.prompt,
+    skillDomain: params.request.skillDomain,
+    ...attemptPlanRefs(params.request, params.skill, params.failureReason),
+    skillId: params.skill.id,
+    attempt: 1,
+    status: params.status,
+    failureReason: params.failureReason,
+    contextRecovery: {
+      kind: 'contextWindowExceeded',
+      backend: params.diagnostics.backend,
+      provider: params.diagnostics.provider,
+      agentId: params.diagnostics.agentId,
+      sessionRef: params.diagnostics.sessionRef,
+      originalErrorSummary: params.diagnostics.originalErrorSummary,
+      compaction: params.diagnostics.compaction,
+      retryAttempted: params.diagnostics.retryAttempted,
+      retrySucceeded: params.diagnostics.retrySucceeded,
+    },
+    createdAt: new Date().toISOString(),
+  });
 }
 
 function parseGenerationResponseFromStandaloneText(text: string) {
@@ -2016,14 +2532,400 @@ async function readAgentServerRunStream(
   };
 }
 
+async function recoverOrReturnAgentServerGenerationFailure(params: {
+  error: string;
+  sanitizedError: string;
+  dispatchAttempt: number;
+  contextRecovery?: AgentServerGenerationFailureDiagnostics;
+  adapter: AgentBackendAdapter;
+  baseUrl: string;
+  workspace: string;
+  agentId: string;
+  provider?: string;
+  model?: string;
+  request: GatewayRequest;
+  skill: SkillAvailability;
+  callbacks?: WorkspaceRuntimeCallbacks;
+  httpStatus?: number;
+  headers?: Headers;
+  priorHandoff: {
+    rawRef: string;
+    rawBytes: number;
+    normalizedBytes: number;
+  };
+}): Promise<
+  | { retry: true; diagnostics: AgentServerGenerationFailureDiagnostics }
+  | { retry: false; result: AgentServerGenerationResult }
+> {
+  const originalErrorSummary = sanitizeAgentServerError(params.error || params.sanitizedError);
+  const contextSessionRef = agentServerSessionRef(params.baseUrl, params.agentId);
+  const diagnosticProvider = params.provider ?? providerForBackend(params.adapter.backend);
+  if (isContextWindowExceededError(`${params.error}\n${params.sanitizedError}`)) {
+    if (params.dispatchAttempt >= 2 || params.contextRecovery?.retryAttempted) {
+      return {
+        retry: false,
+        result: {
+          ok: false,
+          error: params.sanitizedError,
+          diagnostics: {
+            ...(params.contextRecovery ?? {}),
+            kind: 'contextWindowExceeded',
+            backend: params.contextRecovery?.backend ?? params.adapter.backend,
+            provider: params.contextRecovery?.provider ?? diagnosticProvider,
+            model: params.contextRecovery?.model ?? params.model,
+            agentId: params.contextRecovery?.agentId ?? params.agentId,
+            sessionRef: params.contextRecovery?.sessionRef ?? contextSessionRef,
+            originalErrorSummary: params.contextRecovery?.originalErrorSummary ?? originalErrorSummary,
+            priorHandoff: params.contextRecovery?.priorHandoff ?? params.priorHandoff,
+            retryAttempted: true,
+            retrySucceeded: false,
+          },
+        },
+      };
+    }
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-window-recovery',
+      source: 'workspace-runtime',
+      status: 'running',
+      message: 'AgentServer reported context window exceeded; compacting context before one retry.',
+      detail: originalErrorSummary,
+      raw: {
+        backend: params.adapter.backend,
+        provider: diagnosticProvider,
+        model: params.model,
+        agentId: params.agentId,
+        sessionRef: contextSessionRef,
+        priorHandoff: params.priorHandoff,
+      },
+    });
+    const compaction = await params.adapter.compactContext?.(
+      { agentId: params.agentId, workspace: params.workspace, baseUrl: params.baseUrl },
+      `contextWindowExceeded:${originalErrorSummary}`,
+    ) ?? {
+      ok: false,
+      backend: params.adapter.backend,
+      agentId: params.agentId,
+      strategy: 'none' as const,
+      reason: `contextWindowExceeded:${originalErrorSummary}`,
+      message: 'Backend adapter did not provide compactContext.',
+    };
+    const compactionStatus = compaction.status === 'unsupported' || compaction.status === 'skipped'
+      ? 'skipped'
+      : compaction.ok ? 'completed' : 'failed';
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-window-recovery',
+      source: 'workspace-runtime',
+      status: compactionStatus,
+      message: compaction.ok
+        ? 'Context compaction completed; retrying AgentServer generation once.'
+        : compactionStatus === 'skipped'
+          ? 'Context compact API unsupported; retrying AgentServer generation once with slim handoff diagnostics.'
+          : 'Context compaction failed; retrying AgentServer generation once with slim handoff diagnostics.',
+      detail: compaction.message || compaction.reason,
+      raw: compaction,
+    });
+    const diagnostics: AgentServerGenerationFailureDiagnostics = {
+      kind: 'contextWindowExceeded',
+      backend: params.adapter.backend,
+      provider: diagnosticProvider,
+      model: params.model,
+      agentId: params.agentId,
+      sessionRef: contextSessionRef,
+      originalErrorSummary,
+      compaction,
+      priorHandoff: params.priorHandoff,
+      retryAttempted: true,
+      retrySucceeded: false,
+    };
+    await appendContextRecoveryAuditAttempt({
+      workspace: params.workspace,
+      request: params.request,
+      skill: params.skill,
+      diagnostics,
+      status: compaction.ok ? 'self-healed' : 'repair-needed',
+      failureReason: originalErrorSummary,
+    });
+    return { retry: true, diagnostics };
+  }
+
+  const diagnostic = classifyAgentServerBackendFailure(params.error, {
+    httpStatus: params.httpStatus,
+    headers: params.headers,
+    backend: params.adapter.backend,
+    provider: diagnosticProvider,
+    model: params.model,
+  });
+  if (!diagnostic) {
+    return {
+      retry: false,
+      result: { ok: false, error: params.sanitizedError },
+    };
+  }
+
+  if (params.dispatchAttempt >= 2 || params.contextRecovery?.retryAttempted) {
+    return {
+      retry: false,
+      result: {
+        ok: false,
+        error: providerRateLimitDiagnosticMessage(diagnostic, true),
+        diagnostics: {
+          ...(params.contextRecovery ?? {}),
+          kind: diagnostic.categories.includes('context-window') ? 'contextWindowExceeded' : diagnostic.categories.includes('rate-limit') || diagnostic.categories.includes('http-429') ? 'rateLimit' : 'agentserver',
+          categories: diagnostic.categories,
+          backend: diagnostic.backend,
+          provider: diagnostic.provider,
+          model: diagnostic.model,
+          agentId: params.agentId,
+          sessionRef: `${params.baseUrl}/api/agent-server/agents/${encodeURIComponent(params.agentId)}`,
+          originalErrorSummary: providerRateLimitDiagnosticMessage(diagnostic, true),
+          retryAfterMs: diagnostic.retryAfterMs,
+          resetAt: diagnostic.resetAt,
+          priorHandoff: params.priorHandoff,
+          retryAttempted: true,
+          retrySucceeded: false,
+        },
+      },
+    };
+  }
+
+  const backoffMs = boundedRateLimitBackoffMs(diagnostic);
+  emitWorkspaceRuntimeEvent(params.callbacks, {
+    type: diagnostic.categories.includes('context-window') ? 'agentserver-context-window-recovery' : 'agentserver-generation-retry',
+    source: 'workspace-runtime',
+    status: 'running',
+    message: 'AgentServer provider/rate-limit recovery: compacting context and retrying once.',
+    detail: providerRateLimitDiagnosticMessage(diagnostic, false),
+    raw: diagnostic,
+  });
+  if (backoffMs > 0) {
+    await sleep(backoffMs);
+  }
+  const sessionRef = {
+    agentId: params.agentId,
+    workspace: params.workspace,
+    baseUrl: params.baseUrl,
+  };
+  const compaction = await params.adapter.compactContext?.(
+    sessionRef,
+    `rate-limit-retry:${diagnostic.categories.join(',')}:${diagnostic.message.slice(0, 120)}`,
+  );
+  if (compaction) {
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-compaction',
+      source: 'workspace-runtime',
+      status: compaction.ok ? 'completed' : 'failed',
+      message: 'AgentServer compact before provider/rate-limit retry',
+      detail: compaction.message || compaction.reason,
+      raw: compaction,
+    });
+  }
+
+  const retryAudit: AgentServerGenerationRetryAudit = {
+    schemaVersion: 'bioagent.agentserver-generation-retry.v1',
+    attempt: 2,
+    maxAttempts: 2,
+    trigger: diagnostic,
+    firstFailedAt: new Date().toISOString(),
+    backoffMs,
+    recoveryActions: rateLimitRecoverActions(diagnostic),
+    contextPolicy: {
+      mode: 'delta',
+      handoff: 'slimmed',
+      compactBeforeRetry: true,
+      maxRetryCount: 1,
+    },
+    compaction: compaction ? contextCompactionMetadata(compaction) : undefined,
+    priorHandoff: params.priorHandoff,
+  };
+  return {
+    retry: true,
+    diagnostics: {
+      kind: diagnostic.categories.includes('context-window') ? 'contextWindowExceeded' : diagnostic.categories.includes('rate-limit') || diagnostic.categories.includes('http-429') ? 'rateLimit' : 'agentserver',
+      categories: diagnostic.categories,
+      backend: diagnostic.backend,
+      provider: diagnostic.provider,
+      model: diagnostic.model,
+      agentId: params.agentId,
+      sessionRef: `${params.baseUrl}/api/agent-server/agents/${encodeURIComponent(params.agentId)}`,
+      originalErrorSummary: providerRateLimitDiagnosticMessage(diagnostic, false),
+      retryAfterMs: diagnostic.retryAfterMs,
+      resetAt: diagnostic.resetAt,
+      compaction,
+      priorHandoff: params.priorHandoff,
+      retryAudit,
+      retryAttempted: true,
+      retrySucceeded: false,
+    },
+  };
+}
+
+async function finalizeAgentServerGenerationSuccess<T extends Extract<AgentServerGenerationResult, { ok: true }>>(params: {
+  result: T;
+  contextRecovery?: AgentServerGenerationFailureDiagnostics;
+  workspace: string;
+  request: GatewayRequest;
+  skill: SkillAvailability;
+  callbacks?: WorkspaceRuntimeCallbacks;
+  httpStatus?: number;
+  headers?: Headers;
+  priorHandoff?: AgentServerGenerationRetryAudit['priorHandoff'];
+}): Promise<T> {
+  if (!params.contextRecovery) return params.result;
+  params.contextRecovery.retrySucceeded = true;
+  if (String(params.contextRecovery.kind) === 'contextWindowExceeded') {
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-window-recovery',
+      source: 'workspace-runtime',
+      status: 'completed',
+      message: 'AgentServer generation succeeded after context compaction retry.',
+      detail: params.contextRecovery.compaction?.message || params.contextRecovery.originalErrorSummary,
+      raw: params.contextRecovery,
+    });
+    await appendContextRecoveryAuditAttempt({
+      workspace: params.workspace,
+      request: params.request,
+      skill: params.skill,
+      diagnostics: params.contextRecovery,
+      status: 'self-healed',
+      failureReason: `Recovered from contextWindowExceeded after one compact+retry: ${params.contextRecovery.originalErrorSummary}`,
+    });
+    return params.result;
+  }
+  emitWorkspaceRuntimeEvent(params.callbacks, {
+    type: 'agentserver-generation-retry',
+    source: 'workspace-runtime',
+    status: 'completed',
+    message: 'AgentServer provider/rate-limit recovery succeeded after one compact retry.',
+    detail: params.contextRecovery.originalErrorSummary,
+    raw: params.contextRecovery,
+  });
+  return params.result;
+}
+
+function classifyAgentServerBackendFailure(
+  message: string,
+  context: {
+    httpStatus?: number;
+    headers?: Headers;
+    backend?: string;
+    provider?: string;
+    model?: string;
+  } = {},
+): AgentServerBackendFailureDiagnostic | undefined {
+  const text = parseJsonErrorMessage(message) || message;
+  const lower = text.toLowerCase();
+  const categories: AgentServerBackendFailureKind[] = [];
+  if (/contextwindowexceeded|context window exceeded|context_length|maximum context|token limit|context.*overflow/i.test(text)) categories.push('context-window');
+  if (context.httpStatus === 429 || /\b429\b|too many requests/.test(lower)) categories.push('http-429', 'rate-limit');
+  if (/rate[\s-]?limit|retry-after|reset/i.test(text)) categories.push('rate-limit');
+  if (/responseTooManyFailedAttempts|too many failed attempts/i.test(text)) categories.push('too-many-failed-attempts', 'retry-budget');
+  if (/exceeded retry limit|retry budget|too many retries|max retries/i.test(text)) categories.push('retry-budget');
+  const uniqueCategories = uniqueStrings(categories) as AgentServerBackendFailureKind[];
+  if (!uniqueCategories.length) return undefined;
+  const retryAfterMs = retryAfterMsFromHeaders(context.headers) ?? retryAfterMsFromText(text);
+  const resetAt = rateLimitResetAtFromHeaders(context.headers) ?? rateLimitResetAtFromText(text);
+  return {
+    kind: uniqueCategories[0],
+    categories: uniqueCategories,
+    backend: context.backend,
+    provider: context.provider,
+    model: context.model,
+    httpStatus: context.httpStatus,
+    retryAfterMs,
+    resetAt,
+    message: sanitizeBackendFailureDetail(text),
+  };
+}
+
+function providerRateLimitDiagnosticMessage(diagnostic: AgentServerBackendFailureDiagnostic, finalFailure: boolean) {
+  const labels = diagnostic.categories.join(', ');
+  const provider = [diagnostic.provider, diagnostic.model].filter(Boolean).join('/') || diagnostic.backend || 'unknown provider';
+  const retryAfter = diagnostic.retryAfterMs !== undefined ? ` retryAfterMs=${diagnostic.retryAfterMs}.` : '';
+  const resetAt = diagnostic.resetAt ? ` resetAt=${diagnostic.resetAt}.` : '';
+  const retry = finalFailure
+    ? ' BioAgent already performed the single allowed compact/slim retry and will not retry again automatically.'
+    : ' BioAgent will back off, compact/slim the handoff, and retry once.';
+  return `AgentServer/provider failure classified as ${labels} for ${provider}.${retryAfter}${resetAt}${retry} Detail: ${diagnostic.message}`;
+}
+
+function rateLimitRecoverActions(diagnostic: AgentServerBackendFailureDiagnostic) {
+  const wait = diagnostic.retryAfterMs
+    ? `Wait at least ${Math.ceil(diagnostic.retryAfterMs / 1000)}s or until provider retry-after/reset before rerunning.`
+    : 'Wait for the provider rate-limit or retry budget to reset before rerunning.';
+  return [
+    wait,
+    'Reduce concurrent AgentServer runs or switch to a model/provider with available quota.',
+    'Keep follow-up context compact by relying on workspace refs instead of resending full logs/artifacts.',
+  ];
+}
+
+function boundedRateLimitBackoffMs(diagnostic: AgentServerBackendFailureDiagnostic) {
+  const configuredMax = Number(process.env.BIOAGENT_AGENTSERVER_RATE_LIMIT_BACKOFF_MAX_MS || 1500);
+  const max = Number.isFinite(configuredMax) ? Math.max(0, Math.min(10_000, configuredMax)) : 1500;
+  const requested = diagnostic.retryAfterMs ?? 250;
+  return Math.min(max, Math.max(0, requested));
+}
+
+function retryAfterMsFromHeaders(headers?: Headers) {
+  const value = headers?.get('retry-after');
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1000));
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
+}
+
+function rateLimitResetAtFromHeaders(headers?: Headers) {
+  return headers?.get('x-ratelimit-reset') ?? headers?.get('x-rate-limit-reset') ?? undefined;
+}
+
+function retryAfterMsFromText(text: string) {
+  const seconds = text.match(/retry-after["'\s:=]+(\d+(?:\.\d+)?)/i)?.[1]
+    ?? text.match(/retry after\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds)?/i)?.[1];
+  if (!seconds) return undefined;
+  const parsed = Number(seconds);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 1000)) : undefined;
+}
+
+function rateLimitResetAtFromText(text: string) {
+  return text.match(/(?:resetAt|reset_at|rate limit reset)["'\s:=]+([0-9T:.\-+Z]+)/i)?.[1];
+}
+
+function sanitizeBackendFailureDetail(text: string) {
+  return redactSecretText(text
+    .replace(/request id:\s*[^),\s]+/gi, 'request id: redacted')
+    .replace(/url:\s*\S+/gi, 'url: redacted')
+    .replace(/https?:\/\/[^\s|,)]+/gi, 'redacted-url'))
+    .slice(0, 320);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeAgentServerWorkspaceEvent(raw: unknown): WorkspaceRuntimeEvent {
   const record = isRecord(raw) ? raw : {};
-  const type = typeof record.type === 'string' ? record.type : typeof record.kind === 'string' ? record.kind : 'agentserver-event';
+  const rawType = typeof record.type === 'string' ? record.type : typeof record.kind === 'string' ? record.kind : 'agentserver-event';
+  const type = normalizeAgentServerWorkspaceEventType(rawType, record);
   const toolName = typeof record.toolName === 'string' ? record.toolName : undefined;
   const usage = normalizeWorkspaceTokenUsage(record.usage)
     ?? normalizeWorkspaceTokenUsage(isRecord(record.output) ? record.output.usage : undefined)
     ?? normalizeWorkspaceTokenUsage(isRecord(record.result) ? record.result.usage : undefined)
     ?? normalizeWorkspaceTokenUsage(isRecord(record.result) && isRecord(record.result.output) ? record.result.output.usage : undefined);
+  const contextCompaction = normalizeWorkspaceContextCompaction(
+    record.contextCompaction ?? record.compaction ?? record.context_compaction ?? record.context_compressor ?? record.contextCompressor,
+    type,
+    record,
+  );
+  const rateLimit = normalizeWorkspaceRateLimit(
+    record.rateLimit ?? record.rate_limit ?? record.rateLimitDiagnostics ?? record.rate_limit_diagnostics ?? hermesCompatRateLimitRecord(record),
+    record,
+  );
+  const contextWindowState = normalizeWorkspaceContextWindowState(
+    record.contextWindowState ?? record.contextWindow ?? record.context_window ?? record.context_compressor ?? record.contextCompressor ?? record.usage,
+    type,
+    record,
+  );
   const baseDetail = typeof record.detail === 'string'
     ? record.detail
     : typeof record.message === 'string'
@@ -2050,8 +2952,203 @@ function normalizeAgentServerWorkspaceEvent(raw: unknown): WorkspaceRuntimeEvent
     text: typeof record.text === 'string' ? record.text : undefined,
     output: typeof record.output === 'string' ? record.output.slice(0, 2000) : undefined,
     usage,
+    contextWindowState,
+    contextCompaction,
+    rateLimit,
     raw,
   };
+}
+
+function normalizeAgentServerWorkspaceEventType(type: string, record: Record<string, unknown>) {
+  const lower = type.toLowerCase();
+  if (lower === 'context_compressor' || lower === 'context-compressor') return 'contextCompaction';
+  if (lower === 'ratelimit' || lower === 'rate_limit' || lower === 'rate-limit') return 'rateLimit';
+  if (lower.includes('context_compressor') || record.context_compressor || record.contextCompressor) return 'contextCompaction';
+  if (lower.includes('rate-limit') || lower.includes('rate_limit') || record.rate_limit || record.rateLimit || record.rate_limit_reset || record.rate_limit_reset_at) return 'rateLimit';
+  return type;
+}
+
+function normalizeWorkspaceContextWindowState(
+  value: unknown,
+  type: string,
+  fallback: Record<string, unknown>,
+): WorkspaceRuntimeEvent['contextWindowState'] | undefined {
+  const record = isRecord(value) ? value : type === 'contextWindowState' && isRecord(fallback) ? fallback : undefined;
+  if (!record) return undefined;
+  const usage = isRecord(record.usage) ? record.usage : record;
+  const input = firstFiniteNumber(record.input, record.inputTokens, record.prompt_tokens, usage.input, usage.inputTokens, usage.promptTokens, usage.prompt_tokens);
+  const output = firstFiniteNumber(record.output, record.outputTokens, record.completion_tokens, usage.output, usage.outputTokens, usage.completionTokens, usage.completion_tokens);
+  const cacheRead = firstFiniteNumber(record.cacheRead, record.cache_read, record.cacheReadTokens, usage.cacheRead, usage.cache_read, usage.cacheReadTokens);
+  const cacheWrite = firstFiniteNumber(record.cacheWrite, record.cache_write, record.cacheWriteTokens, usage.cacheWrite, usage.cache_write, usage.cacheWriteTokens);
+  const cache = firstFiniteNumber(record.cache, record.cacheTokens, record.cache_tokens, usage.cache, usage.cacheTokens, usage.cache_tokens)
+    ?? (cacheRead !== undefined || cacheWrite !== undefined ? (cacheRead ?? 0) + (cacheWrite ?? 0) : undefined);
+  const usedTokens = finiteNumber(record.usedTokens)
+    ?? finiteNumber(record.used_tokens)
+    ?? finiteNumber(record.used)
+    ?? finiteNumber(record.contextWindowTokens)
+    ?? finiteNumber(record.context_window_tokens)
+    ?? finiteNumber(record.contextLength)
+    ?? finiteNumber(record.context_length)
+    ?? finiteNumber(record.currentContextLength)
+    ?? finiteNumber(record.current_context_length)
+    ?? finiteNumber(record.tokens)
+    ?? finiteNumber(record.inputTokens)
+    ?? finiteNumber(record.total)
+    ?? finiteNumber(record.total_tokens)
+    ?? finiteNumber(usage.total)
+    ?? finiteNumber(usage.total_tokens)
+    ?? (input !== undefined || output !== undefined || cache !== undefined ? (input ?? 0) + (output ?? 0) + (cache ?? 0) : undefined);
+  const windowTokens = finiteNumber(record.windowTokens)
+    ?? finiteNumber(record.window_tokens)
+    ?? finiteNumber(record.window)
+    ?? finiteNumber(record.contextWindowLimit)
+    ?? finiteNumber(record.context_window_limit)
+    ?? finiteNumber(record.limit)
+    ?? finiteNumber(record.contextWindow)
+    ?? finiteNumber(record.maxContextLength)
+    ?? finiteNumber(record.max_context_length)
+    ?? finiteNumber(record.contextLimit)
+    ?? finiteNumber(record.context_limit);
+  const ratio = finiteNumber(record.ratio)
+    ?? finiteNumber(record.contextWindowRatio)
+    ?? finiteNumber(record.context_window_ratio)
+    ?? finiteNumber(record.usageRatio)
+    ?? finiteNumber(record.usage_ratio)
+    ?? (usedTokens !== undefined && windowTokens ? usedTokens / windowTokens : undefined);
+  const rawAutoCompactThreshold = finiteNumber(record.autoCompactThreshold)
+    ?? finiteNumber(record.auto_compact_threshold)
+    ?? finiteNumber(record.compressionThreshold)
+    ?? finiteNumber(record.compression_threshold);
+  const autoCompactThreshold = rawAutoCompactThreshold && rawAutoCompactThreshold > 1 && windowTokens
+    ? rawAutoCompactThreshold / windowTokens
+    : rawAutoCompactThreshold;
+  const hasUsage = input !== undefined || output !== undefined || cache !== undefined || finiteNumber(usage.total) !== undefined;
+  const explicitSource = stringField(record.source) ?? stringField(record.contextWindowSource);
+  const source = explicitSource
+    ? (normalizeWorkspaceContextSource(explicitSource) === 'unknown' && hasUsage ? 'provider-usage' : normalizeWorkspaceContextSource(explicitSource))
+    : (hasUsage ? 'provider-usage' : 'unknown');
+  const state = {
+    backend: stringField(record.backend) ?? stringField(fallback.backend) ?? stringField(usage.provider),
+    provider: stringField(record.provider) ?? stringField(usage.provider),
+    model: stringField(record.model) ?? stringField(usage.model),
+    usedTokens,
+    input,
+    output,
+    cache,
+    window: windowTokens,
+    windowTokens,
+    ratio,
+    source,
+    status: normalizeWorkspaceContextStatus(stringField(record.status), ratio, autoCompactThreshold),
+    compactCapability: normalizeWorkspaceCompactCapability(stringField(record.compactCapability) ?? stringField(record.compactionCapability)),
+    budget: isRecord(record.budget) ? record.budget : undefined,
+    auditRefs: toStringList(record.auditRefs),
+    autoCompactThreshold,
+    watchThreshold: finiteNumber(record.watchThreshold),
+    nearLimitThreshold: finiteNumber(record.nearLimitThreshold),
+    lastCompactedAt: stringField(record.lastCompactedAt) ?? stringField(record.last_compacted_at) ?? stringField(record.lastCompressedAt) ?? stringField(record.last_compressed_at),
+    pendingCompact: typeof record.pendingCompact === 'boolean' ? record.pendingCompact : undefined,
+  };
+  if (state.compactCapability === 'unknown' && state.backend) {
+    state.compactCapability = compactCapabilityForBackend(state.backend);
+  }
+  return state.usedTokens !== undefined || state.windowTokens !== undefined || state.ratio !== undefined || state.source !== 'unknown'
+    ? state
+    : undefined;
+}
+
+function normalizeWorkspaceContextCompaction(
+  value: unknown,
+  type: string,
+  fallback: Record<string, unknown>,
+): WorkspaceRuntimeEvent['contextCompaction'] | undefined {
+  const record = isRecord(value) ? value : type === 'contextCompaction' && isRecord(fallback) ? fallback : undefined;
+  if (!record) return undefined;
+  const status = normalizeWorkspaceCompactionStatus(stringField(record.status) ?? stringField(record.result));
+  const completedAt = stringField(record.completedAt) ?? stringField(record.completed_at) ?? stringField(record.compressedAt) ?? stringField(record.compressed_at);
+  const lastCompactedAt = stringField(record.lastCompactedAt) ?? stringField(record.last_compacted_at) ?? stringField(record.lastCompressedAt) ?? stringField(record.last_compressed_at) ?? completedAt;
+  const reason = stringField(record.reason) ?? stringField(record.trigger);
+  const message = stringField(record.message) ?? stringField(record.summary);
+  return {
+    status,
+    source: normalizeWorkspaceContextSource(stringField(record.source) ?? 'native'),
+    backend: stringField(record.backend) ?? stringField(fallback.backend) ?? 'hermes-agent',
+    compactCapability: normalizeWorkspaceCompactCapability(stringField(record.compactCapability) ?? stringField(record.compactionCapability) ?? 'native'),
+    startedAt: stringField(record.startedAt) ?? stringField(record.started_at),
+    completedAt,
+    lastCompactedAt,
+    reason,
+    message,
+  };
+}
+
+function normalizeWorkspaceCompactionStatus(value?: string): NonNullable<WorkspaceRuntimeEvent['contextCompaction']>['status'] {
+  if (value === 'started' || value === 'completed' || value === 'failed' || value === 'pending' || value === 'skipped') return value;
+  if (value && /fail|error/i.test(value)) return 'failed';
+  if (value && /start|running|compact/i.test(value) && !/complete|done|success|compressed/i.test(value)) return 'started';
+  if (value && /skip|unsupported/i.test(value)) return 'skipped';
+  if (value && /complete|done|success|compressed/i.test(value)) return 'completed';
+  return 'completed';
+}
+
+function normalizeWorkspaceRateLimit(
+  value: unknown,
+  fallback: Record<string, unknown>,
+): WorkspaceRuntimeEvent['rateLimit'] | undefined {
+  const record = isRecord(value) ? value : {};
+  const rateLimit = {
+    limited: typeof record.limited === 'boolean'
+      ? record.limited
+      : typeof record.rate_limited === 'boolean'
+        ? record.rate_limited
+        : undefined,
+    retryAfterMs: finiteNumber(record.retryAfterMs) ?? finiteNumber(record.retry_after_ms) ?? retryAfterMsFromText(JSON.stringify(record)),
+    resetAt: stringField(record.resetAt)
+      ?? stringField(record.reset_at)
+      ?? stringField(record.rateLimitResetAt)
+      ?? stringField(record.rate_limit_reset_at)
+      ?? stringField(record.rate_limit_reset)
+      ?? stringField(fallback.rate_limit_reset_at)
+      ?? stringField(fallback.rate_limit_reset),
+    provider: stringField(record.provider) ?? stringField(fallback.provider),
+    model: stringField(record.model) ?? stringField(fallback.model),
+    backend: stringField(record.backend) ?? stringField(fallback.backend),
+    source: stringField(record.source) ?? 'agentserver',
+  };
+  return rateLimit.limited !== undefined || rateLimit.retryAfterMs !== undefined || rateLimit.resetAt ? rateLimit : undefined;
+}
+
+function normalizeWorkspaceContextSource(value?: string): WorkspaceRuntimeContextWindowSource {
+  if (value === 'native' || value === 'agentserver' || value === 'estimate' || value === 'unknown') return value;
+  if (value === 'usage' || value === 'provider' || value === 'provider-usage') return 'native';
+  if (value === 'backend') return 'native';
+  if (value === 'agentserver-estimate') return 'estimate';
+  if (value === 'handoff') return 'agentserver';
+  return 'unknown';
+}
+
+function normalizeWorkspaceCompactCapability(value?: string): NonNullable<WorkspaceRuntimeEvent['contextWindowState']>['compactCapability'] {
+  if (value === 'handoff-only') return 'handoff-slimming';
+  if (value === 'native' || value === 'agentserver' || value === 'handoff-slimming' || value === 'session-rotate' || value === 'none' || value === 'unknown') return value;
+  return 'unknown';
+}
+
+function normalizeWorkspaceContextStatus(
+  value: string | undefined,
+  ratio: number | undefined,
+  autoCompactThreshold: number | undefined,
+): NonNullable<WorkspaceRuntimeEvent['contextWindowState']>['status'] {
+  if (value === 'healthy' || value === 'watch' || value === 'near-limit' || value === 'exceeded' || value === 'compacting' || value === 'blocked' || value === 'unknown') return value;
+  if (value && /exceeded|overflow|max|full/i.test(value)) return 'exceeded';
+  if (value && /compact/i.test(value)) return 'compacting';
+  if (value && /blocked|rate/i.test(value)) return 'blocked';
+  if (value && /near|critical|warning/i.test(value)) return 'near-limit';
+  if (value && /watch/i.test(value)) return 'watch';
+  if (value && /healthy|ok|normal/i.test(value)) return 'healthy';
+  if (ratio !== undefined && ratio >= 1) return 'exceeded';
+  if (ratio !== undefined && ratio >= (autoCompactThreshold ?? 0.82)) return 'near-limit';
+  if (ratio !== undefined && ratio >= 0.68) return 'watch';
+  return ratio === undefined ? 'unknown' : 'healthy';
 }
 
 function normalizeWorkspaceTokenUsage(value: unknown): WorkspaceRuntimeEvent['usage'] | undefined {
@@ -2080,6 +3177,16 @@ function normalizeWorkspaceTokenUsage(value: unknown): WorkspaceRuntimeEvent['us
 
 function finiteNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function firstFiniteNumber(...values: unknown[]) {
+  return values.map(finiteNumber).find((value): value is number => value !== undefined);
+}
+
+function providerForBackend(backend: string) {
+  if (backend === 'openteam_agent') return 'self-hosted';
+  if (backend === 'hermes-agent') return 'hermes';
+  return backend || undefined;
 }
 
 function formatWorkspaceTokenUsage(usage: WorkspaceRuntimeEvent['usage'] | undefined) {
@@ -2521,6 +3628,7 @@ function buildAgentServerGenerationPrompt(request: {
   selectedComponentIds?: string[];
   priorAttempts: unknown[];
   strictTaskFilesReason?: string;
+  retryAudit?: AgentServerGenerationRetryAudit;
 }) {
   return [
     request.contextEnvelope ? JSON.stringify({
@@ -3139,6 +4247,8 @@ function parseJsonErrorMessage(text: string) {
 
 function sanitizeAgentServerError(text: string) {
   const firstLine = text.split('\n').map((line) => line.trim()).find(Boolean) || text;
+  const providerDiagnostic = classifyAgentServerBackendFailure(firstLine);
+  if (providerDiagnostic) return providerRateLimitDiagnosticMessage(providerDiagnostic, false);
   if (/429|too many requests|responseTooManyFailedAttempts|exceeded retry limit/i.test(firstLine)) {
     return '上游模型/AgentServer 返回 429 Too Many Requests 或 exceeded retry limit；这更像速率限制/重试预算耗尽，不是典型 context window 超限。请稍后重试，或降低并发与本轮上下文体积。';
   }
@@ -3150,6 +4260,19 @@ function sanitizeAgentServerError(text: string) {
     .replace(/url:\s*\S+/gi, 'url: redacted')
     .replace(/https?:\/\/[^\s|,)]+/gi, 'redacted-url'))
     .slice(0, 320);
+}
+
+function isContextWindowExceededError(text: string) {
+  return /contextWindowExceeded|context window|maximum context|context length|token limit|tokens? exceeded|context.*exceed|input.*too long/i.test(text)
+    && !isRateLimitError(text);
+}
+
+function isRateLimitError(text: string) {
+  return /429|too many requests|responseTooManyFailedAttempts|exceeded retry limit|rate.?limit/i.test(text);
+}
+
+function agentServerSessionRef(baseUrl: string, agentId: string) {
+  return `${cleanUrl(baseUrl)}/api/agent-server/agents/${encodeURIComponent(agentId)}`;
 }
 
 function agentServerRequestFailureMessage(operation: 'generation' | 'repair', error: unknown, timeoutMs: number) {
@@ -4008,7 +5131,15 @@ function repairNeededPayload(
   request: GatewayRequest,
   skill: SkillAvailability,
   reason: string,
-  refs: Partial<{ taskRel: string; outputRel: string; stdoutRel: string; stderrRel: string }> = {},
+  refs: Partial<{
+    taskRel: string;
+    outputRel: string;
+    stdoutRel: string;
+    stderrRel: string;
+    blocker: string;
+    agentServerRefs: Record<string, unknown>;
+    recoverActions: string[];
+  }> = {},
 ): ToolPayload {
   const id = `EU-${request.skillDomain}-${sha1(`${request.prompt}:${reason}`).slice(0, 8)}`;
   return {
@@ -4048,15 +5179,66 @@ function repairNeededPayload(
       outputRef: refs.outputRel,
       stdoutRef: refs.stdoutRel,
       stderrRef: refs.stderrRel,
+      blocker: refs.blocker,
+      refs: refs.agentServerRefs,
       failureReason: reason,
       ...attemptPlanRefs(request, skill, reason),
       requiredInputs: requiredInputsForRepair(request, reason),
-      recoverActions: recoverActionsForRepair(reason),
+      recoverActions: refs.recoverActions ?? recoverActionsForRepair(reason),
       nextStep: nextStepForRepair(reason),
       attempt: 1,
     }],
     artifacts: [],
   };
+}
+
+function agentServerGenerationFailureReason(error: string, diagnostics?: AgentServerGenerationFailureDiagnostics) {
+  if (diagnostics?.kind !== 'contextWindowExceeded') return error;
+  const parts = [
+    'blocker=contextWindowExceeded: AgentServer/backend exceeded its context window during task generation.',
+    `failureReason=${error}`,
+    diagnostics.backend ? `backend=${diagnostics.backend}` : undefined,
+    diagnostics.provider ? `provider=${diagnostics.provider}` : undefined,
+    diagnostics.agentId ? `session=${diagnostics.agentId}` : undefined,
+    diagnostics.originalErrorSummary ? `originalError=${diagnostics.originalErrorSummary}` : undefined,
+    diagnostics.compaction ? `compact=${diagnostics.compaction.ok ? 'ok' : 'failed'}:${diagnostics.compaction.strategy}:${diagnostics.compaction.message || diagnostics.compaction.reason}` : 'compact=not-run',
+    diagnostics.retryAttempted ? 'retry=attempted-once' : 'retry=not-attempted',
+    diagnostics.retrySucceeded === false ? 'retryResult=failed' : undefined,
+  ];
+  return parts.filter(Boolean).join(' | ');
+}
+
+function agentServerFailurePayloadRefs(diagnostics?: AgentServerGenerationFailureDiagnostics): Partial<{
+  blocker: string;
+  agentServerRefs: Record<string, unknown>;
+  recoverActions: string[];
+}> {
+  if (!diagnostics) return {};
+  const refs = {
+    blocker: diagnostics.kind,
+    agentServerRefs: {
+      backend: diagnostics.backend,
+      provider: diagnostics.provider,
+      model: diagnostics.model,
+      agentId: diagnostics.agentId,
+      sessionRef: diagnostics.sessionRef,
+      originalErrorSummary: diagnostics.originalErrorSummary,
+      contextCompaction: diagnostics.compaction ? contextCompactionMetadata(diagnostics.compaction) : undefined,
+      compactResult: diagnostics.compaction,
+      retryAttempted: diagnostics.retryAttempted,
+      retrySucceeded: diagnostics.retrySucceeded,
+    },
+  };
+  return diagnostics.kind === 'contextWindowExceeded'
+    ? {
+      ...refs,
+      recoverActions: [
+        'Inspect AgentServer/backend context compaction diagnostics in refs.contextCompaction.',
+        'Retry after reducing artifacts, priorAttempts, logs, or selected UI state passed into this turn.',
+        'Use a backend/model with a larger context window if compaction keeps failing.',
+      ],
+    }
+    : refs;
 }
 
 function requiredInputsForRepair(request: GatewayRequest, reason: string) {
@@ -4070,6 +5252,13 @@ function requiredInputsForRepair(request: GatewayRequest, reason: string) {
 }
 
 function recoverActionsForRepair(reason: string) {
+  if (/429|rate-limit|rate limit|retry budget|too many failed attempts|responseTooManyFailedAttempts|retry-after/i.test(reason)) {
+    return [
+      'Wait for the provider rate-limit/retry budget reset, then retry the same prompt.',
+      'Reduce concurrent AgentServer runs or switch to a provider/model with available quota.',
+      'Keep follow-up context compact by relying on workspace refs instead of resending full logs/artifacts.',
+    ];
+  }
   if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) {
     return [
       'Open BioAgent settings and fill Model Provider, Model Base URL, Model Name, and API Key.',
@@ -4096,6 +5285,7 @@ function recoverActionsForRepair(reason: string) {
 }
 
 function nextStepForRepair(reason: string) {
+  if (/429|rate-limit|rate limit|retry budget|too many failed attempts|responseTooManyFailedAttempts|retry-after/i.test(reason)) return 'Wait for provider quota/reset, then rerun with compact workspace refs; BioAgent has already used its single automatic compact retry.';
   if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) return 'Configure the user-side model endpoint in BioAgent settings, then retry the same prompt.';
   if (/AgentServer|base URL|fetch|ECONNREFUSED/i.test(reason)) return 'Start AgentServer or choose a local skill/runtime, then retry.';
   if (/schema|payload|parsed|validation/i.test(reason)) return 'Repair the task output contract and rerun validation.';

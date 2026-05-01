@@ -85,6 +85,16 @@ export interface TurnAcceptanceFailure {
   repairAction?: string;
 }
 
+export interface SemanticTurnAcceptance {
+  pass: boolean;
+  confidence: number;
+  unmetCriteria: string[];
+  missingArtifacts: string[];
+  referencedEvidence: string[];
+  repairPrompt?: string;
+  backendRunRef?: string;
+}
+
 export interface TurnAcceptance {
   pass: boolean;
   severity: TurnAcceptanceSeverity;
@@ -93,6 +103,18 @@ export interface TurnAcceptance {
   objectReferences: ObjectReference[];
   repairPrompt?: string;
   repairAttempt?: number;
+  semantic?: SemanticTurnAcceptance;
+  repairHistory?: Array<{
+    attempt: number;
+    action: string;
+    status: 'started' | 'completed' | 'failed-with-reason' | 'skipped-budget-exhausted';
+    startedAt: string;
+    completedAt?: string;
+    sourceRunId?: string;
+    repairRunId?: string;
+    failureCodes: string[];
+    reason?: string;
+  }>;
 }
 
 export interface BioAgentMessage {
@@ -589,16 +611,36 @@ export interface AgentStreamEvent {
   raw?: unknown;
 }
 
-export type AgentContextWindowSource = 'native' | 'agentserver' | 'estimate' | 'unknown';
-export type AgentCompactCapability = 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown';
+export type AgentContextWindowSource = 'native' | 'provider-usage' | 'agentserver-estimate' | 'agentserver' | 'estimate' | 'unknown';
+export type AgentCompactCapability = 'native' | 'agentserver' | 'handoff-only' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown';
 
 export interface AgentContextWindowState {
+  backend?: string;
+  provider?: string;
+  model?: string;
   usedTokens?: number;
+  input?: number;
+  output?: number;
+  cache?: number;
+  window?: number;
   windowTokens?: number;
   ratio?: number;
   source: AgentContextWindowSource;
-  backend?: string;
+  status?: 'healthy' | 'watch' | 'near-limit' | 'exceeded' | 'compacting' | 'blocked' | 'unknown';
   compactCapability?: AgentCompactCapability;
+  budget?: {
+    rawRef?: string;
+    rawSha1?: string;
+    rawBytes?: number;
+    normalizedBytes?: number;
+    maxPayloadBytes?: number;
+    rawTokens?: number;
+    normalizedTokens?: number;
+    savedTokens?: number;
+    normalizedBudgetRatio?: number;
+    decisions?: Array<Record<string, unknown>>;
+  };
+  auditRefs?: string[];
   autoCompactThreshold?: number;
   watchThreshold?: number;
   nearLimitThreshold?: number;
@@ -611,6 +653,9 @@ export interface AgentContextCompaction {
   source?: AgentContextWindowSource;
   backend?: string;
   compactCapability?: AgentCompactCapability;
+  before?: AgentContextWindowState;
+  after?: AgentContextWindowState;
+  auditRefs?: string[];
   startedAt?: string;
   completedAt?: string;
   lastCompactedAt?: string;

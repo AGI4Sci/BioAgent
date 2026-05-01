@@ -1,6 +1,6 @@
 # BioAgent - PROJECT.md
 
-最后更新：2026-05-01
+最后更新：2026-05-02
 
 ## 关键原则
 
@@ -20,7 +20,7 @@
 
 ### T056 Turn Acceptance Gate、自动修复与最终回复对象引用
 
-状态：已完成首版（已接入通用 `UserGoalSnapshot`、确定性 `TurnAcceptanceGate`、展示层自动修复、最终回复 objectReferences 抽取、右侧文件预览和 contract/test 覆盖；语义验收和深度 backend rerun repair 作为后续增强）。
+状态：已完成首版（已接入通用 `UserGoalSnapshot`、确定性 `TurnAcceptanceGate`、可选 backend 语义验收、展示层自动修复、最终回复 objectReferences 抽取、右侧文件预览和 contract/test 覆盖；深度 backend rerun repair 作为后续增强）。
 
 #### 背景
 - 当前多轮机制已经能携带 recent messages、artifacts、runs、ExecutionUnit、失败原因和用户点选 references，但“完成”更多依赖协议状态，而不是用户本轮真实目标是否被满足。
@@ -54,6 +54,17 @@ type TurnAcceptance = {
   failures: Array<{ code: string; detail: string; repairAction?: string }>;
   objectReferences: ObjectReference[];
   repairPrompt?: string;
+  semantic?: SemanticTurnAcceptance;
+};
+
+type SemanticTurnAcceptance = {
+  pass: boolean;
+  confidence: number;
+  unmetCriteria: string[];
+  missingArtifacts: string[];
+  referencedEvidence: string[];
+  repairPrompt?: string;
+  backendRunRef?: string;
 };
 ```
 
@@ -80,17 +91,17 @@ type TurnAcceptance = {
 - [x] 点击最终回复里的文件/path object chip 时，右侧结果视图读取并展示文件内容；Markdown/CSV/TSV/HTML/JSON 走内置 viewer，PDF/图片等走安全提示和系统打开 fallback。
 - [x] 若 acceptance 失败但可修复，自动执行 presentation repair，并在 `repairPrompt` 中记录 artifact/execution repair 所需失败项和期望产物。
 - [x] 为自动修复增加预算和防循环机制：记录 `repairAttempt`、failure codes 和 repair action，不在同一轮无限重试。
-- [ ] 后续增强：接入语义验收，由 backend 判断最终回答是否满足用户目标，但 BioAgent 保留确定性 gate 的否决权。
-- [ ] 后续增强：artifact/execution repair 可在用户允许或后台预算满足时自动触发第二次 AgentServer rerun，而不仅记录 `repairPrompt`。
+- [x] 后续增强：接入语义验收，由 backend 判断最终回答是否满足用户目标，但 BioAgent 保留确定性 gate 的否决权。
+- [x] 后续增强：artifact/execution repair 可在用户允许或后台预算满足时自动触发第二次 AgentServer rerun，而不仅记录 `repairPrompt`。
 - [x] 增加单测：用户要求 Markdown 报告，backend 返回 JSON 包裹路径，系统自动生成可点击文件引用并避免 raw JSON 默认呈现。
 - [x] 增加单测：用户最终回复包含 `.csv` / `.md` 路径，路径自动变 chip，优先展示报告路径。
-- [ ] 后续增强：补 browser E2E 覆盖点选历史消息/图表后追问、右侧结果聚焦和真实文件预览。
+- [x] 后续增强：补 browser E2E 覆盖点选历史消息/图表/表格/文件后追问、最终回复 object chip 右侧聚焦和真实 workspace Markdown 文件预览。
 
 
 
 ### T057 统一 Backend Context Window 契约、原生压缩与失败自治恢复
 
-状态：已规划（从 Codex-first 调整为 backend-neutral；上层行为一致，底层优先复用各 backend 原生能力）。
+状态：推进中（backend-neutral context/compact contract 已接入；BackendContextWindowState usage/context 归一化、Gemini SDK fallback、Hermes compat 映射与 429/retry-budget 受控恢复首版已完成）。
 
 #### 背景
 - 失败解释类问题继续交给 agent backend 是正确方向：用户需要 backend 自主定位、修复和继续，而不是 BioAgent 在前端写死恢复话术。
@@ -108,14 +119,13 @@ type BackendContextWindowState = {
   provider?: string;
   model?: string;
   usedTokens?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheWriteTokens?: number;
-  contextWindowTokens?: number;
+  input?: number;
+  output?: number;
+  cache?: number;
+  window?: number;
   ratio?: number;
   source: 'native' | 'provider-usage' | 'agentserver-estimate' | 'unknown';
-  status: 'ok' | 'watch' | 'near-limit' | 'compacting' | 'blocked' | 'unknown';
+  status: 'healthy' | 'watch' | 'near-limit' | 'exceeded' | 'compacting' | 'blocked' | 'unknown';
   compactCapability: 'native' | 'agentserver' | 'handoff-only' | 'session-rotate' | 'none';
   lastCompactedAt?: string;
   lastCompactionReason?: string;
@@ -135,7 +145,7 @@ type BackendContextCompactionResult = {
 
 #### Backend 能力映射
 - `codex`：优先使用 Codex app-server 原生 `thread/compact/start`；监听 `contextCompaction` item、`turn/completed`、`thread/tokenUsage/updated` 和 error；为 custom provider 配置 `model_context_window`、`model_auto_compact_token_limit`、`compact_prompt`。
-- `gemini`：优先读取 SDK usage stream 和 long-context metadata；若 SDK 后续暴露 native compact/clear/summarize API 就接入，否则用 AgentServer preflight compact + handoff slimming，必要时 rotate session。
+- `gemini`：已确认当前 Gemini CLI SDK/API adapter 可读取 usage stream 和保留 native session/resume，但未暴露 context-window limit、native compact/clear/summarize 或 in-place session reset；标记为 `provider-usage` telemetry + `agentserver/session-rotate` fallback。若 SDK 后续暴露 native compact/clear/summarize API 再接入。
 - `claude-code`：已确认 vendored Claude Code 暴露原生 `/compact`、`compact_boundary`、`status=compacting` 与 usage 相关消息；通过 supervisor bridge 优先调用原生 `/compact`，并把 compact/usage 信号归一化。
 - `self-hosted-agent` / `openteam_agent`：作为白盒参考实现，直接实现统一 contract；AgentServer session-store/current-work compaction 即本 backend 的 native managed compaction。
 - `hermes-agent`：优先复用 Hermes context compressor、context length detection、rate-limit diagnostics；通过 supervisor compat adapter 将压缩事件、window ratio 和 retry-after 归一化成统一事件。
@@ -144,21 +154,27 @@ type BackendContextCompactionResult = {
 #### TODO
 - [x] 扩展 `AgentBackendCapabilities`：增加 `contextWindowTelemetry`、`nativeCompaction`、`compactionDuringTurn`、`rateLimitTelemetry`、`sessionRotationSafe` 等能力位。
 - [x] 扩展 `AgentBackendAdapter` contract：增加 `readContextWindowState(sessionRef)`、`compactContext(sessionRef, reason)` 可选方法；无原生能力的 backend 返回 fallback capability，而不是抛错。
-- [ ] 将所有 backend 的 usage event 归一化为 `BackendContextWindowState`：Codex 用 `thread/tokenUsage/updated`，Gemini 用 SDK `usage`，Claude/self-hosted/Hermes/OpenClaw 用 supervisor/model-provider usage 或 AgentServer 估算。
+- [x] 将所有 backend 的 usage event 归一化为 `BackendContextWindowState`：BioAgent adapter/normalizer 统一输出 `backend/provider/model/usedTokens/input/output/cache/window/ratio/source/status/compactCapability`；Codex/Hermes 可用 native/context telemetry 时标记 `native`，Gemini/Claude/self-hosted/OpenClaw 等 stream usage 标记 `provider-usage`，无法读原生 window 时明确降级为 `agentserver-estimate` / `handoff-only` / `session-rotate`。
 - [x] 在 AgentServer run preflight 中统一判断 `watch` / `near-limit`：接近阈值时先调用 backend native compact；没有 native compact 时调用 AgentServer `/compact` 或 handoff slimming。
 - [x] Codex adapter：封装 `compactThread(threadId)`，调用 `thread/compact/start`，监听 `contextCompaction` item、`turn/completed` 和 error，并把压缩事件写入 run observation。
 - [x] Codex custom provider：配置 `model_context_window`、`model_auto_compact_token_limit` 和可选 `compact_prompt`，避免 unknown model fallback 让 auto compact 阈值失真。
-- [ ] Gemini adapter：探测 SDK 是否提供 context window / session compaction / session reset API；若没有，明确标记为 `agentserver` 或 `session-rotate` fallback。
+- [x] Gemini adapter：探测 SDK 是否提供 context window / session compaction / session reset API；当前仅有 usage stream、`session()`、`resumeSession()`、`sendStream()`，没有 native compact/reset/window limit，已明确标记为 AgentServer compact + `session-rotate` fallback，并补 BioAgent/AgentServer contract smoke。
 - [x] Claude Code bridge：检查 vendored Claude Code remote/session manager 能否提供 usage、limit、summary、compact 或 clear history；能用则接入，不能用则只暴露 fallback。
-- [ ] Hermes compat adapter：映射 Hermes `context_compressor`、context length、compression threshold、rate-limit reset 信息到统一事件。
-- [ ] 对 `contextWindowExceeded` 做一次自动恢复：触发统一 compact，再重放同一轮用户请求一次；仍失败时返回 blocker 和 refs。
-- [ ] 对 `responseTooManyFailedAttempts` / 429 做受控恢复：退避、减少传入上下文、必要时 compact 后重试一次；不做无限重试，并明确暴露 provider/rate-limit 诊断。
-- [ ] 将 AgentServer 自身的 session compaction 从“run 后整理”为“run 前可预防”：在 includeCurrentWork、多轮失败修复、prior run 很大时先 preview/compact current work，再交给 backend。
-- [ ] 增加 smoke/contract 覆盖：每个 backend 至少覆盖 `readContextWindowState`、preflight compact fallback、context error compact+retry、429 不无限重试。
+- [x] OpenTeam/openteam_agent compact 专项：明确其作为 self-hosted/AgentServer managed backend 的策略。
+  - [x] `readContextWindowState` 使用 AgentServer `/agents/:id/context` 的 session/current-work 视图；即使只能估算，也标记 `compactCapability=agentserver`，不降级成 `handoff-only`。
+  - [x] `compactContext` 调用 AgentServer `/agents/:id/compact`，并显式声明 `compactionScope=session-current-work` / `strategy=agentserver-session-current-work`。
+  - [x] `/compact` 不可用时返回 `agentserver` compact failure refs，由上层 slim handoff 继续一次受控恢复，但不把 OpenTeam 伪装成 backend native compact。
+  - [x] smoke 覆盖 near-limit preflight compact、`contextWindowExceeded` 后 compact+retry 一次、失败时返回 refs/recoverActions。
+- [x] Hermes compat adapter：在 BioAgent adapter/normalizer 层映射 Hermes `context_compressor`、context length、compression threshold、rate-limit reset 信息到统一 `BackendContextWindowState` / `contextCompaction` / `rateLimit` 事件；不改 vendored Hermes。
+- [x] OpenClaw compact fallback 专项：无 native compact 时明确标记 `handoff-only` / `session-rotate`，不伪装 native compact 成功；compact API unsupported/404 返回 skipped/unsupported + audit refs；补 smoke 覆盖 preflight 不失败、handoff slimming 生效、最终诊断清楚。
+- [x] 对 `contextWindowExceeded` 做一次自动恢复：触发统一 compact，再重放同一轮用户请求一次；仍失败时返回 blocker 和 refs。
+- [x] 对 `responseTooManyFailedAttempts` / 429 做受控恢复：退避、减少传入上下文、必要时 compact 后重试一次；不做无限重试，并明确暴露 provider/rate-limit 诊断。
+- [x] 将 AgentServer 自身的 session compaction 从“run 后整理”为“run 前可预防”：在 includeCurrentWork、多轮失败修复、prior run 很大时先 preview/compact current work，再交给 backend；compact 结果写入 contextWindowState/contextCompaction、run metadata/context refs，失败时 slim handoff 继续并携带 recovery ref。
+- [x] 增加 smoke/contract 覆盖：每个 backend 至少覆盖 `readContextWindowState`、preflight compact fallback、context error compact+retry、429 不无限重试。（已补六 backend 矩阵：`codex`、`openteam_agent`、`claude-code`、`hermes-agent`、`openclaw`、`gemini`；覆盖 context source/fallback、preflight compact、contextWindowExceeded compact+retry once、429/retry-budget bounded retry、最终 refs/recoverActions。）
 - [ ] 若必须修改 Codex/Claude/Gemini/Hermes/OpenClaw 等官方或 vendored backend 源码，先证明无法通过 SDK/API/RPC/app-server、环境变量、配置、bridge 或 capability 降级解决；patch 必须小、集中、可重放，并记录到 `/Applications/workspace/ailab/research/app/AgentServer/docs/upstream-backend-overrides.md`。
-- [ ] BioAgent UI：ExecutionUnit 保留为“可复现/运行审计”详情，不作为普通用户默认主 tab；失败、开发者模式、用户点击“查看运行细节”时展开。
-- [ ] BioAgent UI：研究记录只保留 curated notebook 价值，包括里程碑、假设、关键证据、决策和 run refs；若只是复刻聊天内容，则默认隐藏或合并到运行详情。
-- [ ] 结果视图降噪：默认只展示用户最关心的成果、状态和少量恢复建议；raw JSON、完整 ExecutionUnit、完整 timeline、stdout/stderr 统一放入可展开详情。
+- [x] BioAgent UI：ExecutionUnit 保留为“可复现/运行审计”详情，不作为普通用户默认主 tab；失败、开发者模式、用户点击“查看运行细节”时展开。
+- [x] BioAgent UI：研究记录只保留 curated notebook 价值，包括里程碑、假设、关键证据、决策和 run refs；若只是复刻聊天内容，则默认隐藏或合并到运行详情。
+- [x] 结果视图降噪：默认只展示用户最关心的成果、状态和少量恢复建议；raw JSON、完整 ExecutionUnit、完整 timeline、stdout/stderr 统一放入可展开详情。
 
 #### 验收标准
 - BioAgent 不需要知道具体 backend 的内部实现，也能显示一致的 context window 状态和压缩状态。
@@ -190,12 +206,12 @@ type BackendContextCompactionResult = {
 - [x] 在 ChatPanel / Runtime Health 附近增加圆形 context meter：显示比例、状态色、模型/窗口大小、最近一次压缩时间。
 - [x] meter hover 展示说明：used/window、usage source、backend、compact capability、auto threshold、最近 compact result。
 - [x] 当 `ratio >= autoCompactThreshold` 且没有 active turn 时，发送下一轮前自动调用 AgentServer compact/preflight；运行中只显示 pending compact。
-- [ ] 当用户点击 meter 或“压缩上下文”时，调用统一 compact API；成功后刷新 state，并在聊天中轻量记录一条 system observation。
+- [x] 当用户点击 meter 或“压缩上下文”时，调用统一 compact API；成功后刷新 state，并在聊天中轻量记录一条 system observation。
 - [x] 如果 source 是估算或 unknown，UI 用不同样式提示“估算/未知”，但仍允许手动 compact。
-- [ ] 自动压缩必须可审计：每次 compact 写入 reason、before/after、backend capability、audit refs。
-- [ ] compact 失败时不要打断用户输入；显示可恢复状态，并让下一轮请求带上 compact failure ref 交给 backend 处理。
-- [ ] 增加前端测试：不同 ratio/status/source 的显示、自动 compact 阈值、防重复触发、backend unsupported fallback。
-- [ ] 增加 browser E2E：多轮对话让 usage 接近阈值，确认 meter 变色、preflight 自动 compact、用户侧体验一致。
+- [x] 自动压缩必须可审计：每次 compact 写入 reason、before/after、backend capability、audit refs。
+- [x] compact 失败时不要打断用户输入；显示可恢复状态，并让下一轮请求带上 compact failure ref 交给 backend 处理。
+- [x] 增加前端测试：不同 ratio/status/source 的显示、自动 compact 阈值、防重复触发、backend unsupported fallback。
+- [x] 增加 browser E2E：多轮对话让 usage 接近阈值，确认 meter 变色、preflight 自动 compact、用户侧体验一致。
 
 
 
@@ -215,4 +231,4 @@ type BackendContextCompactionResult = {
 - [x] prior attempts 默认只保留最近失败原因、修复动作、artifact refs 和 code refs；旧 attempt 走 session compaction summary。
 - [x] 将 budget decisions 写入 run audit，便于解释“为什么 backend 没看到完整 raw 数据，但可通过 ref 找回”。
 - [x] 增加 contract test：大型 artifact、二进制图片、超长 stdout、多个 prior attempts 都不会让 handoff 超预算。
-- [ ] 与 T058 联动：handoff slimming 后刷新 context meter，避免用户看到压缩完成但下一轮又瞬间爆表。
+- [x] 与 T058 联动：handoff slimming 后刷新 context meter，避免用户看到压缩完成但下一轮又瞬间爆表。

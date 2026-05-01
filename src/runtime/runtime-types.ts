@@ -41,23 +41,46 @@ export interface WorkspaceRuntimeEvent {
   usage?: WorkspaceRuntimeTokenUsage;
   contextWindowState?: WorkspaceRuntimeContextWindowState;
   contextCompaction?: WorkspaceRuntimeContextCompaction;
+  rateLimit?: WorkspaceRuntimeRateLimit;
   raw?: unknown;
 }
 
-export type WorkspaceRuntimeContextWindowSource = 'native' | 'agentserver' | 'estimate' | 'unknown';
+export type WorkspaceRuntimeContextWindowSource = 'native' | 'provider-usage' | 'agentserver-estimate' | 'agentserver' | 'estimate' | 'unknown';
 
 export interface WorkspaceRuntimeContextWindowState {
+  backend?: string;
+  provider?: string;
+  model?: string;
   usedTokens?: number;
+  input?: number;
+  output?: number;
+  cache?: number;
+  window?: number;
   windowTokens?: number;
   ratio?: number;
   source: WorkspaceRuntimeContextWindowSource;
-  backend?: string;
-  compactCapability?: 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown';
+  status?: 'healthy' | 'watch' | 'near-limit' | 'exceeded' | 'compacting' | 'blocked' | 'unknown';
+  compactCapability?: 'native' | 'agentserver' | 'handoff-only' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown';
+  budget?: WorkspaceRuntimeContextBudget;
+  auditRefs?: string[];
   autoCompactThreshold?: number;
   watchThreshold?: number;
   nearLimitThreshold?: number;
   lastCompactedAt?: string;
   pendingCompact?: boolean;
+}
+
+export interface WorkspaceRuntimeContextBudget {
+  rawRef?: string;
+  rawSha1?: string;
+  rawBytes?: number;
+  normalizedBytes?: number;
+  maxPayloadBytes?: number;
+  rawTokens?: number;
+  normalizedTokens?: number;
+  savedTokens?: number;
+  normalizedBudgetRatio?: number;
+  decisions?: Array<Record<string, unknown>>;
 }
 
 export interface WorkspaceRuntimeContextCompaction {
@@ -70,6 +93,16 @@ export interface WorkspaceRuntimeContextCompaction {
   lastCompactedAt?: string;
   reason?: string;
   message?: string;
+}
+
+export interface WorkspaceRuntimeRateLimit {
+  limited?: boolean;
+  retryAfterMs?: number;
+  resetAt?: string;
+  provider?: string;
+  model?: string;
+  backend?: string;
+  source?: string;
 }
 
 export interface WorkspaceRuntimeTokenUsage {
@@ -186,7 +219,15 @@ export interface AgentBackendCapabilities {
 export interface BackendContextWindowState {
   backend: string;
   agentId: string;
-  source: 'backend' | 'agentserver' | 'handoff' | 'unknown';
+  provider?: string;
+  model?: string;
+  usedTokens?: number;
+  input?: number;
+  output?: number;
+  cache?: number;
+  window?: number;
+  ratio?: number;
+  source: 'native' | 'provider-usage' | 'agentserver-estimate' | 'unknown';
   status: 'healthy' | 'watch' | 'near-limit' | 'exceeded' | 'unknown';
   contextWindowTokens?: number;
   contextWindowLimit?: number;
@@ -199,11 +240,14 @@ export interface BackendContextWindowState {
     resetAt?: string;
   };
   compactCapability: 'native' | 'agentserver' | 'handoff-only' | 'session-rotate' | 'none';
+  budget?: WorkspaceRuntimeContextBudget;
+  auditRefs?: string[];
   snapshot?: Record<string, unknown>;
 }
 
 export interface BackendContextCompactionResult {
   ok: boolean;
+  status?: 'compacted' | 'skipped' | 'failed' | 'unsupported';
   backend: string;
   agentId: string;
   strategy: 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none';
@@ -212,6 +256,7 @@ export interface BackendContextCompactionResult {
   after?: BackendContextWindowState;
   message?: string;
   runId?: string;
+  auditRefs?: string[];
 }
 
 export interface AgentBackendAdapter {
@@ -355,5 +400,16 @@ export interface TaskAttemptRecord {
   stderrRef?: string;
   exitCode?: number;
   schemaErrors?: string[];
+  contextRecovery?: {
+    kind: 'contextWindowExceeded';
+    backend?: string;
+    provider?: string;
+    agentId?: string;
+    sessionRef?: string;
+    originalErrorSummary?: string;
+    compaction?: BackendContextCompactionResult;
+    retryAttempted?: boolean;
+    retrySucceeded?: boolean;
+  };
   createdAt: string;
 }

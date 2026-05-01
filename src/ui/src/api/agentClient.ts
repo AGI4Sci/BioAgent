@@ -77,8 +77,10 @@ function buildPrompt(input: SendAgentMessageInput) {
   const recentHistory = input.messages.slice(-8).map((message) => ({
     role: message.role,
     content: message.content,
+    references: message.references?.map(compactBioAgentReference),
   }));
   const artifactContext = summarizeArtifacts(input.artifacts ?? []);
+  const referenceContext = summarizeBioAgentReferences(input.references ?? []);
   return [
     `当前 BioAgent scenario: ${input.scenarioId}`,
     `internal skill domain: ${input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain}`,
@@ -88,6 +90,8 @@ function buildPrompt(input: SendAgentMessageInput) {
     JSON.stringify(recentHistory, null, 2),
     artifactContext.length ? '当前可用 artifacts:' : '',
     artifactContext.length ? JSON.stringify(artifactContext, null, 2) : '',
+    referenceContext.length ? '用户本轮显式引用对象:' : '',
+    referenceContext.length ? JSON.stringify(referenceContext, null, 2) : '',
     '',
     'Scope check metadata:',
     JSON.stringify(scopeCheck(builtInScenarioId, input.prompt), null, 2),
@@ -134,6 +138,7 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         uiPlanRef: input.uiPlanRef,
         scenarioOverride: input.scenarioOverride,
         artifacts: summarizeArtifacts(input.artifacts ?? []),
+        references: summarizeBioAgentReferences(input.references ?? []),
         scopeCheck: scopeCheck(builtInScenarioId, input.prompt),
       },
     },
@@ -152,6 +157,39 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
       },
     },
   };
+}
+
+function summarizeBioAgentReferences(references: NonNullable<SendAgentMessageInput['references']>) {
+  return references.slice(0, 8).map(compactBioAgentReference);
+}
+
+function compactBioAgentReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {
+  return {
+    id: reference.id,
+    kind: reference.kind,
+    title: reference.title,
+    ref: reference.ref,
+    sourceId: reference.sourceId,
+    runId: reference.runId,
+    locator: reference.locator,
+    summary: reference.summary,
+    payload: previewReferencePayload(reference.payload),
+  };
+}
+
+function previewReferencePayload(payload: unknown): unknown {
+  if (!isRecord(payload)) return payload;
+  const preview: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload).slice(0, 10)) {
+    if (typeof value === 'string') {
+      preview[key] = value.slice(0, 1200);
+    } else if (Array.isArray(value)) {
+      preview[key] = value.slice(0, 8);
+    } else {
+      preview[key] = value;
+    }
+  }
+  return preview;
 }
 
 function summarizeArtifacts(artifacts: RuntimeArtifact[]) {
@@ -214,7 +252,7 @@ function buildRuntimeConfig(input: SendAgentMessageInput): NonNullable<AgentServ
 }
 
 function normalizeAgentBackend(value: string): AgentBackendId {
-  return ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw'].includes(value)
+  return ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw', 'gemini'].includes(value)
     ? value as AgentBackendId
     : 'codex';
 }

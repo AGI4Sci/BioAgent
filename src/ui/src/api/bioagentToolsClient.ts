@@ -24,6 +24,7 @@ export async function sendBioAgentToolMessage(
 ): Promise<NormalizedAgentResponse> {
   const builtInScenarioId = builtInScenarioIdForInput(input);
   const artifactSummary = summarizeArtifacts(input);
+  const referenceSummary = summarizeBioAgentReferences(input);
   const recentExecutionRefs = summarizeExecutionRefs(input);
   const recentConversation = currentTurnConversation(input, artifactSummary, recentExecutionRefs);
   const skillDomain = input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain;
@@ -77,6 +78,7 @@ export async function sendBioAgentToolMessage(
         llmEndpoint: buildToolLlmEndpoint(input),
         roleView: input.roleView,
         artifacts: artifactSummary,
+        references: referenceSummary,
         availableSkills: [`agentserver.generate.${skillDomain}`],
         expectedArtifactTypes,
         selectedComponentIds,
@@ -93,6 +95,7 @@ export async function sendBioAgentToolMessage(
           uiPlanRef: input.uiPlanRef,
           currentPrompt: input.prompt,
           recentConversation,
+          currentReferences: referenceSummary,
           recentExecutionRefs,
           recentRuns: summarizeRuns(input),
           workspacePersistence: workspacePersistenceSummary(input),
@@ -365,9 +368,15 @@ function currentTurnConversation(
 ) {
   const hasCurrentSessionWork = (input.runs?.length ?? 0) > 0
     || artifactSummary.length > 0
-    || recentExecutionRefs.length > 0;
+    || recentExecutionRefs.length > 0
+    || (input.references?.length ?? 0) > 0;
   if (!hasCurrentSessionWork) return [`user: ${input.prompt}`];
-  const conversation = input.messages.slice(-12).map((message) => `${message.role}: ${message.content}`);
+  const conversation = input.messages.slice(-12).map((message) => {
+    const references = message.references?.length
+      ? `\n  references: ${JSON.stringify(message.references.map(compactBioAgentReference))}`
+      : '';
+    return `${message.role}: ${message.content}${references}`;
+  });
   const lastUser = [...input.messages].reverse().find((message) => message.role === 'user');
   if (!lastUser || normalizePromptText(lastUser.content) !== normalizePromptText(input.prompt)) {
     conversation.push(`user: ${input.prompt}`);
@@ -396,6 +405,43 @@ function summarizeArtifacts(input: SendAgentMessageInput) {
     metadata: compactRecord(artifact.metadata),
     dataSummary: summarizeArtifactData(artifact.data),
   }));
+}
+
+function summarizeBioAgentReferences(input: SendAgentMessageInput) {
+  return (input.references ?? []).slice(0, 8).map(compactBioAgentReference);
+}
+
+function compactBioAgentReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {
+  return {
+    id: reference.id,
+    kind: reference.kind,
+    title: reference.title,
+    ref: reference.ref,
+    sourceId: reference.sourceId,
+    runId: reference.runId,
+    locator: reference.locator,
+    summary: reference.summary,
+    payload: compactReferencePayload(reference.payload),
+  };
+}
+
+function compactReferencePayload(payload: unknown): unknown {
+  if (typeof payload === 'string') return payload.slice(0, 1600);
+  if (Array.isArray(payload)) return payload.slice(0, 8);
+  if (!isRecord(payload)) return payload;
+  const compact: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload).slice(0, 12)) {
+    if (typeof value === 'string') {
+      compact[key] = value.slice(0, 1600);
+    } else if (Array.isArray(value)) {
+      compact[key] = value.slice(0, 8);
+    } else if (isRecord(value)) {
+      compact[key] = compactRecord(value);
+    } else {
+      compact[key] = value;
+    }
+  }
+  return compact;
 }
 
 function summarizeExecutionRefs(input: SendAgentMessageInput) {
@@ -618,6 +664,7 @@ function buildAgentContext(
       markdown: scenario.scenarioMarkdown,
     } : undefined,
     recentConversation,
+    currentReferences: summarizeBioAgentReferences(input),
     artifacts: artifactSummary,
     recentExecutionRefs,
     workspacePersistence: workspacePersistenceSummary(input),

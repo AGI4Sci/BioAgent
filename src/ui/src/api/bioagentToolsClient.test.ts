@@ -513,6 +513,70 @@ describe('sendBioAgentToolMessage routing', () => {
     assert.equal(artifacts[0].workspaceArtifactRef, '.bioagent/artifacts/session-alpha-generic-result.json');
     assert.deepEqual(artifacts[0].fileRefs, ['.bioagent/task-results/run-alpha.json', '.bioagent/outputs/result.csv']);
   });
+
+  it('passes explicit chat references to workspace runtime context', async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          message: 'referenced context used',
+          confidence: 0.8,
+          claimType: 'fact',
+          evidenceLevel: 'runtime',
+          uiManifest: [],
+          executionUnits: [{ id: 'EU-reference', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          artifacts: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    await sendBioAgentToolMessage({
+      ...baseInput(),
+      messages: [{
+        id: 'msg-source',
+        role: 'scenario',
+        content: '上一轮结论：volcano plot 中 ABC1 显著上调。',
+        createdAt: '2026-04-26T00:00:00.000Z',
+        status: 'completed',
+      }],
+      references: [{
+        id: 'ref-message-msg-source',
+        kind: 'message',
+        title: 'Agent · 上一轮结论',
+        ref: 'message:msg-source',
+        sourceId: 'msg-source',
+        summary: '上一轮结论：volcano plot 中 ABC1 显著上调。',
+        payload: {
+          role: 'scenario',
+          content: '上一轮结论：volcano plot 中 ABC1 显著上调。',
+          createdAt: '2026-04-26T00:00:00.000Z',
+        },
+      }, {
+        id: 'ref-chart-volcano',
+        kind: 'chart',
+        title: 'volcano plot',
+        ref: 'artifact:volcano-plot',
+        sourceId: 'volcano-plot',
+        runId: 'run-volcano',
+        summary: 'differential-expression chart',
+      }],
+      prompt: '基于引用对象继续解释。',
+    });
+
+    const references = requestBody?.references as Array<Record<string, unknown>>;
+    assert.equal(references.length, 2);
+    assert.equal(references[0].ref, 'message:msg-source');
+    assert.equal(references[1].kind, 'chart');
+    const uiState = requestBody?.uiState as Record<string, unknown>;
+    assert.deepEqual(uiState.currentReferences, references);
+    const agentContext = uiState.agentContext as Record<string, unknown>;
+    assert.deepEqual(agentContext.currentReferences, references);
+  });
 });
 
 function baseInput(): SendAgentMessageInput {

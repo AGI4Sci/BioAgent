@@ -57,4 +57,10 @@ describe('BioAgent config persistence', () => {
     assert.equal(normalizeWorkspaceRootPath(`${root}/.bioagent`), root);
     assert.equal(updateConfig(defaultBioAgentConfig, { workspacePath: `${root}/.bioagent/tasks/run-1` }).workspacePath, root);
   });
+
+  it('preserves gemini as a selectable AgentBackend', () => {
+    const config = updateConfig(defaultBioAgentConfig, { agentBackend: 'gemini' });
+
+    assert.equal(config.agentBackend, 'gemini');
+  });
 });

@@ -9,6 +9,26 @@ export type ExecutionUnitStatus = 'planned' | 'running' | 'done' | 'failed' | 'r
 export type ObjectReferenceKind = 'artifact' | 'file' | 'folder' | 'run' | 'execution-unit' | 'url' | 'scenario-package';
 export type ObjectReferenceStatus = 'available' | 'missing' | 'expired' | 'blocked' | 'external';
 export type ObjectAction = 'focus-right-pane' | 'inspect' | 'open-external' | 'reveal-in-folder' | 'copy-path' | 'pin' | 'compare';
+export type BioAgentReferenceKind = 'file' | 'file-region' | 'message' | 'task-result' | 'chart' | 'table' | 'ui';
+
+export interface BioAgentReference {
+  id: string;
+  kind: BioAgentReferenceKind;
+  title: string;
+  ref: string;
+  summary?: string;
+  sourceId?: string;
+  runId?: string;
+  locator?: {
+    page?: number;
+    sheet?: string;
+    rowRange?: string;
+    columnRange?: string;
+    textRange?: string;
+    region?: string;
+  };
+  payload?: unknown;
+}
 
 export interface ObjectReference {
   id: string;
@@ -53,6 +73,7 @@ export interface BioAgentMessage {
   updatedAt?: string;
   status?: RunStatus;
   tokenUsage?: AgentTokenUsage;
+  references?: BioAgentReference[];
   objectReferences?: ObjectReference[];
 }
 
@@ -371,6 +392,7 @@ export interface BioAgentRun {
   createdAt: string;
   completedAt?: string;
   raw?: unknown;
+  references?: BioAgentReference[];
   objectReferences?: ObjectReference[];
 }
 
@@ -475,6 +497,7 @@ export interface SendAgentMessageInput {
   agentName: string;
   agentDomain: string;
   prompt: string;
+  references?: BioAgentReference[];
   roleView: string;
   messages: BioAgentMessage[];
   artifacts?: RuntimeArtifact[];
@@ -537,7 +560,7 @@ export interface AgentTokenUsage {
   source?: string;
 }
 
-export type AgentBackendId = 'codex' | 'openteam_agent' | 'claude-code' | 'hermes-agent' | 'openclaw';
+export type AgentBackendId = 'codex' | 'openteam_agent' | 'claude-code' | 'hermes-agent' | 'openclaw' | 'gemini';
 
 export interface AgentServerRunPayload {
   agent: {

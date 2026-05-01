@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
+import type { WorkspaceRuntimeEvent } from '../../src/runtime/runtime-types.js';
 
-const AGENT_BACKENDS = ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw'] as const;
+const AGENT_BACKENDS = ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw', 'gemini'] as const;
 type AgentBackend = typeof AGENT_BACKENDS[number];
+type TokenUsage = NonNullable<WorkspaceRuntimeEvent['usage']>;
 
-const expectedArtifacts = ['omics-differential-expression', 'research-report'];
-const selectedComponents = ['umap-viewer', 'data-table', 'report-viewer', 'execution-unit-table', 'notebook-timeline'];
+const expectedArtifacts = ['paper-list', 'research-report'];
+const selectedComponents = ['paper-card-list', 'report-viewer', 'execution-unit-table', 'notebook-timeline'];
 const requestsByBackend = new Map<AgentBackend, Array<{ text: string; purpose: string }>>();
+const usageByBackend = new Map<AgentBackend, Required<Pick<TokenUsage, 'input' | 'output' | 'total'>>>();
 
 const server = createServer(async (req, res) => {
   if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
@@ -44,7 +47,7 @@ const server = createServer(async (req, res) => {
   assert.ok(isAgentBackend(backend), `unexpected backend ${backend}`);
   assert.equal(runtime.backend, backend);
   assert.equal(agent.workspace, runtime.cwd);
-  assert.equal(metadata.skillDomain, 'omics');
+  assert.equal(metadata.skillDomain, 'literature');
 
   const text = typeof input.text === 'string' ? input.text : '';
   const purpose = typeof metadata.purpose === 'string' ? metadata.purpose : 'unknown';
@@ -54,6 +57,7 @@ const server = createServer(async (req, res) => {
   requestsByBackend.set(backend, [...seen, { text, purpose }]);
 
   if (round === 1 || round === 2) {
+    const usage = tokenUsageFor(backend, round);
     sendAgentServerRun(res, req.url, {
       ok: true,
       data: {
@@ -76,11 +80,12 @@ const server = createServer(async (req, res) => {
           },
         },
       },
-    });
+    }, usage);
     return;
   }
 
   if (round === 3) {
+    const usage = tokenUsageFor(backend, round);
     sendAgentServerRun(res, req.url, {
       ok: true,
       data: {
@@ -90,7 +95,7 @@ const server = createServer(async (req, res) => {
           output: { result: directContextPayload(backend) },
         },
       },
-    });
+    }, usage);
     return;
   }
 
@@ -107,40 +112,40 @@ try {
     const workspace = await mkdtemp(join(tmpdir(), `bioagent-backend-matrix-${backend}-`));
     const sessionId = `backend-matrix-${backend}`;
     const round1 = await runWorkspaceRuntimeGateway({
-      skillDomain: 'omics',
+      skillDomain: 'literature',
       agentBackend: backend,
       workspacePath: workspace,
       agentServerBaseUrl: baseUrl,
-      prompt: 'Round 1: build a Tabula Sapiens multi-organ scRNA atlas plan with QC, integration, clustering, marker genes, annotation, and composition comparison.',
+      prompt: 'Round 1: 检索今天 arXiv 上最新的 agent 相关论文，下载并阅读全文，输出 paper-list 和详细 markdown 阅读报告。',
       expectedArtifactTypes: ['runtime-artifact', ...expectedArtifacts],
       selectedComponentIds: selectedComponents,
       uiState: {
         sessionId,
-        currentPrompt: 'Round 1 Tabula Sapiens atlas plan',
-        recentConversation: ['user: start Tabula Sapiens atlas benchmark'],
+        currentPrompt: 'Round 1 arXiv agent paper full-text review',
+        recentConversation: ['user: 检索今天 arXiv 最新 agent 论文并阅读全文写报告'],
         expectedArtifactTypes: ['runtime-artifact', ...expectedArtifacts],
         selectedComponentIds: selectedComponents,
         forceAgentServerGeneration: true,
       },
       artifacts: [],
-    });
+    }, usageCollector(backend));
     assertBackendOutput(round1, backend, 1, ['runtime-artifact', ...expectedArtifacts]);
 
     const round2 = await runWorkspaceRuntimeGateway({
-      skillDomain: 'omics',
+      skillDomain: 'literature',
       agentBackend: backend,
       workspacePath: workspace,
       agentServerBaseUrl: baseUrl,
-      prompt: 'Round 2: continue from previous artifacts and refs, add marker gene table, cross-organ cell composition, and a systematic report.',
+      prompt: 'Round 2: 继续基于上一轮论文和全文，补充逐篇创新点、独特性、技术路线、证据矩阵和报告。',
       expectedArtifactTypes: expectedArtifacts,
       selectedComponentIds: selectedComponents,
       uiState: {
         sessionId,
-        currentPrompt: 'Round 2 continue previous Tabula Sapiens atlas refs',
+        currentPrompt: 'Round 2 enrich previous arXiv full-text report',
         recentConversation: [
-          'user: start Tabula Sapiens atlas benchmark',
+          'user: 检索今天 arXiv 最新 agent 论文并阅读全文写报告',
           `assistant: ${round1.message}`,
-          'user: continue from previous artifacts and refs',
+          'user: 继续从已有 paper-list 和 research-report 补逐篇深度分析',
         ],
         recentExecutionRefs: round1.executionUnits,
         expectedArtifactTypes: expectedArtifacts,
@@ -148,26 +153,26 @@ try {
         forceAgentServerGeneration: true,
       },
       artifacts: round1.artifacts,
-    });
+    }, usageCollector(backend));
     assertBackendOutput(round2, backend, 2, expectedArtifacts);
 
     const round3 = await runWorkspaceRuntimeGateway({
-      skillDomain: 'omics',
+      skillDomain: 'literature',
       agentBackend: backend,
       workspacePath: workspace,
       agentServerBaseUrl: baseUrl,
-      prompt: 'Round 3: answer from existing context only, read previous artifacts and refs, do not rerun, and summarize whether the complex task is complete.',
+      prompt: 'Round 3: 只读取已有上下文，不重新下载或执行，评估这份 agent 论文阅读报告是否完整并总结剩余风险。',
       expectedArtifactTypes: expectedArtifacts,
       selectedComponentIds: selectedComponents,
       uiState: {
         sessionId,
-        currentPrompt: 'Round 3 summarize existing context without rerun',
+        currentPrompt: 'Round 3 summarize arXiv report completeness without rerun',
         recentConversation: [
-          'user: start Tabula Sapiens atlas benchmark',
+          'user: 检索今天 arXiv 最新 agent 论文并阅读全文写报告',
           `assistant: ${round1.message}`,
-          'user: continue from previous artifacts and refs',
+          'user: 继续从已有 paper-list 和 research-report 补逐篇深度分析',
           `assistant: ${round2.message}`,
-          'user: answer from existing context only; do not rerun',
+          'user: 只读已有上下文，评估报告完整性，不重新执行',
         ],
         recentExecutionRefs: round2.executionUnits,
         expectedArtifactTypes: expectedArtifacts,
@@ -175,21 +180,25 @@ try {
         forceAgentServerGeneration: true,
       },
       artifacts: [...round2.artifacts, ...round1.artifacts],
-    });
+    }, usageCollector(backend));
     assertBackendOutput(round3, backend, 3, expectedArtifacts);
     assert.ok(round3.artifacts.some((artifact) =>
-      artifact.type === 'omics-differential-expression'
+      artifact.type === 'paper-list'
       && isRecord(artifact.metadata)
       && artifact.metadata.reusedForContextAnswer === true
-    ), `${backend} round 3 should reuse previous omics artifact for a direct context answer`);
+    ), `${backend} round 3 should reuse previous paper-list artifact for a direct context answer`);
   }
 
   for (const backend of AGENT_BACKENDS) {
     const seen = requestsByBackend.get(backend) ?? [];
     assert.equal(seen.length, 3, `${backend} should complete three AgentServer turns`);
     assert.ok(seen.every((entry) => entry.purpose === 'workspace-task-generation'), `${backend} should use generation dispatch for each turn`);
+    const usage = usageByBackend.get(backend);
+    assert.ok(usage && usage.total > 0, `${backend} should report token usage`);
   }
-  console.log('[ok] all AgentServer backends handle complex three-round continuation with task generation and direct context answers');
+  const reportPath = join(process.cwd(), 'docs', 'AgentBackendMultiturnTestReport.md');
+  await writeFile(reportPath, buildMarkdownReport(), 'utf8');
+  console.log(`[ok] all AgentServer backends handle the same three-round arXiv agent-paper continuation; report written to ${reportPath}`);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
@@ -213,32 +222,31 @@ prompt = request.get("prompt", "")
 def artifact_for(kind):
     if kind == "runtime-artifact":
         return {
-            "id": f"{backend}-atlas-plan",
+            "id": f"{backend}-arxiv-plan",
             "type": "runtime-artifact",
-            "producerScenario": "omics",
+            "producerScenario": "literature-evidence-review",
             "schemaVersion": "1",
             "metadata": {"source": "backend-matrix", "backend": backend, "round": round_no},
             "data": {
                 "rows": [
-                    {"step": "QC", "status": "planned"},
-                    {"step": "integration", "status": "planned"},
-                    {"step": "marker genes", "status": "planned"},
-                    {"step": "cross-organ composition", "status": "planned"}
+                    {"step": "arXiv search", "status": "planned"},
+                    {"step": "PDF download", "status": "planned"},
+                    {"step": "full-text extraction", "status": "planned"},
+                    {"step": "markdown report", "status": "planned"}
                 ]
             }
         }
-    if kind == "omics-differential-expression":
+    if kind == "paper-list":
         return {
-            "id": "omics-differential-expression",
-            "type": "omics-differential-expression",
-            "producerScenario": "omics",
+            "id": "paper-list",
+            "type": "paper-list",
+            "producerScenario": "literature-evidence-review",
             "schemaVersion": "1",
             "metadata": {"source": "backend-matrix", "backend": backend, "round": round_no},
             "data": {
-                "rows": [
-                    {"feature": "Tabula Sapiens marker genes", "status": "done", "backend": backend},
-                    {"feature": "cross-organ composition", "status": "done", "backend": backend},
-                    {"feature": "cell type annotation", "status": "done", "backend": backend}
+                "papers": [
+                    {"id": f"arxiv:2605.0000{round_no}", "title": f"Agent benchmark paper via {backend}", "url": f"https://arxiv.org/abs/2605.0000{round_no}", "status": "full-text-read"},
+                    {"id": f"arxiv:2605.0001{round_no}", "title": f"Multi-agent workflow paper via {backend}", "url": f"https://arxiv.org/abs/2605.0001{round_no}", "status": "full-text-read"}
                 ]
             }
         }
@@ -246,11 +254,11 @@ def artifact_for(kind):
         return {
             "id": "research-report",
             "type": "research-report",
-            "producerScenario": "omics",
+            "producerScenario": "literature-evidence-review",
             "schemaVersion": "1",
             "metadata": {"source": "backend-matrix", "backend": backend, "round": round_no},
             "data": {
-                "markdown": f"# {backend} round {round_no} report\n\nTabula Sapiens continuation used previous context, marker genes, annotation, and composition comparison.\n\nPrompt: {prompt[:200]}",
+                "markdown": f"# {backend} round {round_no} arXiv agent-paper report\n\nThe backend preserved the same multi-turn task: search today's agent papers, read full text, and summarize novelty, uniqueness, and technical path.\n\nPrompt: {prompt[:200]}",
                 "sections": [{"title": "Backend matrix", "content": f"{backend} completed round {round_no}."}]
             }
         }
@@ -265,7 +273,7 @@ def artifact_for(kind):
 
 component_for = {
     "runtime-artifact": "data-table",
-    "omics-differential-expression": "umap-viewer",
+    "paper-list": "paper-card-list",
     "research-report": "report-viewer"
 }
 artifacts = [artifact_for(kind) for kind in expected]
@@ -299,13 +307,13 @@ with open(output_path, "w", encoding="utf-8") as handle:
 
 function directContextPayload(backend: AgentBackend) {
   return {
-    message: `${backend} round 3 answered from previous artifacts and refs without rerun; the complex Tabula Sapiens task is complete enough for reporting.`,
+    message: `${backend} round 3 answered from previous artifacts and refs without rerun; the arXiv agent-paper reading task is complete enough for reporting.`,
     confidence: 0.83,
     claimType: 'evidence-summary',
     evidenceLevel: 'mock-agentserver',
-    reasoningTrace: `${backend} read previous artifacts, prior refs, and current session context before returning a direct context answer.`,
+    reasoningTrace: `${backend} read previous paper-list, report artifacts, prior refs, and current session context before returning a direct context answer.`,
     claims: [{
-      text: `${backend} can continue a complex multi-turn task and answer from existing context.`,
+      text: `${backend} can continue a complex multi-turn arXiv reading task and answer from existing context.`,
       confidence: 0.83,
       evidenceLevel: 'mock-agentserver',
     }],
@@ -326,8 +334,8 @@ function directContextPayload(backend: AgentBackend) {
       schemaVersion: '1',
       metadata: { source: 'backend-matrix', backend, round: 3 },
       data: {
-        markdown: `${backend} direct context report: previous artifacts and refs were enough; no rerun was needed.`,
-        sections: [{ title: 'Direct context answer', content: `${backend} preserved the multi-turn context.` }],
+        markdown: `${backend} direct context report: previous arXiv paper-list/report artifacts and refs were enough; no rerun was needed.`,
+        sections: [{ title: 'Direct context answer', content: `${backend} preserved the multi-turn arXiv reading context.` }],
       },
     }],
   };
@@ -355,13 +363,74 @@ function assertBackendOutput(
 
 function assertPromptContract(text: string, round: number) {
   assert.match(text, /AgentServer owns orchestration|taskContract|AgentServerGenerationResponse/i);
-  assert.match(text, /Tabula Sapiens|scRNA|marker genes|composition/i);
-  assert.match(text, /expectedArtifactTypes|omics-differential-expression|research-report/i);
-  assert.match(text, /selectedComponentIds|report-viewer|execution-unit-table/i);
+  assert.match(text, /arXiv|agent|paper|论文|全文|阅读|报告/i);
+  assert.match(text, /expectedArtifactTypes|paper-list|research-report/i);
+  assert.match(text, /selectedComponentIds|paper-card-list|report-viewer|execution-unit-table/i);
   assert.match(text, /recentConversation|priorAttempts/i);
   if (round > 1) {
     assert.match(text, /previous artifacts|recentExecutionRefs|artifacts|refs|do not rerun|context/i);
   }
+}
+
+function usageCollector(backend: AgentBackend) {
+  return {
+    onEvent(event: WorkspaceRuntimeEvent) {
+      if (!event.usage) return;
+      const current = usageByBackend.get(backend) ?? { input: 0, output: 0, total: 0 };
+      current.input += event.usage.input ?? 0;
+      current.output += event.usage.output ?? 0;
+      current.total += event.usage.total ?? ((event.usage.input ?? 0) + (event.usage.output ?? 0));
+      usageByBackend.set(backend, current);
+    },
+  };
+}
+
+function tokenUsageFor(backend: AgentBackend, round: number): TokenUsage {
+  const backendIndex = AGENT_BACKENDS.indexOf(backend);
+  const input = 7_800 + backendIndex * 180 + round * 420;
+  const output = 1_250 + backendIndex * 95 + round * 210;
+  return {
+    input,
+    output,
+    total: input + output,
+    provider: backend,
+    model: `${backend}-mock-model`,
+    source: 'mock-agentserver-backend-matrix',
+  };
+}
+
+function buildMarkdownReport() {
+  const generatedAt = new Date().toISOString();
+  const rows = AGENT_BACKENDS.map((backend) => {
+    const seen = requestsByBackend.get(backend) ?? [];
+    const usage = usageByBackend.get(backend) ?? { input: 0, output: 0, total: 0 };
+    return `| ${backend} | ${seen.length}/3 | Pass | ${usage.input} | ${usage.output} | ${usage.total} |`;
+  }).join('\n');
+  return `# AgentBackend Multi-turn Test Report
+
+Generated: ${generatedAt}
+
+## Test Task
+
+Same three-round conversation for every AgentBackend:
+
+1. Search today's latest arXiv agent-related papers, download/read full text, and produce \`paper-list\` plus \`research-report\`.
+2. Continue from previous artifacts and refs, then enrich per-paper novelty, uniqueness, technical path, evidence matrix, and report.
+3. Read existing context only, do not rerun/download, and summarize report completeness plus residual risks.
+
+## Results
+
+| Backend | Completed turns | Completion | Input tokens | Output tokens | Total tokens |
+| --- | ---: | --- | ---: | ---: | ---: |
+${rows}
+
+## Findings
+
+- All tested backends completed the same three-turn workflow through AgentServer generation/direct-context dispatch.
+- Round 3 verified context reuse by reusing the prior \`paper-list\` artifact without rerunning the workspace task.
+- Token usage is collected from AgentServer stream usage events; this smoke uses deterministic mock token accounting so regressions are reproducible in CI.
+- Gemini is now included in frontend/backend normalization and appears as a selectable AgentBackend.
+`;
 }
 
 function readJson(req: AsyncIterable<Buffer | string>) {
@@ -385,10 +454,14 @@ function sendAgentServerRun(
   res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
   requestUrl: string | undefined,
   result: Record<string, unknown>,
+  usage?: TokenUsage,
 ) {
   if (requestUrl === '/api/agent-server/runs/stream') {
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-    res.end(JSON.stringify({ result }) + '\n');
+    const event = usage
+      ? JSON.stringify({ event: { type: 'usage-update', message: 'mock token usage', usage } }) + '\n'
+      : '';
+    res.end(event + JSON.stringify({ result }) + '\n');
     return;
   }
   res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -66,7 +66,7 @@ function cleanUrl(value: unknown) {
 
 function normalizeAgentBackend(value: unknown) {
   const backend = typeof value === 'string' ? value.trim() : '';
-  return ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw'].includes(backend)
+  return ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw', 'gemini'].includes(backend)
     ? backend
     : defaultBioAgentConfig.agentBackend;
 }

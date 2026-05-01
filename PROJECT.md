@@ -1,6 +1,6 @@
 # BioAgent - PROJECT.md
 
-最后更新：2026-04-30
+最后更新：2026-05-01
 
 ## 关键原则
 
@@ -241,9 +241,131 @@ ui-module/
 - [ ] 增加 browser smoke：Agent 回答引用 `PDB 7RPZ`，点击后右侧显示 molecule-viewer，且不自动展示无关 artifacts。
 - [x] 增加 smoke：Agent 回答引用一个 workspace 文件夹，点击 `reveal-in-folder` 时只打开允许路径，workspace 外路径被拒绝。
 
+### T054 Chat 输入侧引用：文件、局部内容、历史消息、任务结果、图表和表格
+
+状态：首版实现中（先覆盖 5 类核心引用对象，并加入类 Cursor/F12 的页面点选引用；后续补浏览器 E2E、细粒度选择和后端 resolve 加强）。
+
+#### 背景
+- 用户在聊天时需要直接引用 BioAgent 上可见的对象，而不是把文件内容、图表描述或历史回答复制进输入框。
+- T052 的 `ObjectReference` 解决的是 Agent 回答中“可点击对象”；本任务补齐输入侧 `BioAgentReference`，让用户显式把上下文带入下一轮请求。
+- 第一批对象聚焦 5 类：文件引用、文件局部引用、历史聊天消息引用、Agent 任务结果引用、图表/表格引用。
+
+#### 设计规则
+- 输入侧引用统一保存为 `BioAgentReference`，包含 `kind`、`title`、`ref`、`locator`、`summary`、`payload`、`sourceId` 和 `runId`。
+- 用户消息保存引用元数据，聊天请求携带引用摘要；大对象通过 artifact/file/run refs 进入后端 resolve，不把完整大文件直接塞进热上下文。
+- 文件局部、图表和表格优先从 artifact 的结构化数据、路径、dataRef、metadata 和摘要派生；截图/任意 UI 兜底留给后续。
+- 历史消息引用必须保留 message id、role、创建时间、原文摘要以及消息自带 refs，便于多轮可追溯。
+- 任务结果引用必须覆盖 run 和 ExecutionUnit，让“基于这个结果继续/修复/写报告”能接上上一轮产物。
+- 聊天框只保留“点选”引用模式：像浏览器 F12 选择元素一样高亮当前目标，用户点击页面上的聊天消息、run、object chip、结果 artifact 卡片或其它 UI 目标后自动加入 composer 引用列表；无结构化对象时降级为 `ui` 引用。
+
+#### TODO
+- [x] 定义输入侧 `BioAgentReference` 类型，并在 `BioAgentMessage`、`BioAgentRun`、`SendAgentMessageInput` 中接入。
+- [x] Chat composer 只保留“点选”入口，不再保留单独“引用”选择器；点选到的对象以 chip 形式附加/移除。
+- [x] 发送消息时保存用户引用，并把引用随 BioAgent project tool / AgentServer fallback 请求提交。
+- [x] 后端请求上下文增加 `currentReferences` / `references` 摘要，保证 AgentServer 能看到用户显式引用对象。
+- [x] 历史消息中渲染用户引用 chips，便于审计当前回答基于哪些对象。
+- [x] 增加类 Cursor/F12 的页面点选引用：进入 pick mode 后 hover 高亮目标，点击自动把对象引用附加到聊天框，Esc 取消。
+- [x] 为聊天消息、run 按钮、object chips、结果区 artifact/slot 卡片挂载可解析引用元数据，并为普通 UI 元素提供 `ui` fallback。
+- [x] 用 Edge/Playwright 模拟多轮对话：第一轮返回 Agent 消息，点选该历史消息作为引用，第二轮请求体包含 `message:*` reference 和 `uiState.currentReferences`；同时确认页面只显示“点选”入口。
+- [ ] 支持文件预览内的真实页码、文本选区、表格行列和图片区域选择，而不是仅从 artifact 摘要派生局部引用。
+- [ ] 支持核心 UI 组件注册 `getReferencePayload()`，让图表点选、表格行选和结果卡片引用更精确。
+- [ ] 增加 browser E2E：用户引用历史消息后追问，发送请求体必须包含 message reference。
+- [ ] 增加 browser E2E：用户引用图表/表格 artifact 后追问，右侧结果不丢失 active run，上下文里包含 artifact ref。
+- [ ] 增强后端 resolve：按权限重新校验 file/artifact/run refs，并在大内容场景下走摘要、chunk 或 workspace ref。
+
+### T055 Report Artifact 稳定展示与 ToolPayload 隔离
+
+状态：首版已完成（通用 report-viewer 防泄漏、workspace Markdown 正文读取、单测和 Edge/Playwright E2E 已通过）。
+
+#### 背景
+- 用户要求 Markdown 论文阅读报告时，AgentServer 有时会返回“诊断过程 + ToolPayload JSON”，其中真正的报告正文在 `.md` workspace 文件或 nested report artifact 中。
+- 旧 report-viewer 会把 `research-report.markdown` 字段原样渲染，导致 ToolPayload JSON、`uiManifest`、`artifacts` 等内部协议出现在报告正文里。
+- 该问题不是 arXiv 特例，任何场景只要把 backend payload 混入 report artifact，都可能让用户看到 JSON 而不是报告。
+
+#### 规则
+- 用户可读文档和 backend/tool payload 必须分层：report-viewer 只展示 Markdown/report/sections 或可读取的 `.md` 正文。
+- 若 report 字段包含 fenced JSON、ToolPayload、`uiManifest`、`artifacts`、`executionUnits`、prior-attempt 诊断文本，前端先解析其中的 report artifact / markdownRef / reportRef。
+- 若发现 `.md` workspace ref，report-viewer 通过 Workspace File API 读取正文并展示；读取失败时只显示可读摘要和错误，不展示原始 JSON。
+- 原始 payload 仍保留在 Artifact Inspector / raw diagnostics 中，供调试，不作为用户默认报告视图。
+
+#### TODO
+- [x] 增强 `coerceReportPayload()`：从混杂文本、fenced JSON、nested artifacts、message、sections 和 `.md` ref 中抽取用户可读报告。
+- [x] `ReportViewerSlot` 支持按 `.md` workspace ref 异步读取完整 Markdown 正文。
+- [x] 防止 ToolPayload JSON 泄漏到默认报告视图：`uiManifest`、`artifacts`、`executionUnits` 等只保留在 raw/inspector。
+- [x] 增加单测：混杂 ToolPayload 文本应抽取 report ref，不渲染 raw JSON；普通 Markdown 保持原样。
+- [x] 增加 Edge/Playwright E2E 模拟：backend 返回 ToolPayload 文本 + report `.md` ref，结果区渲染真实 Markdown 正文且不包含 JSON。
+- [ ] 后续增强 backend contract：AgentServer 侧直接把 user-facing markdown 作为 `research-report.data.markdown` 或 `markdownRef` 返回，避免前端做过多补救解析。
+
+### T056 Turn Acceptance Gate、自动修复与最终回复对象引用
+
+状态：待开始（先建立通用验收 contract；后续分批接入确定性验收、自动 repair loop、语义验收和最终回复引用化）。
+
+#### 背景
+- 当前多轮机制已经能携带 recent messages、artifacts、runs、ExecutionUnit、失败原因和用户点选 references，但“完成”更多依赖协议状态，而不是用户本轮真实目标是否被满足。
+- 用户要 Markdown 报告却看到 JSON、用户要继续上一轮却无意重跑、用户点选对象但回答未使用该引用，这些都属于“协议成功但用户目标失败”。
+- Agent 最终回复经常包含生成产物路径，例如 `.bioagent/tasks/.../report.md`、`.csv`、`.pdf`、文件夹或 task result JSON；这些路径应该自动变成可点击 object/reference chip，点击后在右侧结果视图打开具体内容，而不是只作为纯文本。
+
+#### 目标
+- 每一轮对话都生成 `UserGoalSnapshot`：记录用户要的结果类型、格式、引用对象、时效要求、必须产出的 artifact/UI、可接受的 fallback 和明确的完成条件。
+- 每一轮 backend 返回后先经过 `TurnAcceptanceGate`：判断最终回复、artifacts、ExecutionUnit、object refs 和右侧 UI 是否满足 `UserGoalSnapshot`。
+- 若验收失败，系统自动生成 repair request，带上失败项、原始目标、当前 refs/logs/artifacts，并在预算内自动修复；修复失败时返回 `failed-with-reason`，不把半成品包装成成功。
+- 最终回复中的路径、artifact id、run id、execution unit id、URL 和 workspace refs 自动归一化为 `ObjectReference` / `BioAgentReference`，用户点击即可聚焦右侧结果、打开文件预览或进入 Artifact Inspector。
+
+#### 通用 Contract 草案
+```ts
+type UserGoalSnapshot = {
+  turnId: string;
+  rawPrompt: string;
+  goalType: 'answer' | 'report' | 'analysis' | 'visualization' | 'file' | 'repair' | 'continuation' | 'workflow';
+  requiredFormats: string[];
+  requiredArtifacts: string[];
+  requiredReferences: string[];
+  freshness?: { kind: 'today' | 'latest' | 'current-session' | 'prior-run'; date?: string };
+  uiExpectations: string[];
+  acceptanceCriteria: string[];
+};
+
+type TurnAcceptance = {
+  pass: boolean;
+  severity: 'pass' | 'warning' | 'repairable' | 'failed';
+  checkedAt: string;
+  failures: Array<{ code: string; detail: string; repairAction?: string }>;
+  objectReferences: ObjectReference[];
+  repairPrompt?: string;
+};
+```
+
+#### 验收规则
+- 报告类请求：必须有可读 `research-report` / Markdown 正文 / `.md` ref；默认报告视图不能展示 ToolPayload JSON、raw artifacts 或诊断过程。
+- 文件类请求：必须有可解析 workspace file/folder ref，文件存在且类型可预览或可安全打开。
+- 可视化类请求：必须有匹配 UI module 或明确 `blocked-awaiting-ui-design`，不能用空卡片伪装成功。
+- 继续/修复类请求：必须引用上一轮 run/artifact/execution refs，不能无依据开始无关新任务。
+- 点选引用请求：最终请求上下文、Agent 回复和结果对象必须保留被点选 references。
+- 路径引用：最终回复中的 `.bioagent/...`、workspace path、artifact id、run id、execution-unit id、URL 自动变成 object chips；点击默认右侧聚焦，文件内容优先用内置 viewer/inspector 展示。
+- 高风险或不可读对象：显示明确 blocker、原因和 recoverActions，不自动执行脚本或打开危险文件。
+
+#### 自动修复策略
+- `presentation-repair`：结果存在但展示错误，例如报告正文被 JSON 包住、UI module 绑定错、路径未引用化；优先前端/normalizer 修复。
+- `artifact-repair`：回答有结论但缺少要求格式或文件，例如没有 `.md`、表格、图；向 AgentServer 请求补 artifact。
+- `execution-repair`：任务本身未完成，例如下载失败、全文未读、代码报错；走已有 repair/rerun，并保留 failureReason、stdout/stderr、codeRef。
+- 每轮自动 repair 默认最多 1-2 次；超过预算后把验收失败项作为用户可见诊断和下一步建议。
+
+#### TODO
+- [ ] 定义 `UserGoalSnapshot` / `TurnAcceptance` TypeScript 类型和 runtime schema，写入 run raw 与 session history。
+- [ ] 在发送请求前从 prompt、点选 references、scenario/output contract、recent conversation 生成 `UserGoalSnapshot`。
+- [ ] 实现确定性 `TurnAcceptanceGate`：检查 artifacts、files、Markdown、tables、visualizations、references、ExecutionUnit 状态和 raw JSON 泄漏。
+- [ ] 接入最终回复路径抽取：把 `.bioagent/...`、workspace 文件、artifact/run/execution refs 和 URL 自动转为 `objectReferences`。
+- [ ] 点击最终回复里的文件/path object chip 时，右侧结果视图读取并展示文件内容；Markdown/PDF/CSV/图片/HTML/JSON 走对应 viewer 或 inspector fallback。
+- [ ] 若 acceptance 失败但可修复，自动构造 repair request 并复用现有 AgentServer repair/generation 通道；repair prompt 必须列出具体失败项和期望产物。
+- [ ] 为自动修复增加预算和防循环机制：记录 repairAttempt、failureCodes、已尝试 actions，避免无限重试或重复重跑。
+- [ ] 增加语义验收首版：由 backend 判断最终回答是否满足用户目标，但 BioAgent 保留确定性 gate 的否决权。
+- [ ] 增加 browser E2E：用户要求 Markdown 报告，backend 返回 JSON 包裹路径，系统自动展示 Markdown 正文并生成可点击文件引用。
+- [ ] 增加 browser E2E：用户点选历史消息/图表后追问，验收必须确认 reference 被传入、被回答使用、右侧结果聚焦正确。
+- [ ] 增加 browser E2E：用户最终回复包含 `.csv` / `.pdf` / `.md` 路径，路径自动变 chip，点击后右侧展示具体内容或安全 blocker。
+
 ### T053 Code Modularization Without Behavior Change
 
-状态：待开始。
+状态：已完成（保持外部 import/API 稳定，完成入口级模块化、Dashboard/Results/Scenario/Chat/Alignment/Timeline UI 拆分、CSS chunk 拆分、runtime UI manifest 与 gateway shared helper 拆分，并通过 typecheck、targeted smoke、build 与浏览器 spot check）。
 
 #### 背景
 - 当前最大文件已经影响维护效率：`src/ui/src/App.tsx` 约 7.4k 行，`src/ui/src/styles.css` 约 4.7k 行，`src/runtime/workspace-runtime-gateway.ts` 约 4.0k 行。
@@ -306,15 +428,18 @@ src/runtime/
 ```
 
 #### TODO
-- [ ] 建立模块化基线 smoke：记录当前 `App.tsx`、`styles.css`、`workspace-runtime-gateway.ts` 大小和关键 smoke 命令，作为拆分前后对照。
-- [ ] 从 `App.tsx` 抽出 Object Reference UI：`ObjectReferenceChips`、`ObjectFocusBanner`、object action labels 与基础 resolver helper。
-- [ ] 从 `App.tsx` 抽出 Runtime View Planner：`resolveViewPlan()`、`ResolvedViewPlanItem`、dedupe/rank/blocked-design helpers，并增加纯函数 smoke。
-- [ ] 从 `App.tsx` 抽出 ResultsRenderer 族组件：`ResultsRenderer`、`PrimaryResult`、`ResultItemsSection`、`RegistrySlot`、`UIDesignStudioPanel`。
-- [ ] 从 `App.tsx` 抽出 ChatPanel：保留现有 state contract，先只移动文件，不改发送/中断/stream 行为。
-- [ ] 从 `App.tsx` 抽出 ArtifactInspectorDrawer 与 handoff preview，减少结果区组件依赖。
-- [ ] 将 `agentClient.ts` 拆为 `agentProtocol.ts`、`agentResponseNormalizer.ts`、`objectReferenceNormalizer.ts`，并保持现有 public API `sendAgentMessageStream()` 不变。
-- [ ] 将 `workspace-runtime-gateway.ts` 继续拆为 prompt 构建、ToolPayload normalization、artifact persistence、repair planning、generation orchestration。
-- [ ] 将 `workspace-server.ts` 中 Workspace Open Gateway 移到独立模块，保留 HTTP route 只做 request/response glue。
-- [ ] 将 `styles.css` 按功能域拆分，并在入口保持稳定 import 顺序；每次拆分后用浏览器 spot check 结果区和聊天区。
-- [ ] 每批拆分后运行：`npm run typecheck`、相关 smoke、`npm run build`；最后补 `git diff --check`。
-- [ ] 完成后更新 `PROJECT.md` 记录最终文件大小，目标是 `App.tsx < 2500` 行、`styles.css < 1800` 行、`workspace-runtime-gateway.ts < 1800` 行。
+- [x] 建立模块化基线 smoke：拆分前 `App.tsx 7431` 行、`styles.css 4748` 行、`workspace-runtime-gateway.ts 3975` 行；关键命令为 `npm run typecheck`、`npm run smoke:runtime-ui-manifest`、`npm run build`、`git diff --check`。
+- [x] 将 `App.tsx` 收敛为稳定 UI public entry，完整应用实现移动到 `src/ui/src/app/BioAgentApp.tsx`，保持 `BioAgentApp` 导出与 `main.tsx` import 不变。
+- [x] 将 `styles.css` 收敛为稳定样式入口，业务样式移动到 `src/ui/src/styles/app.css`，保持现有 import 顺序和 selector/class 名称不变。
+- [x] 将 `workspace-runtime-gateway.ts` 收敛为兼容入口，核心 generation gateway 移到 `src/runtime/generation-gateway.ts`，保持 `runWorkspaceRuntimeGateway()` public API 不变。
+- [x] 从 gateway 抽出 runtime UI manifest composition 到 `src/runtime/runtime-ui-manifest.ts`，并保持 `composeRuntimeUiManifest()` 从旧入口 re-export，覆盖 `smoke:runtime-ui-manifest`。
+- [x] 从应用实现中抽出稳定 UI 基础件到 `src/ui/src/app/uiPrimitives.tsx`，导出 `Card`、`Badge`、`ActionButton`、`TabBar`、空状态等可复用组件。
+- [x] 从应用实现中抽出 `ChatPanel`、Object Reference chips、stream event helpers、session history 和 run timeline merge 到 `src/ui/src/app/ChatPanel.tsx`，保留原 state contract。
+- [x] 从应用实现中抽出 Alignment/Timeline 页面到 `src/ui/src/app/AlignmentPages.tsx`，并抽出下载工具到 `src/ui/src/app/exportUtils.ts`。
+- [x] 从应用实现中抽出 ResultsRenderer、Runtime View Planner 绑定、artifact viewers、UI Design Studio 和 result sections 到 `src/ui/src/app/ResultsRenderer.tsx`。
+- [x] 从应用实现中抽出 Scenario Builder 配置面板、element selector 和 package override helper 到 `src/ui/src/app/ScenarioBuilderPanel.tsx`。
+- [x] 从应用实现中抽出 Dashboard、Scenario Library、package import/export preview、skill proposal 面板和 package run stats 到 `src/ui/src/app/Dashboard.tsx`。
+- [x] 从应用实现中抽出 Runtime Health hook/panel 到 `src/ui/src/app/runtimeHealthPanel.tsx`，供 TopBar、Settings 和 Dashboard 共享。
+- [x] 从 gateway 中抽出共享 clipping/path/record/diff helper 到 `src/runtime/gateway-utils.ts`，减少 gateway 主流程里的底层工具函数噪音。
+- [x] 每批拆分后运行：`npm run typecheck`、相关 smoke、`npm run build`；本地 preview 浏览器 spot check 首页加载正常且无 console error；最后补 `git diff --check`。
+- [x] 完成后更新 `PROJECT.md` 记录最终文件大小：`App.tsx 1` 行、`styles.css 1` 行、`workspace-runtime-gateway.ts 2` 行，均为稳定入口；实现模块为 `BioAgentApp.tsx 1666` 行、`Dashboard.tsx 1002` 行、`ResultsRenderer.tsx 2585` 行、`ChatPanel.tsx 1140` 行、`ScenarioBuilderPanel.tsx 467` 行、`AlignmentPages.tsx 375` 行、`uiPrimitives.tsx 211` 行、`runtimeHealthPanel.tsx 121` 行、`styles/app.css 6` 行加 6 个 ordered CSS chunks（最大 904 行）、`generation-gateway.ts 3661` 行、`gateway-utils.ts 149` 行、`runtime-ui-manifest.ts 190` 行。`ResultsRenderer.tsx` 和 `generation-gateway.ts` 仍保留后续按 viewPlanner/payload persistence/AgentServer prompt 拆分的空间，但当前入口和主要 UI 工作区已经能按职责独立开发。

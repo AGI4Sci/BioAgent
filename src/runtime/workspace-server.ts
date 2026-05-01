@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runBioAgentTool } from './bioagent-tools.js';
 import { readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
@@ -75,7 +76,10 @@ createServer(async (req, res) => {
       const info = await stat(filePath);
       if (!info.isFile()) throw new Error(`${filePath} is not a file`);
       if (info.size > 1024 * 1024) throw new Error('File is larger than the 1MB preview/edit limit.');
-      const content = await readFile(filePath, 'utf8');
+      const binaryPreview = isBinaryPreviewFile(filePath);
+      const content = binaryPreview
+        ? (await readFile(filePath)).toString('base64')
+        : await readFile(filePath, 'utf8');
       writeJson(res, 200, {
         ok: true,
         file: {
@@ -85,6 +89,8 @@ createServer(async (req, res) => {
           size: info.size,
           modifiedAt: info.mtime.toISOString(),
           language: languageForPath(filePath),
+          encoding: binaryPreview ? 'base64' : 'utf8',
+          mimeType: mimeTypeForPath(filePath),
         },
       });
     } catch (err) {
@@ -555,6 +561,8 @@ function languageForPath(path: string) {
   const ext = extname(path).toLowerCase();
   if (ext === '.md' || ext === '.markdown') return 'markdown';
   if (ext === '.json') return 'json';
+  if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.gif' || ext === '.webp' || ext === '.svg') return 'image';
+  if (ext === '.pdf') return 'pdf';
   if (ext === '.ts' || ext === '.tsx') return 'typescript';
   if (ext === '.js' || ext === '.jsx') return 'javascript';
   if (ext === '.py') return 'python';
@@ -564,6 +572,25 @@ function languageForPath(path: string) {
   if (ext === '.css') return 'css';
   if (ext === '.sh') return 'shell';
   return 'text';
+}
+
+function isBinaryPreviewFile(path: string) {
+  return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf'].includes(extname(path).toLowerCase());
+}
+
+function mimeTypeForPath(path: string) {
+  const ext = extname(path).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.pdf') return 'application/pdf';
+  if (ext === '.json') return 'application/json';
+  if (ext === '.csv') return 'text/csv';
+  if (ext === '.tsv') return 'text/tab-separated-values';
+  if (ext === '.html') return 'text/html';
+  return 'text/plain';
 }
 
 function scenarioWorkspaceRoot(url: URL) {
@@ -842,9 +869,26 @@ function resolveWorkspaceOpenPath(workspacePath: string, rawPath: string) {
   const targetPath = isAbsolute(stripped) ? resolve(stripped) : resolve(root, stripped);
   const rel = relative(root, targetPath);
   if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-    throw new Error('Workspace Open Gateway refused a path outside the active workspace.');
+    if (!isAllowedGeneratedPreviewPath(targetPath)) {
+      throw new Error('Workspace Open Gateway refused a path outside the active workspace.');
+    }
   }
   return targetPath;
+}
+
+function isAllowedGeneratedPreviewPath(targetPath: string) {
+  if (!isBinaryPreviewFile(targetPath)) return false;
+  const tempRoots = Array.from(new Set([
+    resolve('/tmp'),
+    resolve('/private/tmp'),
+    resolve(tmpdir()),
+    resolve('/var/folders'),
+    resolve('/private/var/folders'),
+  ]));
+  return tempRoots.some((root) => {
+    const rel = relative(root, targetPath);
+    return rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  });
 }
 
 function assertCanOpenExternal(targetPath: string, isDirectory: boolean) {

@@ -18,7 +18,9 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace
 try {
   await mkdir(join(workspace, 'notes'), { recursive: true });
   const filePath = join(workspace, 'notes', 'report.md');
+  const imagePath = join(workspace, 'notes', 'pixel.png');
   await writeFile(filePath, '# Draft\n\nhello', 'utf8');
+  await writeFile(imagePath, Buffer.from('iVBORw0KGgo=', 'base64'));
   await writeFile(join(workspace, '.DS_Store'), 'ignored before', 'utf8');
   await waitForHealth(port);
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -36,6 +38,15 @@ try {
   assert.equal(opened.file.content, '# Draft\n\nhello');
   assert.equal(opened.file.language, 'markdown');
   assert.ok(opened.file.size > 0);
+
+  response = await fetch(`${baseUrl}/api/bioagent/workspace/file?path=${encodeURIComponent(imagePath)}`);
+  await assertOk(response);
+  const image = await response.json() as { file: { name: string; content: string; language: string; encoding?: string; mimeType?: string } };
+  assert.equal(image.file.name, 'pixel.png');
+  assert.equal(image.file.language, 'image');
+  assert.equal(image.file.encoding, 'base64');
+  assert.equal(image.file.mimeType, 'image/png');
+  assert.equal(image.file.content, 'iVBORw0KGgo=');
 
   response = await fetch(`${baseUrl}/api/bioagent/workspace/file`, {
     method: 'POST',

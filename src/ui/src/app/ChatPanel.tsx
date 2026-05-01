@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ChevronDown, ChevronUp, CircleStop, Clock, Copy, Download, MessageSquare, Plus, Quote, Sparkles, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { ChevronDown, ChevronUp, CircleStop, Clock, Copy, Download, MessageSquare, Plus, Quote, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
 import { scenarios, type ScenarioId } from '../data';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
-import { sendAgentMessageStream } from '../api/agentClient';
+import { compactAgentContext, sendAgentMessageStream } from '../api/agentClient';
 import { sendBioAgentToolMessage } from '../api/bioagentToolsClient';
 import { builtInScenarioPackageRef } from '../scenarioCompiler/scenarioPackage';
 import { resetSession } from '../sessionStore';
 import { acceptAndRepairAgentResponse, buildUserGoalSnapshot } from '../turnAcceptance';
-import { makeId, nowIso, type AgentStreamEvent, type BioAgentConfig, type BioAgentMessage, type BioAgentReference, type BioAgentRun, type BioAgentSession, type NormalizedAgentResponse, type ObjectReference, type RuntimeExecutionUnit, type ScenarioInstanceId, type ScenarioRuntimeOverride, type TimelineEventRecord } from '../domain';
+import { makeId, nowIso, type AgentContextWindowState, type AgentStreamEvent, type BioAgentConfig, type BioAgentMessage, type BioAgentReference, type BioAgentRun, type BioAgentSession, type NormalizedAgentResponse, type ObjectReference, type RuntimeExecutionUnit, type ScenarioInstanceId, type ScenarioRuntimeOverride, type TimelineEventRecord } from '../domain';
 import { exportJsonFile } from './exportUtils';
 import { ActionButton, Badge, ClaimTag, ConfidenceBar, EvidenceTag, IconButton, cx } from './uiPrimitives';
 
@@ -100,6 +100,7 @@ export function ChatPanel({
   const [streamEventsHeight, setStreamEventsHeight] = useState(260);
   const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
+  const [pendingCompact, setPendingCompact] = useState(false);
   const [referencePickMode, setReferencePickMode] = useState(false);
   const [pendingReferences, setPendingReferences] = useState<BioAgentReference[]>([]);
   const activeSessionRef = useRef(session);
@@ -119,6 +120,8 @@ export function ChatPanel({
   const visibleMessageStart = Math.max(0, messages.length - 24);
   const visibleMessages = messages.slice(visibleMessageStart);
   const liveTokenUsage = latestTokenUsage(streamEvents);
+  const contextWindowState = latestContextWindowState(streamEvents)
+    ?? estimateContextWindowState(session, config, streamEvents);
 
   useEffect(() => {
     activeSessionRef.current = session;
@@ -131,8 +134,14 @@ export function ChatPanel({
   useEffect(() => {
     setStreamEvents([]);
     setGuidanceQueue([]);
+    setPendingCompact(false);
     setErrorText('');
   }, [scenarioId, session.sessionId]);
+
+  useEffect(() => {
+    if (!isSending || !shouldAutoCompact(contextWindowState)) return;
+    setPendingCompact(true);
+  }, [contextWindowState, isSending]);
 
   useEffect(() => {
     if (autoScrollRef.current) {
@@ -205,6 +214,9 @@ export function ChatPanel({
     if (isSending) {
       handleRunningGuidance(prompt);
       return;
+    }
+    if (shouldAutoCompact(contextWindowState)) {
+      await runContextCompaction('auto-threshold-before-send', prompt, session, pendingReferences);
     }
     await runPrompt(prompt, session, pendingReferences);
   }
@@ -385,6 +397,7 @@ export function ChatPanel({
   }
 
   function handleRunningGuidance(prompt: string) {
+    if (shouldAutoCompact(contextWindowState)) setPendingCompact(true);
     const now = nowIso();
     const guidanceMessage: BioAgentMessage = {
       id: makeId('msg'),
@@ -424,6 +437,65 @@ export function ChatPanel({
       createdAt: interruptedAt,
     }]);
     abortRef.current.abort();
+  }
+
+  async function runContextCompaction(reason: string, prompt = input.trim(), baseSession = activeSessionRef.current, references = pendingReferences) {
+    const startedAt = nowIso();
+    const request = {
+      sessionId: baseSession.sessionId,
+      scenarioId,
+      agentName: scenario.name,
+      agentDomain: scenario.domain,
+      prompt: prompt || 'BioAgent context compaction preflight',
+      references,
+      roleView: role,
+      messages: baseSession.messages,
+      artifacts: baseSession.artifacts,
+      executionUnits: baseSession.executionUnits,
+      runs: baseSession.runs,
+      config,
+      scenarioOverride,
+      scenarioPackageRef,
+      skillPlanRef,
+      uiPlanRef,
+    };
+    setPendingCompact(false);
+    setStreamEvents((current) => [...current.slice(-31), {
+      id: makeId('evt'),
+      type: 'contextCompaction',
+      label: '上下文压缩',
+      detail: '正在发送统一 compact API preflight',
+      contextCompaction: {
+        status: 'started',
+        source: 'agentserver',
+        backend: config.agentBackend,
+        compactCapability: contextWindowState.compactCapability ?? 'unknown',
+        startedAt,
+        reason,
+      },
+      createdAt: startedAt,
+    }]);
+    const result = await compactAgentContext(request, reason, abortRef.current?.signal);
+    const completedAt = nowIso();
+    setStreamEvents((current) => [...current.slice(-31), {
+      id: makeId('evt'),
+      type: 'contextCompaction',
+      label: '上下文压缩',
+      detail: result?.message || (result?.status === 'completed' ? '上下文压缩完成' : `上下文压缩 ${result?.status ?? 'skipped'}`),
+      contextCompaction: {
+        ...result,
+        completedAt: result?.completedAt ?? completedAt,
+        lastCompactedAt: result?.lastCompactedAt ?? (result?.status === 'completed' ? completedAt : contextWindowState.lastCompactedAt),
+      },
+      contextWindowState: {
+        ...contextWindowState,
+        pendingCompact: false,
+        lastCompactedAt: result?.lastCompactedAt ?? (result?.status === 'completed' ? completedAt : contextWindowState.lastCompactedAt),
+        compactCapability: result?.compactCapability ?? contextWindowState.compactCapability,
+      },
+      createdAt: completedAt,
+      raw: result,
+    }]);
   }
 
   function beginComposerResize(event: React.MouseEvent<HTMLDivElement>) {
@@ -547,6 +619,17 @@ export function ChatPanel({
             <option value="gemini">Gemini</option>
           </select>
         </label>
+        <ContextWindowMeter
+          state={{ ...contextWindowState, pendingCompact: pendingCompact || contextWindowState.pendingCompact }}
+          running={isSending}
+          onCompact={() => {
+            if (isSending) {
+              setPendingCompact(true);
+              return;
+            }
+            void runContextCompaction('manual-meter-click');
+          }}
+        />
         <div className="panel-actions">
           <IconButton icon={Plus} label="开启新聊天" onClick={onNewChat} />
           <IconButton icon={Clock} label="历史会话" onClick={() => setHistoryOpen((value) => !value)} />
@@ -637,22 +720,6 @@ export function ChatPanel({
               ) : null}
               {message.acceptance && !message.acceptance.pass ? (
                 <TurnAcceptanceNotice acceptance={message.acceptance} />
-              ) : null}
-              {message.status === 'failed' ? (
-                <FailureRecoveryCard
-                  message={message.content}
-                  onOpenSettings={() => setErrorText('请打开右上角设置，检查 AgentServer / Workspace Writer / Model Backend 连接。')}
-                  onRetry={() => {
-                    const lastPrompt = [...messages].reverse().find((item) => item.role === 'user')?.content;
-                    if (lastPrompt) void runPrompt(lastPrompt, activeSessionRef.current);
-                  }}
-                  onUseSeedSkill={() => setErrorText(`当前可先使用 workspace/evolved capability：${skillPlanRef}。如果任务需要通用生成，请启动 AgentServer。`)}
-                  onExportDiagnostics={() => exportJsonFile(`${scenarioId}-${session.sessionId}-diagnostics.json`, buildSessionDiagnostics(session, message.content, {
-                    scenarioPackageRef,
-                    skillPlanRef,
-                    uiPlanRef,
-                  }))}
-                />
               ) : null}
               <div className="message-actions">
                 <button onClick={() => void navigator.clipboard?.writeText(message.content)}>复制</button>
@@ -823,6 +890,51 @@ export function ChatPanel({
         </ActionButton>
       </div>
     </div>
+  );
+}
+
+function ContextWindowMeter({
+  state,
+  running,
+  onCompact,
+}: {
+  state: AgentContextWindowState;
+  running: boolean;
+  onCompact: () => void;
+}) {
+  const ratio = state.ratio ?? 0;
+  const level = contextWindowLevel(state);
+  const sourceLabel = contextWindowSourceLabel(state.source);
+  const used = state.usedTokens !== undefined ? formatCompactNumber(state.usedTokens) : 'unknown';
+  const windowSize = state.windowTokens !== undefined ? formatCompactNumber(state.windowTokens) : 'unknown';
+  const ratioLabel = state.ratio !== undefined ? `${Math.round(state.ratio * 100)}%` : 'unknown';
+  const title = [
+    `used/window: ${used}/${windowSize}`,
+    `ratio: ${ratioLabel}`,
+    `source: ${sourceLabel}`,
+    `backend: ${state.backend || 'unknown'}`,
+    `compact: ${state.compactCapability || 'unknown'}`,
+    `last compacted: ${state.lastCompactedAt || 'never'}`,
+  ].join('\n');
+  return (
+    <button
+      type="button"
+      className={cx('context-window-meter', level, state.source === 'estimate' && 'estimated', state.source === 'unknown' && 'unknown')}
+      onClick={onCompact}
+      title={running ? `${title}\n运行中达到阈值时只标记 pending compact。` : `${title}\n点击触发统一 compact API。`}
+      style={{ '--context-window-ratio': `${Math.min(100, Math.max(0, ratio * 100))}%` } as CSSProperties}
+    >
+      <span className="context-window-ring" aria-hidden="true">
+        <span>{ratioLabel}</span>
+      </span>
+      <span className="context-window-copy">
+        <strong>{used}/{windowSize}</strong>
+        <em>{sourceLabel} · {state.backend || 'unknown'}</em>
+        <em>compact {state.compactCapability || 'unknown'}{state.pendingCompact ? ' · pending' : ''}</em>
+        <em>last {state.lastCompactedAt ? formatShortTime(state.lastCompactedAt) : 'never'}</em>
+      </span>
+      <RefreshCw size={13} />
+    </button>
   );
 }
 
@@ -1129,6 +1241,93 @@ function latestTokenUsage(events: AgentStreamEvent[]) {
   return [...events].reverse().find((event) => event.usage)?.usage;
 }
 
+function latestContextWindowState(events: AgentStreamEvent[]) {
+  const compaction = [...events].reverse().find((event) => event.contextCompaction?.lastCompactedAt)?.contextCompaction;
+  const state = [...events].reverse().find((event) => event.contextWindowState)?.contextWindowState;
+  if (!state && !compaction) return undefined;
+  return {
+    ...(state ?? { source: 'unknown' as const }),
+    lastCompactedAt: state?.lastCompactedAt ?? compaction?.lastCompactedAt,
+    compactCapability: state?.compactCapability ?? compaction?.compactCapability,
+    backend: state?.backend ?? compaction?.backend,
+  };
+}
+
+function estimateContextWindowState(session: BioAgentSession, config: BioAgentConfig, events: AgentStreamEvent[]): AgentContextWindowState {
+  const usage = latestTokenUsage(events);
+  const modelWindow = estimateModelContextWindow(config.modelName);
+  const textChars = session.messages.slice(-24).reduce((sum, message) => sum + message.content.length + (message.expandable?.length ?? 0), 0);
+  const artifactChars = session.artifacts.slice(-12).reduce((sum, artifact) => sum + JSON.stringify({
+    id: artifact.id,
+    type: artifact.type,
+    metadata: artifact.metadata,
+    dataRef: artifact.dataRef,
+    path: artifact.path,
+  }).length, 0);
+  const usedTokens = usage?.total ?? usage?.input ?? Math.ceil((textChars + artifactChars) / 4);
+  return {
+    usedTokens: usedTokens || undefined,
+    windowTokens: modelWindow,
+    ratio: modelWindow && usedTokens ? usedTokens / modelWindow : undefined,
+    source: modelWindow || usedTokens ? 'estimate' : 'unknown',
+    backend: config.agentBackend || 'unknown',
+    compactCapability: compactCapabilityForBackend(config.agentBackend),
+    autoCompactThreshold: 0.82,
+    watchThreshold: 0.68,
+    nearLimitThreshold: 0.86,
+  };
+}
+
+function estimateModelContextWindow(modelName: string) {
+  const model = modelName.toLowerCase();
+  if (!model) return undefined;
+  if (/1m|1000k|gemini-1\.5-pro|gemini-2\./.test(model)) return 1_000_000;
+  if (/400k|claude.*sonnet-4|claude.*opus-4/.test(model)) return 400_000;
+  if (/200k|claude|gpt-4\.1|gpt-5|o3|o4/.test(model)) return 200_000;
+  if (/128k|gpt-4o|gemini/.test(model)) return 128_000;
+  if (/32k/.test(model)) return 32_000;
+  if (/16k/.test(model)) return 16_000;
+  return undefined;
+}
+
+function compactCapabilityForBackend(backend: string): AgentContextWindowState['compactCapability'] {
+  if (backend === 'codex') return 'native';
+  if (backend === 'openteam_agent' || backend === 'hermes-agent') return 'agentserver';
+  if (backend === 'gemini' || backend === 'claude-code' || backend === 'openclaw') return 'handoff-slimming';
+  return 'unknown';
+}
+
+function shouldAutoCompact(state: AgentContextWindowState) {
+  const threshold = state.autoCompactThreshold ?? 0.82;
+  return state.ratio !== undefined && state.ratio >= threshold && state.compactCapability !== 'none';
+}
+
+function contextWindowLevel(state: AgentContextWindowState) {
+  if (state.ratio === undefined) return 'unknown';
+  if (state.ratio >= (state.nearLimitThreshold ?? 0.86)) return 'near-limit';
+  if (state.ratio >= (state.watchThreshold ?? 0.68)) return 'watch';
+  return 'ok';
+}
+
+function contextWindowSourceLabel(source: AgentContextWindowState['source']) {
+  if (source === 'estimate') return '估算';
+  if (source === 'unknown') return '未知';
+  if (source === 'native') return 'native';
+  return 'AgentServer';
+}
+
+function formatCompactNumber(value: number) {
+  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
+  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
+  return String(value);
+}
+
+function formatShortTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 function formatAgentTokenUsage(usage: AgentStreamEvent['usage'] | undefined) {
   if (!usage) return '';
   const parts = [
@@ -1175,6 +1374,8 @@ function mergeTextDeltaDetail(previous: string, next: string) {
 }
 
 function streamEventTypeLabel(type: string) {
+  if (type === 'contextWindowState') return '上下文窗口';
+  if (type === 'contextCompaction') return '上下文压缩';
   if (type === 'text-delta') return '生成内容';
   if (type === 'tool-call') return '工具调用';
   if (type === 'tool-result') return '工具结果';
@@ -1184,6 +1385,19 @@ function streamEventTypeLabel(type: string) {
 }
 
 function readableStreamEventDetail(event: AgentStreamEvent) {
+  if (event.contextWindowState) {
+    const state = event.contextWindowState;
+    const used = state.usedTokens !== undefined ? formatCompactNumber(state.usedTokens) : 'unknown';
+    const windowSize = state.windowTokens !== undefined ? formatCompactNumber(state.windowTokens) : 'unknown';
+    const ratio = state.ratio !== undefined ? `${Math.round(state.ratio * 100)}%` : 'unknown';
+    return `used/window ${used}/${windowSize}, ratio ${ratio}, source ${contextWindowSourceLabel(state.source)}, backend ${state.backend || 'unknown'}, compact ${state.compactCapability || 'unknown'}, last ${state.lastCompactedAt || 'never'}`;
+  }
+  if (event.contextCompaction) {
+    const compaction = event.contextCompaction;
+    return [compaction.status, compaction.message || compaction.reason, compaction.lastCompactedAt ? `last ${compaction.lastCompactedAt}` : '']
+      .filter(Boolean)
+      .join(' · ');
+  }
   if (!event.detail) return '';
   const detail = event.type === 'text-delta'
     ? normalizeStreamTextDelta(event.detail)
@@ -1229,79 +1443,21 @@ function tidyReadableText(value: string) {
 
 function streamEventBadge(type: string): 'info' | 'warning' | 'danger' | 'success' | 'muted' {
   if (type.includes('error') || type.includes('failed')) return 'danger';
+  if (type === 'contextCompaction') return 'warning';
   if (type.includes('silent') || type.includes('guidance') || type.includes('permission')) return 'warning';
+  if (type === 'contextWindowState') return 'info';
   if (type.includes('result') || type.includes('completed') || type.includes('done')) return 'success';
   if (type.includes('text-delta')) return 'muted';
   return 'info';
 }
 
 function streamEventUiClass(type: string) {
+  if (type === 'contextWindowState' || type === 'contextCompaction') return 'context';
   if (type === 'tool-call' || type === 'tool-result') return 'tool';
   if (type === 'text-delta') return 'thinking';
   if (type === 'run-plan' || type === 'stage-start') return 'plan';
   if (type.includes('error') || type.includes('failed')) return 'error';
   return '';
-}
-
-function FailureRecoveryCard({
-  message,
-  onRetry,
-  onOpenSettings,
-  onUseSeedSkill,
-  onExportDiagnostics,
-}: {
-  message: string;
-  onRetry: () => void;
-  onOpenSettings: () => void;
-  onUseSeedSkill: () => void;
-  onExportDiagnostics: () => void;
-}) {
-  const actions = recoveryActionsForMessage(message);
-  return (
-    <div className="failure-recovery-card">
-      <strong>可以这样恢复</strong>
-      <div>
-        {actions.map((action) => <span key={action}>{action}</span>)}
-      </div>
-      <div className="scenario-builder-actions">
-        <button onClick={onRetry}>重试上一条请求</button>
-        <button onClick={onUseSeedSkill}>改用 workspace capability</button>
-        <button onClick={onOpenSettings}>检查设置</button>
-        <button onClick={onExportDiagnostics}>导出诊断包</button>
-      </div>
-    </div>
-  );
-}
-
-function buildSessionDiagnostics(
-  session: BioAgentSession,
-  message: string,
-  refs: {
-    scenarioPackageRef?: RuntimeExecutionUnit['scenarioPackageRef'];
-    skillPlanRef: string;
-    uiPlanRef: string;
-  },
-) {
-  return {
-    schemaVersion: '1',
-    generatedAt: nowIso(),
-    reason: message,
-    scenarioId: session.scenarioId,
-    sessionId: session.sessionId,
-    packageRef: refs.scenarioPackageRef,
-    skillPlanRef: refs.skillPlanRef,
-    uiPlanRef: refs.uiPlanRef,
-    recentMessages: session.messages.slice(-8),
-    recentRuns: session.runs.slice(-8),
-    executionUnits: session.executionUnits.slice(0, 12),
-    artifacts: session.artifacts.slice(0, 12).map((artifact) => ({
-      id: artifact.id,
-      type: artifact.type,
-      schemaVersion: artifact.schemaVersion,
-      dataRef: artifact.dataRef,
-      metadata: artifact.metadata,
-    })),
-  };
 }
 
 export function mergeRunTimelineEvents(events: TimelineEventRecord[], previousSession: BioAgentSession | undefined, nextSession: BioAgentSession) {
@@ -1340,28 +1496,6 @@ function timelineEventFromStoredRun(session: BioAgentSession, run: BioAgentSessi
     decisionStatus: 'not-a-decision',
     createdAt: run.completedAt ?? run.createdAt ?? nowIso(),
   };
-}
-
-function recoveryActionsForMessage(message: string) {
-  if (/AgentServer|18080|stream|fetch/i.test(message)) {
-    return [
-      '启动或修复 AgentServer 后重试。',
-      '如果当前任务已有 workspace/evolved skill，BioAgent 会优先走 workspace runtime。',
-      '仍失败时导出诊断包，保留 package/version 和 execution logs。',
-    ];
-  }
-  if (/workspace|writer|5174|scenarios|save/i.test(message)) {
-    return [
-      '启动 workspace writer 或检查 Workspace Writer URL。',
-      '确认 workspace path 可写。',
-      '刷新 Scenario Library 后重试。',
-    ];
-  }
-  return [
-    '查看 Runtime Health 判断是连接、输入还是 contract 问题。',
-    '检查当前 package 的 validation / quality gate。',
-    '保留失败 run，作为 repair 或 reusable task 候选。',
-  ];
 }
 
 function SessionHistoryPanel({

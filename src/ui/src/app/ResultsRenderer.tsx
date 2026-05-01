@@ -369,6 +369,7 @@ export function ResultsRenderer({
   const [inspectedArtifact, setInspectedArtifact] = useState<RuntimeArtifact | undefined>();
   const [pinnedObjectReferences, setPinnedObjectReferences] = useState<ObjectReference[]>([]);
   const [objectActionError, setObjectActionError] = useState('');
+  const [objectActionNotice, setObjectActionNotice] = useState('');
   const scenario = scenarios.find((item) => item.id === scenarioId) ?? scenarios[0];
   const activeRun = activeRunId ? session.runs.find((run) => run.id === activeRunId) : undefined;
   const viewPlan = useMemo(() => resolveViewPlan({
@@ -394,10 +395,12 @@ export function ResultsRenderer({
   ];
   const handleObjectAction = async (reference: ObjectReference, action: ObjectAction) => {
     setObjectActionError('');
+    setObjectActionNotice('');
     if (action === 'focus-right-pane') {
       onFocusedObjectChange(reference);
       if (reference.runId) onActiveRunChange(reference.runId);
       setResultTab('primary');
+      setObjectActionNotice('已聚焦到右侧结果。');
       return;
     }
     if (action === 'inspect') {
@@ -415,6 +418,7 @@ export function ResultsRenderer({
         : [...current, reference].slice(-4));
       onFocusedObjectChange(reference);
       setResultTab('primary');
+      setObjectActionNotice(action === 'compare' ? '已加入对比/固定列表。' : '已固定到结果区。');
       return;
     }
     if (action === 'copy-path') {
@@ -423,7 +427,12 @@ export function ResultsRenderer({
         setObjectActionError(`没有可复制路径：${reference.title}`);
         return;
       }
-      await navigator.clipboard?.writeText(path);
+      try {
+        await writeClipboardText(path);
+        setObjectActionNotice(`已复制路径：${path}`);
+      } catch (error) {
+        setObjectActionError(error instanceof Error ? error.message : String(error));
+      }
       return;
     }
     if (action === 'open-external' || action === 'reveal-in-folder') {
@@ -434,6 +443,7 @@ export function ResultsRenderer({
       }
       try {
         await openWorkspaceObject(config, action, path);
+        setObjectActionNotice(action === 'reveal-in-folder' ? '已请求在文件夹中显示。' : '已请求系统打开文件。');
       } catch (error) {
         setObjectActionError(error instanceof Error ? error.message : String(error));
       }
@@ -496,6 +506,7 @@ export function ResultsRenderer({
                 pinnedReferences={pinnedObjectReferences}
                 actions={availableObjectActions(focusedObjectReference, session)}
                 error={objectActionError}
+                notice={objectActionNotice}
                 onAction={handleObjectAction}
                 onClear={() => onFocusedObjectChange(undefined)}
               />
@@ -2108,6 +2119,7 @@ function ObjectFocusBanner({
   pinnedReferences,
   actions,
   error,
+  notice,
   onAction,
   onClear,
 }: {
@@ -2115,9 +2127,11 @@ function ObjectFocusBanner({
   pinnedReferences: ObjectReference[];
   actions: ObjectAction[];
   error?: string;
+  notice?: string;
   onAction: (reference: ObjectReference, action: ObjectAction) => void | Promise<void>;
   onClear: () => void;
 }) {
+  const visibleActions = actions.filter((action) => action !== 'focus-right-pane');
   return (
     <div className="object-focus-banner">
       <div>
@@ -2126,7 +2140,7 @@ function ObjectFocusBanner({
         <span>{reference.summary || reference.ref}</span>
       </div>
       <div className="object-focus-actions">
-        {actions.slice(0, 6).map((action) => (
+        {visibleActions.slice(0, 6).map((action) => (
           <button key={action} type="button" onClick={() => void onAction(reference, action)}>
             {objectActionLabel(action)}
           </button>
@@ -2139,6 +2153,7 @@ function ObjectFocusBanner({
           {pinnedReferences.map((item) => <code key={item.id}>{item.title}</code>)}
         </div>
       ) : null}
+      {notice ? <p className="object-action-notice">{notice}</p> : null}
       {error ? <p className="object-action-error">{error}</p> : null}
     </div>
   );
@@ -2244,14 +2259,30 @@ function WorkspaceFileInlineViewer({ file }: { file: WorkspaceFileContent }) {
   if (kind === 'json') return <pre className="workspace-object-code">{formatJsonLike(file.content)}</pre>;
   if (kind === 'csv' || kind === 'tsv') return <DelimitedTextPreview content={file.content} delimiter={kind === 'tsv' ? '\t' : ','} />;
   if (kind === 'image') {
+    if (file.encoding === 'base64') {
+      return (
+        <div className="workspace-object-image-frame">
+          <img src={`data:${file.mimeType || 'image/png'};base64,${file.content}`} alt={file.name} />
+        </div>
+      );
+    }
     return (
       <div className="workspace-object-media-note">
-        图片文件已解析为 workspace 引用；若 workspace server 返回文本内容，则下方显示其元数据/编码预览。
+        图片文件已解析为 workspace 引用，但当前 workspace server 未返回 base64 预览；可使用“系统打开”查看。
         <pre className="workspace-object-code">{file.content.slice(0, 4000)}</pre>
       </div>
     );
   }
   if (kind === 'pdf') {
+    if (file.encoding === 'base64') {
+      return (
+        <iframe
+          className="workspace-object-pdf-frame"
+          title={file.name}
+          src={`data:${file.mimeType || 'application/pdf'};base64,${file.content}`}
+        />
+      );
+    }
     return <p className="workspace-object-media-note">PDF 已作为可点击文件引用聚焦。可用“系统打开”查看完整 PDF，BioAgent 不会把二进制内容直接塞进聊天区。</p>;
   }
   if (kind === 'html') return <pre className="workspace-object-code">{file.content.slice(0, 12000)}</pre>;
@@ -2314,6 +2345,24 @@ function objectActionLabel(action: ObjectAction) {
   if (action === 'copy-path') return '复制路径';
   if (action === 'compare') return '对比';
   return 'Pin';
+}
+
+async function writeClipboardText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('浏览器拒绝复制路径，请手动复制。');
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function availableObjectActions(reference: ObjectReference, session: BioAgentSession): ObjectAction[] {

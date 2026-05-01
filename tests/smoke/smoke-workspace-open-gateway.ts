@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-workspace-open-'));
+const generatedTmpPath = join(tmpdir(), `bioagent-generated-preview-${Date.now()}.png`);
 const port = 24080 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
@@ -22,6 +23,7 @@ try {
   const scriptPath = join(workspace, 'reports', 'run.sh');
   await writeFile(reportPath, '# Summary\n', 'utf8');
   await writeFile(scriptPath, 'echo unsafe\n', 'utf8');
+  await writeFile(generatedTmpPath, Buffer.from('iVBORw0KGgo=', 'base64'));
   await waitForHealth(port);
   const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -52,6 +54,15 @@ try {
 
   response = await postOpen(baseUrl, {
     workspacePath: workspace,
+    action: 'open-external',
+    path: generatedTmpPath,
+  });
+  await assertOk(response);
+  const openedTmp = await response.json() as { dryRun?: boolean; path?: string };
+  assert.equal(openedTmp.path, generatedTmpPath);
+
+  response = await postOpen(baseUrl, {
+    workspacePath: workspace,
     action: 'reveal-in-folder',
     path: join(workspace, '..', 'outside.md'),
   });
@@ -62,6 +73,7 @@ try {
 } finally {
   child.kill('SIGTERM');
   await rm(workspace, { recursive: true, force: true });
+  await rm(generatedTmpPath, { force: true }).catch(() => {});
 }
 
 function postOpen(baseUrl: string, body: Record<string, unknown>) {

@@ -20,6 +20,8 @@ export interface WorkspaceFileContent {
   size: number;
   modifiedAt?: string;
   language: string;
+  encoding?: 'utf8' | 'base64';
+  mimeType?: string;
 }
 
 export interface WorkspaceOpenResult {

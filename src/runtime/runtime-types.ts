@@ -39,7 +39,37 @@ export interface WorkspaceRuntimeEvent {
   text?: string;
   output?: string;
   usage?: WorkspaceRuntimeTokenUsage;
+  contextWindowState?: WorkspaceRuntimeContextWindowState;
+  contextCompaction?: WorkspaceRuntimeContextCompaction;
   raw?: unknown;
+}
+
+export type WorkspaceRuntimeContextWindowSource = 'native' | 'agentserver' | 'estimate' | 'unknown';
+
+export interface WorkspaceRuntimeContextWindowState {
+  usedTokens?: number;
+  windowTokens?: number;
+  ratio?: number;
+  source: WorkspaceRuntimeContextWindowSource;
+  backend?: string;
+  compactCapability?: 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown';
+  autoCompactThreshold?: number;
+  watchThreshold?: number;
+  nearLimitThreshold?: number;
+  lastCompactedAt?: string;
+  pendingCompact?: boolean;
+}
+
+export interface WorkspaceRuntimeContextCompaction {
+  status: 'started' | 'completed' | 'failed' | 'pending' | 'skipped';
+  source?: WorkspaceRuntimeContextWindowSource;
+  backend?: string;
+  compactCapability?: WorkspaceRuntimeContextWindowState['compactCapability'];
+  startedAt?: string;
+  completedAt?: string;
+  lastCompactedAt?: string;
+  reason?: string;
+  message?: string;
 }
 
 export interface WorkspaceRuntimeTokenUsage {
@@ -143,6 +173,55 @@ export interface SkillAvailability {
   checkedAt: string;
   manifestPath: string;
   manifest: SkillManifest;
+}
+
+export interface AgentBackendCapabilities {
+  contextWindowTelemetry: boolean;
+  nativeCompaction: boolean;
+  compactionDuringTurn: boolean;
+  rateLimitTelemetry: boolean;
+  sessionRotationSafe: boolean;
+}
+
+export interface BackendContextWindowState {
+  backend: string;
+  agentId: string;
+  source: 'backend' | 'agentserver' | 'handoff' | 'unknown';
+  status: 'healthy' | 'watch' | 'near-limit' | 'exceeded' | 'unknown';
+  contextWindowTokens?: number;
+  contextWindowLimit?: number;
+  contextWindowRatio?: number;
+  autoCompactThreshold?: number;
+  lastCompactedAt?: string;
+  rateLimit?: {
+    limited?: boolean;
+    retryAfterMs?: number;
+    resetAt?: string;
+  };
+  compactCapability: 'native' | 'agentserver' | 'handoff-only' | 'session-rotate' | 'none';
+  snapshot?: Record<string, unknown>;
+}
+
+export interface BackendContextCompactionResult {
+  ok: boolean;
+  backend: string;
+  agentId: string;
+  strategy: 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none';
+  reason: string;
+  before?: BackendContextWindowState;
+  after?: BackendContextWindowState;
+  message?: string;
+  runId?: string;
+}
+
+export interface AgentBackendAdapter {
+  backend: string;
+  capabilities: AgentBackendCapabilities;
+  readContextWindowState?: (sessionRef: { agentId: string; workspace: string; baseUrl: string }) => Promise<BackendContextWindowState | undefined>;
+  compactContext?: (
+    sessionRef: { agentId: string; workspace: string; baseUrl: string },
+    reason: string,
+  ) => Promise<BackendContextCompactionResult>;
 }
 
 export interface SkillPromotionProposal {

@@ -583,8 +583,39 @@ export interface AgentStreamEvent {
   label: string;
   detail?: string;
   usage?: AgentTokenUsage;
+  contextWindowState?: AgentContextWindowState;
+  contextCompaction?: AgentContextCompaction;
   createdAt: string;
   raw?: unknown;
+}
+
+export type AgentContextWindowSource = 'native' | 'agentserver' | 'estimate' | 'unknown';
+export type AgentCompactCapability = 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown';
+
+export interface AgentContextWindowState {
+  usedTokens?: number;
+  windowTokens?: number;
+  ratio?: number;
+  source: AgentContextWindowSource;
+  backend?: string;
+  compactCapability?: AgentCompactCapability;
+  autoCompactThreshold?: number;
+  watchThreshold?: number;
+  nearLimitThreshold?: number;
+  lastCompactedAt?: string;
+  pendingCompact?: boolean;
+}
+
+export interface AgentContextCompaction {
+  status: 'started' | 'completed' | 'failed' | 'pending' | 'skipped';
+  source?: AgentContextWindowSource;
+  backend?: string;
+  compactCapability?: AgentCompactCapability;
+  startedAt?: string;
+  completedAt?: string;
+  lastCompactedAt?: string;
+  reason?: string;
+  message?: string;
 }
 
 export interface AgentTokenUsage {

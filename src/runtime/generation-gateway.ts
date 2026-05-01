@@ -2,12 +2,13 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { agentServerGenerationSkill, loadSkillRegistry } from './skill-registry.js';
 import { appendTaskAttempt, readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
-import type { AgentServerGenerationResponse, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
+import type { AgentBackendAdapter, AgentBackendCapabilities, AgentServerGenerationResponse, BackendContextCompactionResult, BackendContextWindowState, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
 import { fileExists, runWorkspaceTask, sha1 } from './workspace-task-runner.js';
 import { maybeWriteSkillPromotionProposal } from './skill-promotion.js';
 import { emitWorkspaceRuntimeEvent, throwIfRuntimeAborted } from './workspace-runtime-events.js';
 import { composeRuntimeUiManifest } from './runtime-ui-manifest.js';
 import { cleanUrl, clipForAgentServerJson, clipForAgentServerPrompt, errorMessage, excerptAroundFailureLine, extractLikelyErrorLine, generatedTaskArchiveRel, hashJson, headForAgentServer, isRecord, isTaskInputRel, readTextIfExists, safeWorkspaceRel, summarizeTextChange, tailForAgentServer, toRecordList, toStringList, uniqueStrings } from './gateway-utils.js';
+import { normalizeBackendHandoff } from './workspace-task-input.js';
 
 const SKILL_DOMAIN_SET = new Set<BioAgentSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
 const AGENT_BACKEND_ANSWER_PRINCIPLE = [
@@ -773,6 +774,385 @@ function agentServerBackend(request?: GatewayRequest, llmEndpoint?: LlmEndpointC
   return 'codex';
 }
 
+function agentBackendAdapter(backend: string): AgentBackendAdapter {
+  const capabilities = agentBackendCapabilities(backend);
+  return {
+    backend,
+    capabilities,
+    readContextWindowState: async (sessionRef) => readBackendContextWindowState(sessionRef, backend, capabilities),
+    compactContext: async (sessionRef, reason) => compactBackendContext(sessionRef, backend, capabilities, reason),
+  };
+}
+
+function agentBackendCapabilities(backend: string): AgentBackendCapabilities {
+  if (backend === 'codex') {
+    return {
+      contextWindowTelemetry: true,
+      nativeCompaction: true,
+      compactionDuringTurn: true,
+      rateLimitTelemetry: true,
+      sessionRotationSafe: true,
+    };
+  }
+  if (backend === 'hermes-agent') {
+    return {
+      contextWindowTelemetry: true,
+      nativeCompaction: true,
+      compactionDuringTurn: false,
+      rateLimitTelemetry: true,
+      sessionRotationSafe: true,
+    };
+  }
+  if (backend === 'gemini') {
+    return {
+      contextWindowTelemetry: true,
+      nativeCompaction: false,
+      compactionDuringTurn: false,
+      rateLimitTelemetry: true,
+      sessionRotationSafe: true,
+    };
+  }
+  if (backend === 'openteam_agent') {
+    return {
+      contextWindowTelemetry: true,
+      nativeCompaction: false,
+      compactionDuringTurn: false,
+      rateLimitTelemetry: true,
+      sessionRotationSafe: true,
+    };
+  }
+  if (backend === 'claude-code') {
+    return {
+      contextWindowTelemetry: false,
+      nativeCompaction: false,
+      compactionDuringTurn: false,
+      rateLimitTelemetry: true,
+      sessionRotationSafe: true,
+    };
+  }
+  return {
+    contextWindowTelemetry: false,
+    nativeCompaction: false,
+    compactionDuringTurn: false,
+    rateLimitTelemetry: false,
+    sessionRotationSafe: true,
+  };
+}
+
+async function preflightAgentServerContextWindow(params: {
+  adapter: AgentBackendAdapter;
+  baseUrl: string;
+  workspace: string;
+  agentId: string;
+  callbacks?: WorkspaceRuntimeCallbacks;
+}) {
+  const sessionRef = {
+    agentId: params.agentId,
+    workspace: params.workspace,
+    baseUrl: params.baseUrl,
+  };
+  const state = await params.adapter.readContextWindowState?.(sessionRef);
+  if (state) {
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-window-state',
+      source: 'workspace-runtime',
+      status: state.status,
+      message: `AgentServer context window ${state.status}`,
+      detail: formatContextWindowState(state),
+      raw: state,
+    });
+  }
+  if (!state || !contextWindowNeedsCompaction(state)) {
+    return { state, forceSlimHandoff: false };
+  }
+  const reason = `preflight:${state.status}:${formatContextWindowState(state)}`;
+  const compaction = await params.adapter.compactContext?.(sessionRef, reason);
+  if (compaction) {
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'agentserver-context-compaction',
+      source: 'workspace-runtime',
+      status: compaction.ok ? 'completed' : 'failed',
+      message: `AgentServer context compaction ${compaction.strategy}`,
+      detail: compaction.message || compaction.reason,
+      raw: compaction,
+    });
+  }
+  const after = compaction?.after ?? state;
+  return {
+    state: after,
+    compaction,
+    forceSlimHandoff: !compaction?.ok || compaction.strategy === 'handoff-slimming',
+  };
+}
+
+async function readBackendContextWindowState(
+  sessionRef: { agentId: string; workspace: string; baseUrl: string },
+  backend: string,
+  capabilities: AgentBackendCapabilities,
+): Promise<BackendContextWindowState | undefined> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`${sessionRef.baseUrl}/api/agent-server/agents/${encodeURIComponent(sessionRef.agentId)}/context`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    if (!response.ok) return fallbackContextWindowState(sessionRef.agentId, backend, capabilities);
+    const json = await response.json() as unknown;
+    const data = isRecord(json) && isRecord(json.data) ? json.data : json;
+    if (!isRecord(data)) return fallbackContextWindowState(sessionRef.agentId, backend, capabilities);
+    const snapshot = compactAgentServerCoreSnapshot(data);
+    return normalizeBackendContextWindowState(data, snapshot, sessionRef.agentId, backend, capabilities);
+  } catch {
+    return fallbackContextWindowState(sessionRef.agentId, backend, capabilities);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function compactBackendContext(
+  sessionRef: { agentId: string; workspace: string; baseUrl: string },
+  backend: string,
+  capabilities: AgentBackendCapabilities,
+  reason: string,
+): Promise<BackendContextCompactionResult> {
+  const before = await readBackendContextWindowState(sessionRef, backend, capabilities);
+  if (!capabilities.nativeCompaction) {
+    const agentServerCompaction = await requestAgentServerCompact(sessionRef, backend, reason, before);
+    if (agentServerCompaction.ok) return agentServerCompaction;
+    return {
+      ok: true,
+      backend,
+      agentId: sessionRef.agentId,
+      strategy: capabilities.sessionRotationSafe ? 'handoff-slimming' : 'none',
+      reason,
+      before,
+      after: markHandoffSlimmingState(before, sessionRef.agentId, backend),
+      message: agentServerCompaction.message || 'Backend has no native compaction; using compact handoff refs for this turn.',
+    };
+  }
+  const native = await requestAgentServerCompact(sessionRef, backend, reason, before);
+  if (native.ok) return native;
+  return {
+    ok: true,
+    backend,
+    agentId: sessionRef.agentId,
+    strategy: 'handoff-slimming',
+    reason,
+    before,
+    after: markHandoffSlimmingState(before, sessionRef.agentId, backend),
+    message: native.message || 'Native compaction was unavailable; using compact handoff refs for this turn.',
+  };
+}
+
+async function requestAgentServerCompact(
+  sessionRef: { agentId: string; workspace: string; baseUrl: string },
+  backend: string,
+  reason: string,
+  before: BackendContextWindowState | undefined,
+): Promise<BackendContextCompactionResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(`${sessionRef.baseUrl}/api/agent-server/agents/${encodeURIComponent(sessionRef.agentId)}/compact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        reason,
+        backend,
+        workspace: sessionRef.workspace,
+        contextWindow: before ? contextWindowMetadata(before) : undefined,
+      }),
+    });
+    const text = await response.text();
+    let json: unknown = text;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // Compact endpoints may be absent or plain-text in older AgentServer builds.
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        backend,
+        agentId: sessionRef.agentId,
+        strategy: 'agentserver',
+        reason,
+        before,
+        message: isRecord(json) ? String(json.error || json.message || '') : String(text).slice(0, 500),
+      };
+    }
+    const data = isRecord(json) && isRecord(json.data) ? json.data : isRecord(json) ? json : {};
+    const stateData = isRecord(data.state) ? data.state : isRecord(data.contextWindowState) ? data.contextWindowState : data;
+    const after = normalizeBackendContextWindowState(stateData, before?.snapshot, sessionRef.agentId, backend, agentBackendCapabilities(backend));
+    return {
+      ok: true,
+      backend,
+      agentId: sessionRef.agentId,
+      strategy: before?.compactCapability === 'native' ? 'native' : 'agentserver',
+      reason,
+      before,
+      after,
+      runId: stringField(data.runId) ?? stringField(data.id),
+      message: stringField(data.message) ?? 'Context compacted before dispatch.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      backend,
+      agentId: sessionRef.agentId,
+      strategy: 'agentserver',
+      reason,
+      before,
+      message: errorMessage(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeBackendContextWindowState(
+  data: Record<string, unknown>,
+  snapshot: Record<string, unknown> | undefined,
+  agentId: string,
+  backend: string,
+  capabilities: AgentBackendCapabilities,
+): BackendContextWindowState {
+  const contextWindow = firstRecord(data.contextWindow, data.contextWindowState, data.tokenUsage, data.usage);
+  const workBudget = isRecord(data.workBudget) ? data.workBudget : {};
+  const tokens = finiteNumber(contextWindow.tokens)
+    ?? finiteNumber(contextWindow.contextWindowTokens)
+    ?? finiteNumber(contextWindow.total)
+    ?? finiteNumber(workBudget.approxCurrentWorkTokens);
+  const limit = finiteNumber(contextWindow.limit)
+    ?? finiteNumber(contextWindow.contextWindowLimit)
+    ?? finiteNumber(contextWindow.modelContextWindow)
+    ?? finiteNumber(workBudget.contextWindowLimit);
+  const ratio = finiteNumber(contextWindow.ratio)
+    ?? finiteNumber(contextWindow.contextWindowRatio)
+    ?? (tokens !== undefined && limit ? tokens / limit : undefined);
+  const autoCompactThreshold = finiteNumber(contextWindow.autoCompactThreshold)
+    ?? finiteNumber(contextWindow.modelAutoCompactTokenLimit)
+    ?? (limit && finiteNumber(workBudget.autoCompactTokenLimit) ? finiteNumber(workBudget.autoCompactTokenLimit)! / limit : undefined)
+    ?? 0.82;
+  const rawStatus = stringField(contextWindow.status) ?? stringField(workBudget.status);
+  const status = normalizeContextWindowStatus(rawStatus, ratio, autoCompactThreshold);
+  return {
+    backend,
+    agentId,
+    source: capabilities.contextWindowTelemetry ? 'backend' : 'agentserver',
+    status,
+    contextWindowTokens: tokens,
+    contextWindowLimit: limit,
+    contextWindowRatio: ratio,
+    autoCompactThreshold,
+    lastCompactedAt: stringField(contextWindow.lastCompactedAt) ?? stringField(workBudget.lastCompactedAt),
+    rateLimit: normalizeRateLimit(data.rateLimit ?? contextWindow.rateLimit),
+    compactCapability: capabilities.nativeCompaction ? 'native' : 'agentserver',
+    snapshot,
+  };
+}
+
+function fallbackContextWindowState(agentId: string, backend: string, capabilities: AgentBackendCapabilities): BackendContextWindowState {
+  return {
+    backend,
+    agentId,
+    source: 'unknown',
+    status: 'unknown',
+    compactCapability: capabilities.nativeCompaction ? 'native' : capabilities.sessionRotationSafe ? 'handoff-only' : 'none',
+  };
+}
+
+function markHandoffSlimmingState(
+  state: BackendContextWindowState | undefined,
+  agentId: string,
+  backend: string,
+): BackendContextWindowState {
+  return {
+    ...(state ?? {
+      backend,
+      agentId,
+      source: 'handoff' as const,
+      status: 'watch' as const,
+      compactCapability: 'handoff-only' as const,
+    }),
+    backend,
+    agentId,
+    source: 'handoff',
+    status: 'watch',
+    compactCapability: 'handoff-only',
+  };
+}
+
+function firstRecord(...values: unknown[]) {
+  return values.find(isRecord) ?? {};
+}
+
+function normalizeRateLimit(value: unknown): BackendContextWindowState['rateLimit'] | undefined {
+  if (!isRecord(value)) return undefined;
+  const rateLimit = {
+    limited: typeof value.limited === 'boolean' ? value.limited : undefined,
+    retryAfterMs: finiteNumber(value.retryAfterMs),
+    resetAt: stringField(value.resetAt),
+  };
+  return rateLimit.limited !== undefined || rateLimit.retryAfterMs !== undefined || rateLimit.resetAt ? rateLimit : undefined;
+}
+
+function normalizeContextWindowStatus(
+  value: string | undefined,
+  ratio: number | undefined,
+  autoCompactThreshold: number | undefined,
+): BackendContextWindowState['status'] {
+  if (value && /exceeded|overflow|max|full/i.test(value)) return 'exceeded';
+  if (value && /near|compact|critical|warning/i.test(value)) return 'near-limit';
+  if (value && /watch/i.test(value)) return 'watch';
+  if (value && /healthy|ok|normal/i.test(value)) return 'healthy';
+  if (ratio !== undefined && ratio >= 1) return 'exceeded';
+  if (ratio !== undefined && ratio >= (autoCompactThreshold ?? 0.82)) return 'near-limit';
+  if (ratio !== undefined && ratio >= 0.68) return 'watch';
+  return ratio === undefined ? 'unknown' : 'healthy';
+}
+
+function contextWindowNeedsCompaction(state: BackendContextWindowState) {
+  return state.status === 'near-limit'
+    || state.status === 'exceeded'
+    || (state.contextWindowRatio !== undefined && state.contextWindowRatio >= (state.autoCompactThreshold ?? 0.82));
+}
+
+function formatContextWindowState(state: BackendContextWindowState) {
+  const ratio = state.contextWindowRatio !== undefined ? `${Math.round(state.contextWindowRatio * 100)}%` : 'unknown ratio';
+  const tokens = state.contextWindowTokens !== undefined ? `${state.contextWindowTokens}` : '?';
+  const limit = state.contextWindowLimit !== undefined ? `${state.contextWindowLimit}` : '?';
+  return `${state.backend} ${state.status} ${ratio} (${tokens}/${limit}) via ${state.compactCapability}`;
+}
+
+function contextWindowMetadata(state: BackendContextWindowState) {
+  return {
+    backend: state.backend,
+    source: state.source,
+    status: state.status,
+    contextWindowTokens: state.contextWindowTokens,
+    contextWindowLimit: state.contextWindowLimit,
+    contextWindowRatio: state.contextWindowRatio,
+    autoCompactThreshold: state.autoCompactThreshold,
+    compactCapability: state.compactCapability,
+    rateLimit: state.rateLimit,
+  };
+}
+
+function contextCompactionMetadata(compaction: BackendContextCompactionResult) {
+  return {
+    ok: compaction.ok,
+    strategy: compaction.strategy,
+    reason: compaction.reason,
+    message: compaction.message,
+    runId: compaction.runId,
+    before: compaction.before ? contextWindowMetadata(compaction.before) : undefined,
+    after: compaction.after ? contextWindowMetadata(compaction.after) : undefined,
+  };
+}
+
 function agentServerAgentId(request: GatewayRequest, _purpose: string) {
   const sessionId = typeof request.uiState?.sessionId === 'string' ? request.uiState.sessionId : '';
   const packageId = request.scenarioPackageRef?.id || request.skillDomain;
@@ -792,6 +1172,45 @@ function agentServerContextPolicy(request: GatewayRequest) {
     persistRunSummary: hasSession,
     persistExtractedConstraints: false,
   };
+}
+
+function estimateWorkspaceContextWindowState(params: {
+  backend: string;
+  modelName?: string;
+  usedTokens: number;
+  source: 'estimate' | 'unknown';
+}) {
+  const windowTokens = estimateModelContextWindow(params.modelName);
+  return {
+    usedTokens: params.usedTokens,
+    windowTokens,
+    ratio: windowTokens ? params.usedTokens / windowTokens : undefined,
+    source: windowTokens ? params.source : 'unknown',
+    backend: params.backend,
+    compactCapability: compactCapabilityForBackend(params.backend),
+    autoCompactThreshold: 0.82,
+    watchThreshold: 0.68,
+    nearLimitThreshold: 0.86,
+  };
+}
+
+function estimateModelContextWindow(modelName?: string) {
+  const model = (modelName ?? '').toLowerCase();
+  if (!model) return undefined;
+  if (/1m|1000k|gemini-1\.5-pro|gemini-2\./.test(model)) return 1_000_000;
+  if (/400k|claude.*sonnet-4|claude.*opus-4/.test(model)) return 400_000;
+  if (/200k|claude|gpt-4\.1|gpt-5|o3|o4/.test(model)) return 200_000;
+  if (/128k|gpt-4o|gemini/.test(model)) return 128_000;
+  if (/32k/.test(model)) return 32_000;
+  if (/16k/.test(model)) return 16_000;
+  return undefined;
+}
+
+function compactCapabilityForBackend(backend: string): 'native' | 'agentserver' | 'handoff-slimming' | 'session-rotate' | 'none' | 'unknown' {
+  if (backend === 'codex') return 'native';
+  if (backend === 'openteam_agent' || backend === 'hermes-agent') return 'agentserver';
+  if (backend === 'gemini' || backend === 'claude-code' || backend === 'openclaw') return 'handoff-slimming';
+  return 'unknown';
 }
 
 async function fetchAgentServerContextSnapshot(baseUrl: string, agentId: string) {
@@ -1328,16 +1747,25 @@ async function requestAgentServerGeneration(params: {
     if (!llmRuntime.llmEndpoint && requiresUserLlmEndpoint(params.baseUrl)) {
       return { ok: false, error: missingUserLlmEndpointMessage() };
     }
+    const adapter = agentBackendAdapter(backend);
+    const agentId = agentServerAgentId(params.request, 'task-generation');
+    const preflight = await preflightAgentServerContextWindow({
+      adapter,
+      baseUrl: params.baseUrl,
+      workspace: params.workspace,
+      agentId,
+      callbacks: params.callbacks,
+    });
     const workspaceTree = await workspaceTreeSummary(params.workspace);
     const priorAttempts = summarizeTaskAttemptsForAgentServer(await readRecentTaskAttempts(params.workspace, params.request.skillDomain, 8, {
       scenarioPackageId: params.request.scenarioPackageRef?.id,
       skillPlanRef: params.request.skillPlanRef,
       prompt: params.request.prompt,
     }));
-    const agentId = agentServerAgentId(params.request, 'task-generation');
-    const agentServerSnapshot = await fetchAgentServerContextSnapshot(params.baseUrl, agentId);
+    const agentServerSnapshot = preflight.state?.snapshot ?? await fetchAgentServerContextSnapshot(params.baseUrl, agentId);
     const contextMode = contextEnvelopeMode(params.request, {
       agentServerCoreAvailable: Boolean(agentServerSnapshot),
+      forceSlimHandoff: preflight.forceSlimHandoff,
     });
     const contextEnvelope: Record<string, unknown> = buildContextEnvelope(params.request, {
       workspace: params.workspace,
@@ -1377,6 +1805,17 @@ async function requestAgentServerGeneration(params: {
     };
     const generationPrompt = buildAgentServerGenerationPrompt(generationRequest);
     const contextEnvelopeBytes = Buffer.byteLength(JSON.stringify(contextEnvelope), 'utf8');
+    emitWorkspaceRuntimeEvent(params.callbacks, {
+      type: 'contextWindowState',
+      source: 'workspace-runtime',
+      message: 'Estimated context window before AgentServer dispatch',
+      contextWindowState: estimateWorkspaceContextWindowState({
+        backend,
+        modelName: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        usedTokens: Math.ceil((contextEnvelopeBytes + generationPrompt.length) / 4),
+        source: 'estimate',
+      }),
+    });
     runPayload = {
       agent: {
         id: agentId,
@@ -1407,6 +1846,9 @@ async function requestAgentServerGeneration(params: {
           contextEnvelopeBytes,
           promptChars: generationPrompt.length,
           workspaceTreeEntryCount: workspaceTree.length,
+          contextWindow: preflight.state ? contextWindowMetadata(preflight.state) : undefined,
+          contextCompaction: preflight.compaction ? contextCompactionMetadata(preflight.compaction) : undefined,
+          backendCapabilities: adapter.capabilities,
         },
       },
       contextPolicy: agentServerContextPolicy(params.request),
@@ -1437,11 +1879,21 @@ async function requestAgentServerGeneration(params: {
         },
       },
     };
+    const normalizedHandoff = await normalizeBackendHandoff(runPayload, {
+      workspacePath: params.workspace,
+      purpose: 'agentserver-generation',
+      budget: {
+        maxInlineStringChars: 24_000,
+        headChars: 4_000,
+        tailChars: 4_000,
+      },
+    });
+    runPayload = normalizedHandoff.payload;
     emitWorkspaceRuntimeEvent(params.callbacks, {
       type: 'agentserver-dispatch',
       source: 'workspace-runtime',
       message: `Dispatching to AgentServer ${backend}`,
-      detail: params.baseUrl,
+      detail: `${params.baseUrl} · handoff ${normalizedHandoff.normalizedBytes}/${normalizedHandoff.budget.maxPayloadBytes} bytes · raw ${normalizedHandoff.rawRef}`,
     });
     const response = await fetch(`${params.baseUrl}/api/agent-server/runs/stream`, {
       method: 'POST',
@@ -1754,6 +2206,11 @@ async function requestAgentServerRepair(params: {
         },
       },
     };
+    const normalizedHandoff = await normalizeBackendHandoff(runPayload, {
+      workspacePath: params.run.workspace,
+      purpose: 'agentserver-repair',
+    });
+    runPayload = normalizedHandoff.payload;
     const response = await fetch(`${params.baseUrl}/api/agent-server/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2066,6 +2523,11 @@ function buildAgentServerGenerationPrompt(request: {
   strictTaskFilesReason?: string;
 }) {
   return [
+    request.contextEnvelope ? JSON.stringify({
+      version: request.contextEnvelope.version,
+      workspaceFacts: Boolean(request.contextEnvelope.workspaceFacts),
+      longTermRefs: Boolean(request.contextEnvelope.longTermRefs),
+    }, null, 2) : '',
     'Handle this BioAgent request as the agent backend decision-maker.',
     'AgentServer owns orchestration, domain reasoning, tool choice, continuation, and repair strategy. BioAgent only validates protocol, runs returned workspace tasks, persists refs/artifacts, and reports contract failures.',
     'First infer the current-turn intent from prompt, recentConversation, priorAttempts, artifacts, recentExecutionRefs, and workspace refs. BioAgent is only the protocol/execution layer; you decide whether to answer, continue, repair, rerun, retrieve, or generate new workspace task code.',
@@ -2184,13 +2646,14 @@ function buildAgentServerCompactContext(
 
 function contextEnvelopeMode(
   request: GatewayRequest,
-  options: { agentServerCoreAvailable?: boolean } = {},
+  options: { agentServerCoreAvailable?: boolean; forceSlimHandoff?: boolean } = {},
 ): AgentServerContextMode {
   const uiState = isRecord(request.uiState) ? request.uiState : {};
   const hasSession = typeof uiState.sessionId === 'string' && uiState.sessionId.trim().length > 0;
   const hasPriorRefs = request.artifacts.length > 0
     || toRecordList(uiState.recentExecutionRefs).length > 0
     || toStringList(uiState.recentConversation).length > 1;
+  if (options.forceSlimHandoff && hasSession && hasPriorRefs) return 'delta';
   return hasSession && hasPriorRefs && options.agentServerCoreAvailable === true ? 'delta' : 'full';
 }
 
@@ -2676,6 +3139,12 @@ function parseJsonErrorMessage(text: string) {
 
 function sanitizeAgentServerError(text: string) {
   const firstLine = text.split('\n').map((line) => line.trim()).find(Boolean) || text;
+  if (/429|too many requests|responseTooManyFailedAttempts|exceeded retry limit/i.test(firstLine)) {
+    return '上游模型/AgentServer 返回 429 Too Many Requests 或 exceeded retry limit；这更像速率限制/重试预算耗尽，不是典型 context window 超限。请稍后重试，或降低并发与本轮上下文体积。';
+  }
+  if (/context window|maximum context|context length|token limit/i.test(firstLine)) {
+    return '上游模型报告 context window/token limit 超限；需要压缩历史上下文、减少 artifacts/logs，或改用更大上下文模型。';
+  }
   return redactSecretText(firstLine
     .replace(/request id:\s*[^),\s]+/gi, 'request id: redacted')
     .replace(/url:\s*\S+/gi, 'url: redacted')

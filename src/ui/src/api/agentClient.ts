@@ -260,6 +260,8 @@ function normalizeAgentBackend(value: string): AgentBackendId {
 function normalizeStreamEvent(raw: unknown): AgentStreamEvent {
   const record = isRecord(raw) ? raw : {};
   const type = asString(record.type) || asString(record.kind) || 'event';
+  const contextWindowState = normalizeContextWindowState(record.contextWindowState ?? record.contextWindow ?? record.context_window, type, record);
+  const contextCompaction = normalizeContextCompaction(record.contextCompaction ?? record.compaction ?? record.context_compaction, type, record);
   const usage = normalizeTokenUsage(record.usage)
     ?? normalizeTokenUsage(isRecord(record.output) ? record.output.usage : undefined)
     ?? normalizeTokenUsage(isRecord(record.result) ? record.result.usage : undefined)
@@ -277,9 +279,75 @@ function normalizeStreamEvent(raw: unknown): AgentStreamEvent {
     label: streamEventLabel(type),
     detail,
     usage,
+    contextWindowState,
+    contextCompaction,
     createdAt: nowIso(),
     raw,
   };
+}
+
+function normalizeContextWindowState(value: unknown, type: string, fallback: Record<string, unknown>): AgentStreamEvent['contextWindowState'] | undefined {
+  const record = isRecord(value) ? value : type === 'contextWindowState' && isRecord(fallback) ? fallback : undefined;
+  if (!record) return undefined;
+  const usedTokens = asNumber(record.usedTokens) ?? asNumber(record.used) ?? asNumber(record.inputTokens) ?? asNumber(record.total);
+  const windowTokens = asNumber(record.windowTokens) ?? asNumber(record.window) ?? asNumber(record.limit) ?? asNumber(record.contextWindow);
+  const ratio = clampRatio(asNumber(record.ratio) ?? asNumber(record.contextWindowRatio) ?? (
+    usedTokens !== undefined && windowTokens ? usedTokens / windowTokens : undefined
+  ));
+  const source = normalizeContextWindowSource(asString(record.source) ?? asString(record.contextWindowSource));
+  const state = {
+    usedTokens,
+    windowTokens,
+    ratio,
+    source,
+    backend: asString(record.backend),
+    compactCapability: normalizeCompactCapability(asString(record.compactCapability) ?? asString(record.compactionCapability)),
+    autoCompactThreshold: clampRatio(asNumber(record.autoCompactThreshold)),
+    watchThreshold: clampRatio(asNumber(record.watchThreshold)),
+    nearLimitThreshold: clampRatio(asNumber(record.nearLimitThreshold)),
+    lastCompactedAt: asString(record.lastCompactedAt),
+    pendingCompact: typeof record.pendingCompact === 'boolean' ? record.pendingCompact : undefined,
+  };
+  return state.usedTokens !== undefined || state.windowTokens !== undefined || state.ratio !== undefined || state.source !== 'unknown'
+    ? state
+    : undefined;
+}
+
+function normalizeContextCompaction(value: unknown, type: string, fallback: Record<string, unknown>): AgentStreamEvent['contextCompaction'] | undefined {
+  const record = isRecord(value) ? value : type === 'contextCompaction' && isRecord(fallback) ? fallback : undefined;
+  if (!record) return undefined;
+  const status = normalizeCompactionStatus(asString(record.status));
+  return {
+    status,
+    source: normalizeContextWindowSource(asString(record.source)),
+    backend: asString(record.backend),
+    compactCapability: normalizeCompactCapability(asString(record.compactCapability) ?? asString(record.compactionCapability)),
+    startedAt: asString(record.startedAt),
+    completedAt: asString(record.completedAt),
+    lastCompactedAt: asString(record.lastCompactedAt) ?? asString(record.completedAt),
+    reason: asString(record.reason),
+    message: asString(record.message) ?? asString(record.detail),
+  };
+}
+
+function normalizeContextWindowSource(value?: string): NonNullable<AgentStreamEvent['contextWindowState']>['source'] {
+  if (value === 'native' || value === 'agentserver' || value === 'estimate' || value === 'unknown') return value;
+  return 'unknown';
+}
+
+function normalizeCompactCapability(value?: string): NonNullable<AgentStreamEvent['contextWindowState']>['compactCapability'] {
+  if (value === 'native' || value === 'agentserver' || value === 'handoff-slimming' || value === 'session-rotate' || value === 'none' || value === 'unknown') return value;
+  return 'unknown';
+}
+
+function normalizeCompactionStatus(value?: string): NonNullable<AgentStreamEvent['contextCompaction']>['status'] {
+  if (value === 'started' || value === 'completed' || value === 'failed' || value === 'pending' || value === 'skipped') return value;
+  return 'pending';
+}
+
+function clampRatio(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(1.5, value));
 }
 
 function normalizeTokenUsage(value: unknown): AgentStreamEvent['usage'] | undefined {
@@ -321,6 +389,8 @@ function formatTokenUsage(usage: AgentStreamEvent['usage'] | undefined) {
 }
 
 function streamEventLabel(type: string) {
+  if (type === 'contextWindowState') return '上下文窗口';
+  if (type === 'contextCompaction') return '上下文压缩';
   if (type.includes('start')) return '开始';
   if (type.includes('delta') || type.includes('token')) return '生成中';
   if (type.includes('tool')) return '工具事件';
@@ -1096,4 +1166,83 @@ export async function sendAgentMessageStream(
     window.clearTimeout(timeout);
     signal?.removeEventListener('abort', linkedAbort);
   }
+}
+
+export async function compactAgentContext(input: SendAgentMessageInput, reason: string, signal?: AbortSignal): Promise<NonNullable<AgentStreamEvent['contextCompaction']>> {
+  const baseUrl = (input.config.agentServerBaseUrl || DEFAULT_AGENT_SERVER_URL).replace(/\/+$/, '');
+  const builtInScenarioId = builtInScenarioIdForInput(input);
+  const scenario = SCENARIO_SPECS[builtInScenarioId];
+  const payload = {
+    reason,
+    project: 'BioAgent',
+    source: 'bioagent-web-ui',
+    agent: {
+      id: scenario.runtimeId,
+      backend: normalizeAgentBackend(input.config.agentBackend),
+      workspace: input.config.workspacePath,
+    },
+    contextPolicy: {
+      includeCurrentWork: Boolean(input.sessionId),
+      includeRecentTurns: Boolean(input.sessionId),
+      persistRunSummary: true,
+    },
+    metadata: {
+      sessionId: input.sessionId,
+      scenarioId: input.scenarioId,
+      scenarioPackageRef: input.scenarioPackageRef,
+      skillPlanRef: input.skillPlanRef,
+      uiPlanRef: input.uiPlanRef,
+      modelProvider: input.config.modelProvider,
+      modelName: input.config.modelName,
+    },
+  };
+  const endpoints = [
+    `${baseUrl}/api/agent-server/compact`,
+    `${baseUrl}/api/agent-server/context/compact`,
+    `${baseUrl}/api/agent-server/agents/${encodeURIComponent(scenario.runtimeId)}/compact`,
+  ];
+  const errors: string[] = [];
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        errors.push(`${response.status} ${endpoint}`);
+        continue;
+      }
+      let json: unknown = {};
+      try {
+        json = text ? JSON.parse(text) as unknown : {};
+      } catch {
+        json = { message: text };
+      }
+      const data = isRecord(json) && isRecord(json.data) ? json.data : json;
+      const event = normalizeContextCompaction(isRecord(data) ? data.contextCompaction ?? data.compaction ?? data : data, 'contextCompaction', isRecord(data) ? data : {});
+      return event ?? {
+        status: 'completed',
+        source: 'agentserver',
+        backend: input.config.agentBackend,
+        compactCapability: 'agentserver',
+        completedAt: nowIso(),
+        lastCompactedAt: nowIso(),
+        reason,
+      };
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return {
+    status: 'skipped',
+    source: 'unknown',
+    backend: input.config.agentBackend,
+    compactCapability: 'unknown',
+    reason,
+    message: `AgentServer compact API unavailable: ${errors.slice(0, 2).join('; ') || 'no endpoint responded'}`,
+  };
 }

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "T060",
+  "scenarioId": "longform-knowledge-graph-conflict",
+  "title": "Cross Tool Knowledge Graph And Conflict Resolution",
+  "goal": "Build a gene-drug-disease evidence graph, use contradiction and edge references, export normalized TSV, and deliver a decision memo.",
+  "scenarioPackageId": "biomedical-knowledge-graph",
+  "minRounds": 6,
+  "backendRequirement": "real-backend-preferred",
+  "rounds": [
+    {
+      "round": 1,
+      "prompt": "围绕 EGFR、osimertinib、non-small cell lung cancer 构建 gene-drug-disease 证据图，列出工具来源和冲突处理计划。",
+      "referenceOps": [],
+      "expectedArtifacts": ["graph-plan", "source-plan"],
+      "acceptanceChecks": ["plan lists PubMed/UniProt/ChEMBL-like sources or fallback refs", "does not present unsupported clinical advice"]
+    },
+    {
+      "round": 2,
+      "prompt": "输出关系图、证据列表和置信度；保存 graph JSON 和 evidence table。",
+      "referenceOps": [],
+      "expectedArtifacts": ["knowledge-graph", "evidence-list", "confidence-table"],
+      "acceptanceChecks": ["graph or table UI is visible", "raw JSON is available only through inspector/ref"]
+    },
+    {
+      "round": 3,
+      "prompt": "※1 基于这条反对证据重算结论，并说明置信度变化。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※1",
+          "source": "one contradictory evidence row/sentence",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["reweighted-confidence-table"],
+      "acceptanceChecks": ["contradiction can reduce or qualify confidence", "answer mentions the selected opposing evidence"]
+    },
+    {
+      "round": 4,
+      "prompt": "※2 解释被点选图谱边的证据来源、方向和限制。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※2",
+          "source": "graph edge or edge detail UI",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["edge-evidence-explanation"],
+      "acceptanceChecks": ["edge source refs are traced", "answer distinguishes association from causality"]
+    },
+    {
+      "round": 5,
+      "prompt": "※3 从右侧 artifact inspector 的 raw JSON/table 导出规范化 TSV。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※3",
+          "source": "artifact inspector raw JSON or table",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["normalized-evidence.tsv"],
+      "acceptanceChecks": ["TSV path is clickable", "TSV columns are documented"]
+    },
+    {
+      "round": 6,
+      "prompt": "给出最终 decision memo：哪些关系可信、哪些需要实验验证；包含 graph、TSV 和报告 object references。",
+      "referenceOps": [
+        {
+          "kind": "click-object-chip",
+          "source": "normalized TSV object reference",
+          "expectedHighlight": "right pane previews TSV"
+        }
+      ],
+      "expectedArtifacts": ["decision-memo.md", "normalized-evidence.tsv", "knowledge-graph.json"],
+      "acceptanceChecks": ["memo cites contradiction and edge refs", "TSV is previewable"]
+    }
+  ],
+  "evidencePlan": {
+    "browser": ["screenshot of graph/edge UI", "screenshot of TSV preview"],
+    "computerUse": ["right-click contradiction text", "click graph edge/object chip"],
+    "workspace": ["graph JSON ref", "TSV ref", "decision memo ref"]
+  },
+  "blockerTemplate": "Record missing connector/tool/backend and preserve graph UI smoke evidence if available.",
+  "scoringDimensions": ["goal-retention", "reference-use", "reasoning-continuity", "execution-capability", "failure-recovery", "artifact-quality", "reproducibility", "ui-usability"]
+}

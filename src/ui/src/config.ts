@@ -13,6 +13,7 @@ export const defaultBioAgentConfig: BioAgentConfig = {
   modelName: '',
   apiKey: '',
   requestTimeoutMs: 900_000,
+  maxContextWindowTokens: 200_000,
   updatedAt: new Date().toISOString(),
 };
 
@@ -48,6 +49,9 @@ export function normalizeConfig(value: unknown): BioAgentConfig {
     requestTimeoutMs: typeof raw.requestTimeoutMs === 'number' && Number.isFinite(raw.requestTimeoutMs)
       ? Math.max(30_000, Math.trunc(raw.requestTimeoutMs))
       : defaultBioAgentConfig.requestTimeoutMs,
+    maxContextWindowTokens: typeof raw.maxContextWindowTokens === 'number' && Number.isFinite(raw.maxContextWindowTokens)
+      ? Math.max(1_000, Math.trunc(raw.maxContextWindowTokens))
+      : defaultBioAgentConfig.maxContextWindowTokens,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
   };
 }

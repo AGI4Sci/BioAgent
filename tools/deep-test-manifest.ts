@@ -1,4 +1,4 @@
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
 export const deepCoverageStages = [
@@ -236,6 +236,7 @@ export async function generateDeepTestReport(options: { rootDir?: string; scenar
   const markdownPath = join(outDir, `deep-test-report${suffix}.md`);
   const htmlPath = join(outDir, `index${suffix}.html`);
 
+  await mkdir(outDir, { recursive: true });
   await writeFile(markdownPath, renderMarkdownReport(manifests, missingManifestDirectories, generatedAt, rootDir, options.scenario));
   await writeFile(htmlPath, renderHtmlIndex(manifests, missingManifestDirectories, generatedAt, rootDir, options.scenario));
 

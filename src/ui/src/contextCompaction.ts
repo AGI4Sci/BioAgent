@@ -42,7 +42,7 @@ export function buildContextCompactionOutcome({
     lastCompactedAt,
     reason: result.reason ?? reason,
   };
-  const detail = normalizedResult.message || (succeeded ? '上下文压缩完成' : `上下文压缩未完成：${normalizedResult.status}`);
+  const detail = normalizedResult.message || contextCompactionStatusDetail(normalizedResult.status);
   const reference = contextCompactionReference(normalizedResult, messageId, detail);
   return {
     event: {
@@ -60,7 +60,9 @@ export function buildContextCompactionOutcome({
       role: 'system',
       content: succeeded
         ? `上下文压缩完成：${compactReasonLabel(reason)}。`
-        : `上下文压缩未完成：${detail}`,
+        : detail.startsWith('上下文压缩')
+          ? detail
+          : `上下文压缩未完成：${detail}`,
       expandable: JSON.stringify({
         reason,
         status: normalizedResult.status,
@@ -131,4 +133,11 @@ function compactReasonLabel(reason: string) {
   if (reason === 'manual-meter-click') return '手动触发';
   if (reason === 'auto-threshold-before-send') return '发送前自动触发';
   return reason;
+}
+
+function contextCompactionStatusDetail(status: AgentContextCompaction['status']) {
+  if (status === 'pending' || status === 'started') return '上下文压缩已提交，等待后台返回完成状态。';
+  if (status === 'skipped') return '上下文压缩已跳过：当前 backend 不支持原生压缩或将使用轻量 handoff。';
+  if (status === 'failed') return '上下文压缩未完成：后台 compact API 返回失败。';
+  return '上下文压缩完成';
 }

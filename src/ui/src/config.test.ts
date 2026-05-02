@@ -39,6 +39,7 @@ describe('BioAgent config persistence', () => {
       modelBaseUrl: 'https://openrouter.ai/api/v1/',
       modelName: 'qwen/qwen3.6-plus:free',
       apiKey: 'test-key',
+      maxContextWindowTokens: 128000,
     });
 
     saveBioAgentConfig(saved);
@@ -48,6 +49,7 @@ describe('BioAgent config persistence', () => {
     assert.equal(loaded.modelBaseUrl, 'https://openrouter.ai/api/v1');
     assert.equal(loaded.modelName, 'qwen/qwen3.6-plus:free');
     assert.equal(loaded.apiKey, 'test-key');
+    assert.equal(loaded.maxContextWindowTokens, 128000);
   });
 
   it('normalizes accidental .bioagent internal paths back to the workspace root', () => {
@@ -62,5 +64,10 @@ describe('BioAgent config persistence', () => {
     const config = updateConfig(defaultBioAgentConfig, { agentBackend: 'gemini' });
 
     assert.equal(config.agentBackend, 'gemini');
+  });
+
+  it('normalizes user context window limits', () => {
+    assert.equal(updateConfig(defaultBioAgentConfig, { maxContextWindowTokens: 64000 }).maxContextWindowTokens, 64000);
+    assert.equal(updateConfig(defaultBioAgentConfig, { maxContextWindowTokens: 12 }).maxContextWindowTokens, 1000);
   });
 });

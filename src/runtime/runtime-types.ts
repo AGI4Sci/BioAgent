@@ -18,6 +18,7 @@ export interface GatewayRequest {
   agentBackend?: string;
   modelProvider?: string;
   modelName?: string;
+  maxContextWindowTokens?: number;
   llmEndpoint?: LlmEndpointConfig;
   scenarioPackageRef?: ScenarioPackageRef;
   skillPlanRef?: string;

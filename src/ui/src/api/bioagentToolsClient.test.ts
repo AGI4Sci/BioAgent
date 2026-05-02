@@ -577,6 +577,60 @@ describe('sendBioAgentToolMessage routing', () => {
     const agentContext = uiState.agentContext as Record<string, unknown>;
     assert.deepEqual(agentContext.currentReferences, references);
   });
+
+  it('keeps composer markers concise while preserving selected reference payload', async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          message: 'selected text reference used',
+          confidence: 0.8,
+          claimType: 'fact',
+          evidenceLevel: 'runtime',
+          uiManifest: [],
+          executionUnits: [{ id: 'EU-selected-reference', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          artifacts: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const selectedText = 'low sample size weakens the conclusion and must be treated as a limitation';
+    await sendBioAgentToolMessage({
+      ...baseInput(),
+      prompt: '※1 这个限制会不会推翻结论？',
+      references: [{
+        id: 'ref-text-limitation',
+        kind: 'ui',
+        title: '选中文本 · low sample size',
+        ref: 'ui-text:message:msg-limitation#abc',
+        sourceId: 'msg-limitation',
+        summary: selectedText,
+        locator: { textRange: selectedText.slice(0, 32), region: 'message:msg-limitation' },
+        payload: {
+          composerMarker: '※1',
+          selectedText,
+          sourceRef: 'message:msg-limitation',
+          sourceKind: 'message',
+        },
+      }],
+    });
+
+    assert.equal(requestBody?.prompt, '※1 这个限制会不会推翻结论？');
+    assert.doesNotMatch(String(requestBody?.prompt), /low sample size weakens/);
+    const references = requestBody?.references as Array<Record<string, unknown>>;
+    assert.equal(references[0].ref, 'ui-text:message:msg-limitation#abc');
+    assert.equal((references[0].payload as Record<string, unknown>).composerMarker, '※1');
+    assert.equal((references[0].payload as Record<string, unknown>).sourceRef, 'message:msg-limitation');
+    assert.equal((references[0].payload as Record<string, unknown>).selectedText, selectedText);
+    const uiState = requestBody?.uiState as Record<string, unknown>;
+    const agentContext = uiState.agentContext as Record<string, unknown>;
+    assert.deepEqual(agentContext.currentReferences, references);
+  });
 });
 
 function baseInput(): SendAgentMessageInput {
@@ -601,6 +655,7 @@ function baseInput(): SendAgentMessageInput {
       modelName: '',
       apiKey: '',
       requestTimeoutMs: 300000,
+      maxContextWindowTokens: 200000,
       updatedAt: '2026-04-26T00:00:00.000Z',
     },
     scenarioOverride: {

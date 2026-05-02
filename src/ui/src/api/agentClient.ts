@@ -159,6 +159,7 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         modelProvider: input.config.modelProvider,
         modelBaseUrl: input.config.modelBaseUrl,
         modelName: input.config.modelName,
+        maxContextWindowTokens: input.config.maxContextWindowTokens,
         agentServerBaseUrl: input.config.agentServerBaseUrl,
         workspacePath: input.config.workspacePath,
       },
@@ -241,6 +242,7 @@ function buildRuntimeConfig(input: SendAgentMessageInput): NonNullable<AgentServ
       uiPlanRef: input.uiPlanRef,
       skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain,
       nativeToolFirst: true,
+      maxContextWindowTokens: input.config.maxContextWindowTokens,
       autoApprove: true,
       sandbox: 'danger-full-access',
     },
@@ -349,7 +351,15 @@ function normalizeContextWindowState(value: unknown, type: string, fallback: Rec
 function normalizeContextCompaction(value: unknown, type: string, fallback: Record<string, unknown>): AgentStreamEvent['contextCompaction'] | undefined {
   const record = isRecord(value) ? value : type === 'contextCompaction' && isRecord(fallback) ? fallback : undefined;
   if (!record) return undefined;
-  const status = normalizeCompactionStatus(asString(record.status));
+  const completedAt = asString(record.completedAt);
+  const lastCompactedAt = asString(record.lastCompactedAt) ?? completedAt;
+  const message = asString(record.message) ?? asString(record.userVisibleSummary) ?? asString(record.detail);
+  const status = normalizeCompactionStatus(asString(record.status), {
+    ok: asBoolean(record.ok),
+    completedAt,
+    lastCompactedAt,
+    message,
+  });
   return {
     status,
     source: normalizeContextWindowSource(asString(record.source)),
@@ -359,10 +369,10 @@ function normalizeContextCompaction(value: unknown, type: string, fallback: Reco
     after: normalizeContextWindowState(record.after, 'contextWindowState', {}),
     auditRefs: asStringArray(record.auditRefs),
     startedAt: asString(record.startedAt),
-    completedAt: asString(record.completedAt),
-    lastCompactedAt: asString(record.lastCompactedAt) ?? asString(record.completedAt),
+    completedAt,
+    lastCompactedAt,
     reason: asString(record.reason),
-    message: asString(record.message) ?? asString(record.userVisibleSummary) ?? asString(record.detail),
+    message,
   };
 }
 
@@ -421,10 +431,18 @@ function normalizeContextBudget(value: unknown): NonNullable<AgentStreamEvent['c
   };
 }
 
-function normalizeCompactionStatus(value?: string): NonNullable<AgentStreamEvent['contextCompaction']>['status'] {
+function normalizeCompactionStatus(
+  value?: string,
+  inferred: { ok?: boolean; completedAt?: string; lastCompactedAt?: string; message?: string } = {},
+): NonNullable<AgentStreamEvent['contextCompaction']>['status'] {
   if (value === 'started' || value === 'completed' || value === 'failed' || value === 'pending' || value === 'skipped') return value;
   if (value === 'compacted') return 'completed';
   if (value === 'unsupported') return 'skipped';
+  if (value && /fail|error/i.test(value)) return 'failed';
+  if (value && /skip|unsupported|handoff/i.test(value)) return 'skipped';
+  if (value && /complete|done|success|compact(ed)?|compressed/i.test(value)) return 'completed';
+  if (inferred.ok === true || inferred.completedAt || inferred.lastCompactedAt || (inferred.message && /complete|done|success|compact(ed)?|compressed|完成/i.test(inferred.message))) return 'completed';
+  if (inferred.ok === false || (inferred.message && /fail|error|失败|未完成/i.test(inferred.message))) return 'failed';
   return 'pending';
 }
 

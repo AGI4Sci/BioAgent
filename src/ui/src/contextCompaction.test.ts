@@ -75,6 +75,28 @@ test('buildContextCompactionFailureResult keeps failure recoverable for the next
   assert.match(JSON.stringify(outcome.message.references?.[0]?.payload), /compact API unavailable/);
 });
 
+test('buildContextCompactionOutcome avoids duplicate pending failure wording', () => {
+  const outcome = buildContextCompactionOutcome({
+    eventId: 'evt-pending',
+    messageId: 'msg-pending',
+    result: {
+      status: 'pending',
+      source: 'agentserver',
+      backend: 'codex',
+      compactCapability: 'agentserver',
+      reason: 'manual-meter-click',
+    },
+    beforeState,
+    reason: 'manual-meter-click',
+    startedAt: '2026-05-02T00:00:00.000Z',
+    completedAt: '2026-05-02T00:00:02.000Z',
+    fallbackBackend: 'codex',
+  });
+
+  assert.equal(outcome.message.content, '上下文压缩已提交，等待后台返回完成状态。');
+  assert.doesNotMatch(outcome.message.content, /上下文压缩未完成：上下文压缩未完成/);
+});
+
 test('context meter display reflects ratio, status, and source trust level', () => {
   const nativeHealthy = buildContextWindowMeterModel({
     ...beforeState,
@@ -99,7 +121,7 @@ test('context meter display reflects ratio, status, and source trust level', () 
   }, true);
   assert.equal(providerWatch.level, 'watch');
   assert.equal(providerWatch.sourceLabel, 'provider');
-  assert.match(providerWatch.title, /运行中达到阈值/);
+  assert.match(providerWatch.title, /压缩时机由 AgentServer 自动判断/);
 
   const estimatedNearLimit = buildContextWindowMeterModel({
     ...beforeState,

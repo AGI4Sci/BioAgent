@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0",
+  "scenarioId": "<longform-scenario-id>",
+  "title": "<run title>",
+  "taskId": "T060",
+  "status": "not-run",
+  "coverageStage": "protocol-pass",
+  "run": {
+    "id": "<stable-run-id>",
+    "startedAt": "<iso>",
+    "completedAt": "<iso>",
+    "operator": "Codex",
+    "entrypoint": "manual-browser"
+  },
+  "prompt": {
+    "initial": "<round 1 prompt>",
+    "expectedOutcome": "Complete 6+ real BioAgent turns with at least two reference operation types and reproducible artifacts."
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "userPrompt": "<prompt>",
+      "expectedBehavior": "<from script acceptanceChecks>",
+      "observedBehavior": "<what happened>",
+      "status": "not-run",
+      "artifactRefs": [],
+      "executionUnitRefs": [],
+      "screenshotRefs": []
+    }
+  ],
+  "runtimeProfile": {
+    "appUrl": "http://localhost:5173/",
+    "workspacePath": "<workspace>",
+    "agentBackend": "<backend>",
+    "modelProvider": "<provider>",
+    "modelName": "<model>",
+    "runtimeProfileId": "t060-longform",
+    "mockModel": false,
+    "dataMode": "real"
+  },
+  "artifacts": [],
+  "executionUnits": [],
+  "failurePoints": [],
+  "screenshots": [],
+  "qualityScores": {
+    "taskCompletion": 1,
+    "reproducibility": 1,
+    "dataAuthenticity": 1,
+    "artifactSchema": 1,
+    "selfHealing": 1,
+    "reportQuality": 1,
+    "rationale": "Replace with 1-5 scoring across goal-retention, reference-use, reasoning-continuity, execution-capability, failure-recovery, artifact-quality, reproducibility, and ui-usability."
+  },
+  "notes": "Record context ratio, compaction events, failure repair count, final artifact refs, and manual scoring details."
+}

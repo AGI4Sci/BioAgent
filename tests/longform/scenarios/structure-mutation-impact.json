@@ -1,0 +1,82 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "T060",
+  "scenarioId": "longform-structure-mutation-impact",
+  "title": "Structure Biology Mutation Impact Analysis",
+  "goal": "Analyze a protein mutation using structure, sequence mapping, uncertainty references, and reproducible visualization scripts.",
+  "scenarioPackageId": "structure-exploration",
+  "minRounds": 6,
+  "backendRequirement": "real-backend-preferred",
+  "rounds": [
+    {
+      "round": 1,
+      "prompt": "分析 UniProt EGFR 的 L858R 或 PDB 2ITV/5UG9 中相关突变，对结构定位、功能区域和证据来源做计划。",
+      "referenceOps": [],
+      "expectedArtifacts": ["structure-plan", "source-list"],
+      "acceptanceChecks": ["plan includes mapping uncertainty", "structure refs are requested or produced"]
+    },
+    {
+      "round": 2,
+      "prompt": "检索结构、序列映射、功能区域和已知文献；生成初版结构摘要和 viewer。",
+      "referenceOps": [],
+      "expectedArtifacts": ["structure-summary", "molecule-viewer", "literature-summary"],
+      "acceptanceChecks": ["viewer renders", "structure/object refs are present"]
+    },
+    {
+      "round": 3,
+      "prompt": "※1 说明被点选区域附近的相互作用，以及这些相互作用是否可能受突变影响。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※1",
+          "source": "structure viewer or structure summary UI",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["local-interaction-note"],
+      "acceptanceChecks": ["answer uses selected viewer/summary", "nearby residues or pocket features are named"]
+    },
+    {
+      "round": 4,
+      "prompt": "※2 这段不确定映射/低分辨率/缺失 loop 提示会如何影响可信度？",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※2",
+          "source": "uncertainty or low-resolution note",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["confidence-limitation-note"],
+      "acceptanceChecks": ["final limitations include selected uncertainty", "confidence is adjusted or qualified"]
+    },
+    {
+      "round": 5,
+      "prompt": "※3 基于这个 artifact/file ref 生成 PyMOL 或 3Dmol 可复现脚本。",
+      "referenceOps": [
+        {
+          "kind": "click-object-chip",
+          "marker": "※3",
+          "source": "structure artifact or coordinate file object reference",
+          "expectedHighlight": "right pane focuses artifact/file preview"
+        }
+      ],
+      "expectedArtifacts": ["pymol-script", "3dmol-script"],
+      "acceptanceChecks": ["script path is returned as object reference", "script uses selected file/ref"]
+    },
+    {
+      "round": 6,
+      "prompt": "输出最终结构图、方法说明、限制和可复现文件路径；明确引用 ※1/※2/※3 怎样影响结论。",
+      "referenceOps": [],
+      "expectedArtifacts": ["structure-figure", "methods-report", "reproducible-script"],
+      "acceptanceChecks": ["objectReferences include image/script/report", "limitations include uncertainty reference"]
+    }
+  ],
+  "evidencePlan": {
+    "browser": ["screenshot of structure viewer", "screenshot of focused script/report object reference"],
+    "computerUse": ["click structure UI target", "right-click selected uncertainty text"],
+    "workspace": ["coordinate ref", "script ref", "figure ref", "report ref"]
+  },
+  "blockerTemplate": "Record unavailable structure service/viewer/backend and preserve UI smoke screenshots.",
+  "scoringDimensions": ["goal-retention", "reference-use", "reasoning-continuity", "execution-capability", "failure-recovery", "artifact-quality", "reproducibility", "ui-usability"]
+}

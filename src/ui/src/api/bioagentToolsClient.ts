@@ -17,6 +17,10 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const entries = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
@@ -81,6 +85,7 @@ export async function sendBioAgentToolMessage(
         agentServerBaseUrl: input.config.agentServerBaseUrl,
         modelProvider: input.config.modelProvider,
         modelName: input.config.modelName,
+        maxContextWindowTokens: input.config.maxContextWindowTokens,
         llmEndpoint: buildToolLlmEndpoint(input),
         roleView: input.roleView,
         artifacts: artifactSummary,
@@ -100,6 +105,7 @@ export async function sendBioAgentToolMessage(
           skillPlanRef: input.skillPlanRef,
           uiPlanRef: input.uiPlanRef,
           currentPrompt: input.prompt,
+          maxContextWindowTokens: input.config.maxContextWindowTokens,
           recentConversation,
           currentReferences: referenceSummary,
           recentExecutionRefs,
@@ -364,8 +370,16 @@ function normalizeContextWindowState(value: unknown, type: string, fallback: Rec
 function normalizeContextCompaction(value: unknown, type: string, fallback: Record<string, unknown>): AgentStreamEvent['contextCompaction'] | undefined {
   const record = isRecord(value) ? value : type === 'contextCompaction' && isRecord(fallback) ? fallback : undefined;
   if (!record) return undefined;
+  const completedAt = asString(record.completedAt);
+  const lastCompactedAt = asString(record.lastCompactedAt) ?? completedAt;
+  const message = asString(record.message) ?? asString(record.userVisibleSummary) ?? asString(record.detail);
   return {
-    status: normalizeCompactionStatus(asString(record.status)),
+    status: normalizeCompactionStatus(asString(record.status), {
+      ok: asBoolean(record.ok),
+      completedAt,
+      lastCompactedAt,
+      message,
+    }),
     source: normalizeContextWindowSource(asString(record.source)),
     backend: asString(record.backend),
     compactCapability: normalizeCompactCapability(asString(record.compactCapability) ?? asString(record.compactionCapability)),
@@ -373,10 +387,10 @@ function normalizeContextCompaction(value: unknown, type: string, fallback: Reco
     after: normalizeContextWindowState(record.after, 'contextWindowState', {}),
     auditRefs: asStringArray(record.auditRefs),
     startedAt: asString(record.startedAt),
-    completedAt: asString(record.completedAt),
-    lastCompactedAt: asString(record.lastCompactedAt) ?? asString(record.completedAt),
+    completedAt,
+    lastCompactedAt,
     reason: asString(record.reason),
-    message: asString(record.message) ?? asString(record.userVisibleSummary) ?? asString(record.detail),
+    message,
   };
 }
 
@@ -435,10 +449,18 @@ function normalizeContextBudget(value: unknown): NonNullable<AgentStreamEvent['c
   };
 }
 
-function normalizeCompactionStatus(value?: string): NonNullable<AgentStreamEvent['contextCompaction']>['status'] {
+function normalizeCompactionStatus(
+  value?: string,
+  inferred: { ok?: boolean; completedAt?: string; lastCompactedAt?: string; message?: string } = {},
+): NonNullable<AgentStreamEvent['contextCompaction']>['status'] {
   if (value === 'started' || value === 'completed' || value === 'failed' || value === 'pending' || value === 'skipped') return value;
   if (value === 'compacted') return 'completed';
   if (value === 'unsupported') return 'skipped';
+  if (value && /fail|error/i.test(value)) return 'failed';
+  if (value && /skip|unsupported|handoff/i.test(value)) return 'skipped';
+  if (value && /complete|done|success|compact(ed)?|compressed/i.test(value)) return 'completed';
+  if (inferred.ok === true || inferred.completedAt || inferred.lastCompactedAt || (inferred.message && /complete|done|success|compact(ed)?|compressed|完成/i.test(inferred.message))) return 'completed';
+  if (inferred.ok === false || (inferred.message && /fail|error|失败|未完成/i.test(inferred.message))) return 'failed';
   return 'pending';
 }
 

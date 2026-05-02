@@ -548,6 +548,7 @@ export interface BioAgentConfig {
   modelName: string;
   apiKey: string;
   requestTimeoutMs: number;
+  maxContextWindowTokens: number;
   updatedAt: string;
 }
 

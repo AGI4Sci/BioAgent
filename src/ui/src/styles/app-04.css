@@ -416,14 +416,20 @@
   background: rgba(123, 147, 176, 0.09);
   border: 1px solid rgba(123, 147, 176, 0.26);
   border-radius: 6px;
+  cursor: pointer;
   font-size: 11px;
   font-weight: 800;
+}
+
+.bioagent-reference-chip:hover {
+  border-color: rgba(0, 229, 160, 0.34);
+  background: rgba(0, 229, 160, 0.08);
 }
 
 .bioagent-reference-chip > span {
   color: var(--gold);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
 }
 
@@ -433,7 +439,7 @@
   white-space: nowrap;
 }
 
-.bioagent-reference-chip button {
+.bioagent-reference-chip i {
   display: inline-grid;
   place-items: center;
   width: 18px;
@@ -442,6 +448,15 @@
   color: var(--bio-300);
   border: 0;
   background: transparent;
+  cursor: pointer;
+  font-style: normal;
+}
+
+.bioagent-reference-focus {
+  outline: 2px solid rgba(0, 229, 160, 0.96);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgba(0, 229, 160, 0.16), 0 18px 50px rgba(0, 0, 0, 0.28);
+  transition: outline-color 180ms ease, box-shadow 180ms ease;
 }
 
 .message-actions button,
@@ -609,10 +624,12 @@
 
 .bioagent-reference-picking {
   cursor: crosshair;
+  user-select: text;
 }
 
 .bioagent-reference-picking * {
   cursor: crosshair;
+  user-select: text;
 }
 
 .bioagent-reference-pick-hover {
@@ -634,6 +651,39 @@
   border-radius: 6px;
   font-size: 11px;
   font-weight: 900;
+}
+
+.reference-context-menu {
+  display: grid;
+  position: fixed;
+  z-index: 80;
+  min-width: 168px;
+  padding: 6px;
+  background: rgba(15, 22, 35, 0.98);
+  border: 1px solid rgba(46, 61, 85, 0.82);
+  border-radius: 7px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+}
+
+.reference-context-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 9px;
+  color: var(--bio-100);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+}
+
+.reference-context-menu button:hover {
+  color: var(--accent);
+  background: rgba(0, 229, 160, 0.08);
 }
 
 .reference-hint {
@@ -913,19 +963,16 @@
 .context-window-meter {
   --context-window-color: var(--teal);
   display: inline-grid;
-  grid-template-columns: 38px minmax(0, 1fr) 14px;
-  align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  width: 272px;
-  max-width: 272px;
-  flex: 0 0 272px;
-  padding: 4px 7px 4px 4px;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  flex: 0 0 34px;
+  padding: 0;
   color: var(--bio-100);
   background: rgba(5, 8, 16, 0.34);
   border: 1px solid rgba(46, 61, 85, 0.62);
-  border-radius: 8px;
-  cursor: pointer;
+  border-radius: 999px;
   overflow: hidden;
 }
 
@@ -949,13 +996,13 @@
 }
 
 .context-window-ring {
-  width: 38px;
-  height: 38px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border-radius: 50%;
   background:
-    radial-gradient(circle at center, rgba(5, 8, 16, 0.94) 56%, transparent 57%),
+    radial-gradient(circle at center, rgba(5, 8, 16, 0.94) 52%, transparent 53%),
     conic-gradient(var(--context-window-color) var(--context-window-ratio), rgba(46, 61, 85, 0.82) 0);
 }
 
@@ -1001,6 +1048,21 @@
 
 .context-window-meter > svg {
   color: var(--context-window-color);
+}
+
+.composer .context-window-meter {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+
+.composer .context-window-ring {
+  width: 24px;
+  height: 24px;
+}
+
+.composer .context-window-copy em:nth-of-type(n+2) {
+  display: none;
 }
 
 .composer textarea {

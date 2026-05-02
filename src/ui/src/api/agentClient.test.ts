@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
 import { SCENARIO_SPECS } from '../scenarioSpecs';
 import type { ScenarioId } from '../data';
-import { normalizeAgentResponse } from './agentClient';
+import type { SendAgentMessageInput } from '../domain';
+import { compactAgentContext, normalizeAgentResponse } from './agentClient';
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 describe('normalizeAgentResponse', () => {
   it('normalizes structured AgentServer JSON embedded in text', () => {
@@ -424,7 +431,63 @@ describe('normalizeAgentResponse', () => {
     assert.deepEqual(response.notebook[0].executionUnitRefs, ['EU-literature']);
     assert.equal(response.notebook[0].updateReason, 'manual review');
   });
+
+  it('infers completed context compaction from ok/timestamps when status is omitted', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      contextCompaction: {
+        ok: true,
+        source: 'agentserver',
+        backend: 'codex',
+        compactCapability: 'agentserver',
+        completedAt: '2026-05-02T00:00:01.000Z',
+        lastCompactedAt: '2026-05-02T00:00:01.000Z',
+        message: 'compact preflight completed',
+        auditRefs: ['agentserver://compact/1'],
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    const result = await compactAgentContext(compactInput(), 'manual-meter-click');
+
+    assert.equal(result.status, 'completed');
+    assert.equal(result.lastCompactedAt, '2026-05-02T00:00:01.000Z');
+    assert.equal(result.message, 'compact preflight completed');
+  });
 });
+
+function compactInput(): SendAgentMessageInput {
+  return {
+    sessionId: 'session-context-test',
+    scenarioId: 'literature-evidence-review',
+    agentName: 'Literature',
+    agentDomain: 'literature',
+    prompt: 'compact context',
+    roleView: 'PI',
+    messages: [],
+    artifacts: [],
+    executionUnits: [],
+    runs: [],
+    config: {
+      schemaVersion: 1,
+      agentServerBaseUrl: 'http://127.0.0.1:18080',
+      workspaceWriterBaseUrl: 'http://127.0.0.1:5174',
+      workspacePath: '/tmp/bioagent-test-workspace',
+      agentBackend: 'codex',
+      modelProvider: 'native',
+      modelBaseUrl: '',
+      modelName: '',
+      apiKey: '',
+      requestTimeoutMs: 300000,
+      maxContextWindowTokens: 200000,
+      updatedAt: '2026-05-02T00:00:00.000Z',
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+    skillPlanRef: 'skill-plan.literature',
+    uiPlanRef: 'ui-plan.literature',
+  };
+}
 
 function fixtureDataForArtifact(type: string) {
   if (type === 'paper-list') {

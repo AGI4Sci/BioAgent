@@ -93,36 +93,32 @@ try {
     await page.locator('.chat-panel .composer textarea').waitFor({ timeout: 15_000 });
 
     await sendPrompt(page, 'context-window round one usage reaches watch threshold', 1);
-    await page.waitForFunction(() => document.querySelector('.context-window-meter.watch')?.textContent?.includes('72%'), null, { timeout: 15_000 });
+    await page.waitForFunction(() => document.querySelector('.context-window-meter.watch')?.getAttribute('aria-label')?.includes('72%'), null, { timeout: 15_000 });
     assert.equal(compactRequests.length, 0, 'watch-level usage should not compact immediately');
 
     await sendPrompt(page, 'context-window round two usage reaches auto compact threshold', 2);
-    await page.waitForFunction(() => document.querySelector('.context-window-meter.near-limit')?.textContent?.includes('86%'), null, { timeout: 15_000 });
+    await page.waitForFunction(() => document.querySelector('.context-window-meter.near-limit')?.getAttribute('aria-label')?.includes('86%'), null, { timeout: 15_000 });
     assert.equal(compactRequests.length, 0, 'near-limit usage should wait for the next send');
 
     await page.locator('.chat-panel .composer textarea').fill('context-window round three should compact before sending');
     await page.locator('.chat-panel .composer').getByRole('button', { name: '发送' }).click();
-    await waitForCondition(() => compactRequests.length === 1, 'compact preflight request');
     await thirdRunStarted;
-    assert.equal(runRequests.length, 3, 'third turn should start after compact preflight');
-    assert.equal(compactRequests[0]?.reason, 'auto-threshold-before-send');
-    await page.getByText(/上下文压缩完成|browser smoke compact preflight completed/).waitFor({ timeout: 15_000 });
+    assert.equal(runRequests.length, 3, 'third turn should start without a frontend compact preflight');
+    assert.equal(compactRequests.length, 0, 'frontend should not call compact API; AgentServer owns compact timing');
 
-    await page.locator('.context-window-meter').click();
-    await page.waitForFunction(() => document.querySelector('.context-window-meter')?.textContent?.includes('pending'), null, { timeout: 15_000 });
     await page.waitForTimeout(500);
-    assert.equal(compactRequests.length, 1, 'running meter click should only mark pending compact');
+    assert.equal(compactRequests.length, 0, 'meter is read-only and should not mark pending compact');
 
     releaseThirdRun?.();
     await page.getByText('Context smoke response 3').first().waitFor({ timeout: 15_000 });
     assert.equal(runRequests.length, 3, 'running pending marker should not enqueue an extra turn');
-    assert.equal(compactRequests.length, 1, 'compact preflight should be single-shot across active turn');
+    assert.equal(compactRequests.length, 0, 'compact preflight should stay in AgentServer across active turn');
     assert.deepEqual((page as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], 'context meter workflow should not emit page errors');
     await page.close();
   } finally {
     await browser.close();
   }
-  console.log('[ok] browser context meter smoke covered watch/near-limit colors, preflight compact, running pending-only meter click, and user-visible compact observation');
+  console.log('[ok] browser context meter smoke covered compact watch/near-limit colors and read-only AgentServer-owned compact timing');
 } finally {
   for (const child of children.reverse()) child.kill('SIGTERM');
   await rm(workspace, { recursive: true, force: true });

@@ -232,3 +232,130 @@ type BackendContextCompactionResult = {
 - [x] 将 budget decisions 写入 run audit，便于解释“为什么 backend 没看到完整 raw 数据，但可通过 ref 找回”。
 - [x] 增加 contract test：大型 artifact、二进制图片、超长 stdout、多个 prior attempts 都不会让 handoff 超预算。
 - [x] 与 T058 联动：handoff slimming 后刷新 context meter，避免用户看到压缩完成但下一轮又瞬间爆表。
+
+
+
+### T060 长程多轮复杂任务评测集：引用操作、上下文保持与问题解决能力
+
+状态：已完成首版（已落地 `tests/longform/` 六个长程人工评测脚本、Codex/Computer Use 执行模板、longform 结构校验、pending manifest/checklist 生成器、weekly prepare、next-round runner helper、missing-evidence checklist、evidence command generator、operator runbook exporter、round observation recorder、top-level evidence recorder、finalization/scoring CLI、weekly plan selector、T060 evidence quality gate、longform status/weekly regression summary、右键选中文字引用浏览器 E2E、引用 payload contract、显式引用使用 acceptance 检查；真实 backend 每周回归按模板持续执行并沉淀 manifest）。
+
+#### 背景
+- BioAgent 需要用真实长程任务验证复杂科研问题解决能力，而不是只验证单轮协议、UI 展示或 mock smoke。
+- 新增的引用交互包括：选中文字右键引用、点选整块 UI 引用、引用 chip 点击回到并高亮来源、引用 marker 进入聊天框、最终回复 object references 聚焦右侧结果。
+- 长程任务必须覆盖多轮规划、检索、执行、失败修复、结果复用、上下文压缩、引用追问和最终报告交付。
+- 测试目标不是让 BioAgent 给出预设答案，而是验证 backend 是否能正确使用被引用内容、历史产物、失败日志和 workspace refs 继续推进复杂问题。
+
+#### 评测原则
+- 每个任务至少 6 轮，推荐 8-12 轮；中间必须包含 2 次以上引用操作。
+- 引用操作必须混合使用：右键引用具体文字、点选引用 UI 块、引用 run/result chip、引用右侧 artifact/file/object。
+- 每个任务都要产生可复现 artifact：Markdown 报告、CSV/TSV 表格、图表、notebook、代码或日志 refs。
+- 每个任务都要设计一次干扰或修复场景：信息不足、结果矛盾、执行失败、文件缺失、上下文过长或用户改变目标。
+- 验收时重点看“是否使用了引用”，而不是仅检查 references 数组是否存在：最终回答、artifact 和后续行动必须能体现被引用内容。
+
+#### Codex 执行要求
+- 这些长程任务必须由 Codex 真实操作 BioAgent 前端完成，不能只用单元测试、mock request 或直接调用 API 代替。
+- Codex 必须优先使用内置浏览器打开 `http://localhost:5173/`，完成真实页面交互：输入 prompt、等待 backend stream、切换结果 tab、点选 UI、右键引用文字、点击引用 chip、检查右侧 object references。
+- Codex 必须配合使用 Computer Use 做桌面级验证：确认浏览器窗口焦点、鼠标右键菜单、文本选区、拖拽/滚动、截图标记和高亮效果在真实 UI 中可见。
+- 每个长程任务至少保留 3 类证据：内置浏览器截图或 DOM 观察、Computer Use 截图/坐标操作记录、session/workspace artifact refs。
+- 测试记录必须写明使用的 backend/model、任务开始/结束时间、每轮 prompt、引用 marker（例如 `※1`）、引用来源、产物 refs、失败与修复动作。
+- 如果 backend 不可用、端口不可用或模型额度不足，Codex 仍需用内置浏览器和 Computer Use 完成前端引用交互冒烟，并在记录中明确 blocker、缺失能力和下一次可重跑步骤。
+
+#### 任务 1：文献证据评估到可复现报告
+- 目标：围绕一个生物医学 claim 生成文献证据矩阵、支持/反对证据、研究限制和可复现 Markdown 报告。
+- 多轮脚本：
+  - 第 1 轮：用户提出 claim，例如“评估 Playwright MCP 是否适合 BioAgent 浏览器自动化技能安装与安全验证”或一个真实 biomedical claim。
+  - 第 2 轮：要求生成 paper list、证据矩阵和初版结论。
+  - 第 3 轮：用户右键引用某条证据摘要中的一句关键限制，追问“这个限制会不会推翻结论？”
+  - 第 4 轮：用户点选整块 Evidence matrix UI，要求重排证据等级并标出低可信证据。
+  - 第 5 轮：用户引用一个失败/警告 ExecutionUnit，要求解释其对报告可信度的影响。
+  - 第 6 轮：用户要求输出最终 Markdown 报告、CSV 证据表和 object references。
+- 必查点：引用文字进入 backend context；点选矩阵后回答使用矩阵内容；最终报告包含引用来源、limitations、路径/object chips。
+
+#### 任务 2：单细胞分析方案设计、执行与修复
+- 目标：从用户给出的 scRNA-seq 分析目标出发，生成 QC、聚类、marker gene、差异表达和可视化方案，并在 workspace 中执行或生成可复现任务代码。
+- 多轮脚本：
+  - 第 1 轮：用户要求分析一个公开或 fixture 数据集，明确疾病/细胞类型问题。
+  - 第 2 轮：BioAgent 生成执行计划和输入需求；用户引用 UIManifest 中的数据表/输入 slot，要求只使用该 slot。
+  - 第 3 轮：执行失败或缺依赖时，用户引用失败日志文字，要求 backend 自主修复。
+  - 第 4 轮：用户点选 UMAP/结果图 UI，追问“这两个 cluster 是否应该合并？”
+  - 第 5 轮：用户右键引用 marker gene 表中的几行，要求解释细胞类型注释依据。
+  - 第 6 轮：用户改变目标，要求基于已产出的 refs 追加差异表达和富集分析，不重跑无关步骤。
+  - 第 7 轮：输出 notebook、figure refs、marker table 和结论报告。
+- 必查点：失败日志引用驱动修复；图表/表格引用影响后续分析；继续任务复用已有 artifacts 而不是从头开始。
+
+#### 任务 3：结构生物学突变影响分析
+- 目标：围绕一个蛋白突变，检索结构、定位残基、分析可能影响、生成结构视图和证据摘要。
+- 多轮脚本：
+  - 第 1 轮：用户给出蛋白 ID 和突变，例如 UniProt/PDB + residue change。
+  - 第 2 轮：BioAgent 检索结构、序列映射、功能区域和已知文献。
+  - 第 3 轮：用户点选结构 viewer 或结构摘要 UI，要求说明被点选区域附近的相互作用。
+  - 第 4 轮：用户右键引用一段“不确定映射/低分辨率/缺失 loop”提示，要求评估可信度。
+  - 第 5 轮：用户引用某个 artifact/file ref，要求生成 PyMOL/3Dmol 可复现脚本。
+  - 第 6 轮：要求最终输出结构图、方法说明、限制和可复现文件路径。
+- 必查点：结构 UI 引用可定位；不确定性文字引用进入最终 limitations；脚本和图像以 objectReferences 暴露。
+
+#### 任务 4：跨工具知识图谱与冲突证据消解
+- 目标：整合 PubMed、UniProt、ChEMBL、DrugBank 或内部 artifact，构建一个 gene-drug-disease 关系图，并处理矛盾证据。
+- 多轮脚本：
+  - 第 1 轮：用户指定 gene/drug/disease 三元组，要求构建证据图。
+  - 第 2 轮：BioAgent 输出关系图、证据列表和置信度。
+  - 第 3 轮：用户右键引用一条反对证据，要求重算结论。
+  - 第 4 轮：用户点选关系图中的某条边或边详情 UI，要求解释该边的证据来源。
+  - 第 5 轮：用户引用右侧 artifact inspector 中的 raw JSON/table，要求导出规范化 TSV。
+  - 第 6 轮：用户要求给出最终 decision memo：哪些关系可信、哪些需要实验验证。
+- 必查点：矛盾证据引用能改变置信度；图谱边引用能追溯证据；导出 TSV 文件可预览。
+
+#### 任务 5：长上下文压力下的报告迭代与压缩恢复
+- 目标：通过大量中间结果、日志和多次追问，把 context window 推近阈值，验证 compact/handoff slimming 后仍能继续使用引用。
+- 多轮脚本：
+  - 第 1-3 轮：连续要求生成多个候选分析、表格和中间报告。
+  - 第 4 轮：用户引用第一轮报告中的一个段落，要求和当前结论对比。
+  - 第 5 轮：用户引用最新运行日志中的失败原因，要求修复并继续。
+  - 第 6 轮：触发或模拟 context near-limit；确认 meter、compact event 和 audit refs 出现。
+  - 第 7 轮：compact 后用户再次点击旧引用 chip，要求继续围绕旧引用追问。
+  - 第 8 轮：输出压缩前后仍一致的最终结论和可复现 refs。
+- 必查点：compact 后引用仍可用；handoff 不携带大 raw，但 backend 能通过 refs 找回必要上下文；不出现无限重试。
+
+#### 任务 6：用户目标漂移与引用约束下的研究计划重构
+- 目标：测试用户多次改变目标时，BioAgent 是否能保留关键引用、舍弃过时假设、重构计划并给出可执行下一步。
+- 多轮脚本：
+  - 第 1 轮：用户提出宽泛研究目标。
+  - 第 2 轮：BioAgent 产出初始计划和假设列表。
+  - 第 3 轮：用户右键引用其中一个假设，要求“只保留这条主线”。
+  - 第 4 轮：用户点选一个无关结果 UI，要求解释为什么它不应进入主线。
+  - 第 5 轮：用户引入新约束，例如预算、时间、数据不可用或必须使用特定 skill。
+  - 第 6 轮：用户引用前一轮的约束文字，要求重写计划、里程碑和验收标准。
+  - 第 7 轮：输出最终 project plan、risk register 和 next actions。
+- 必查点：引用约束能覆盖旧目标；无关 UI 引用不会被过度使用；最终计划有明确完成标准。
+
+#### TODO
+- [x] 把上述 6 个任务整理成 `tests/longform/` 下的人工评测脚本，每个脚本包含 turn-by-turn prompt、必做引用操作、预期 artifact 和验收清单。
+- [x] 为每个 `tests/longform/` 脚本增加 Codex 执行规程：内置浏览器步骤、Computer Use 步骤、截图点位、引用操作点位、预期高亮对象和失败记录格式。
+- [x] 增加浏览器 E2E：选中文字右键引用到对话栏，确认输入框出现 `※n` marker、reference chip 出现、点击 chip 高亮原文。
+- [x] 增加浏览器 E2E：点选模式引用整块 UI，确认输入框出现 `※n` marker、chip 点击高亮整块 UI。
+- [x] 增加 Computer Use 冒烟：真实鼠标右键选中文字、点击“引用到对话栏”、点击 chip 回到来源并截图确认高亮。
+- [x] 增加 Codex 长程回归模板：要求每次真实测试都记录内置浏览器 URL、Computer Use 截图、操作时间线、backend stream 关键事件和 artifact refs。
+- [x] 增加长程回归准备器：从 `tests/longform/scenarios/*.json` 生成 pending `manifest.json`、`run-checklist.md` 和 evidence 目录，并纳入 `verify:deep`。
+- [x] 增加 round observation recorder：真实 UI 每轮跑完后用 CLI 写入 observedBehavior、status、artifact/execution/screenshot refs，并自动推断顶层 run status。
+- [x] 增加 top-level evidence recorder：用 CLI 追加或更新 artifacts、executionUnits、screenshots，减少人工编辑 manifest JSON 时漏证据。
+- [x] 增加 finalization/scoring CLI：真实 run 结束后用 CLI 写入顶层 status、coverageStage、completedAt、1-5 分评分、结案 notes 和 blocker/repair action。
+- [x] 增加 T060 evidence quality gate：`passed` manifest 必须包含 6+ passed rounds、2 类以上引用操作、browser/Computer Use/workspace 三类证据、produced artifacts 和引用影响说明。
+- [x] 增加 longform status/weekly regression summary：汇总 6 个脚本的 latest status、passed/pending 数量、quality issues 和本周真实 backend passed run 数；可用 `--enforce-weekly` 强制每周至少 2 个真实回归。
+- [x] 增加 weekly plan selector：按 missing、pending、repair-needed、failed 优先级选择本周还需要跑的真实 backend 场景，并生成 `longform:prepare` 命令。
+- [x] 增加 weekly prepare：根据 weekly plan 一键生成本周推荐场景的 pending manifest/checklist；默认跳过已有 pending manifest，避免覆盖半成品记录。
+- [x] 增加 next-round runner helper：从 pending manifest 输出下一轮 prompt、引用操作、预期 artifact、验收点和对应 `longform:record-round` 命令。
+- [x] 增加 missing-evidence checklist：从 manifest 输出离 `passed` 结案还缺的 rounds、round refs、browser/Computer Use/workspace 证据、produced artifact、reference impact 和 completedAt。
+- [x] 增加 evidence command generator：按当前 manifest 自动生成逐轮 `record-round`、顶层 `record-evidence` 和 `finalize` 命令骨架。
+- [x] 增加 operator runbook exporter：为 pending manifest 生成 `operator-runbook.md`，汇总目标、下一轮、缺口、逐轮记录命令、顶层证据命令和 finalize 命令。
+- [x] 增加多轮 contract test：发送请求时 `references` payload 保留 selectedText/sourceRef/composerMarker，prompt 中只含简短 marker，不含完整引用正文。
+- [x] 增加 acceptance 检查：当用户引用了对象，最终回答必须在 message/run/objectReferences 或 artifact 中体现引用使用；未使用时进入 repair。
+- [x] 增加长程测试记录模板：记录 backend、模型、轮数、context ratio、compact 事件、失败修复次数、最终 artifact refs 和人工评分。
+- [x] 为每个长程任务定义评分维度：目标保持、引用使用、推理连续性、执行能力、失败恢复、artifact 质量、可复现性、UI 可用性。
+- [x] 每周至少跑一次 2 个任务的真实 backend regression，保留 session export、workspace refs 和失败复盘。
+
+#### 验收标准
+- 至少 3 个长程任务能在真实 backend 上连续完成 6+ 轮，并产出可复现 artifact。
+- 每个完成任务至少使用 2 个不同类型引用，且最终回答能说明引用如何影响结论或下一步行动。
+- 引用 chip 点击可稳定高亮来源；引用 marker 简洁，不污染 prompt 阅读体验。
+- 每个真实长程任务都必须有内置浏览器执行证据和 Computer Use 视觉证据；缺任一类证据则只能算未完成评测。
+- 遇到失败、上下文压缩或用户目标变化时，BioAgent 能继续围绕已有 refs 推进，而不是丢失上下文或重新开始。

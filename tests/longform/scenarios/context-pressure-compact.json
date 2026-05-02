@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "T060",
+  "scenarioId": "longform-context-pressure-compact",
+  "title": "Long Context Report Iteration And Compaction Recovery",
+  "goal": "Stress long-running context with many intermediate outputs, trigger or simulate near-limit compaction, and verify old references still work after compaction.",
+  "scenarioPackageId": "literature-evidence-review",
+  "minRounds": 8,
+  "backendRequirement": "real-backend-or-ui-simulated-compact",
+  "rounds": [
+    {
+      "round": 1,
+      "prompt": "生成候选分析 A：围绕 BioAgent 引用交互可靠性做证据表和短报告。",
+      "referenceOps": [],
+      "expectedArtifacts": ["candidate-report-a", "candidate-table-a"],
+      "acceptanceChecks": ["report/table refs are produced"]
+    },
+    {
+      "round": 2,
+      "prompt": "生成候选分析 B：围绕 context window 压缩和 handoff slimming 做证据表和短报告。",
+      "referenceOps": [],
+      "expectedArtifacts": ["candidate-report-b", "candidate-table-b"],
+      "acceptanceChecks": ["new artifacts do not overwrite A refs"]
+    },
+    {
+      "round": 3,
+      "prompt": "生成候选分析 C：围绕失败恢复和 artifact repair 做证据表、日志摘要和短报告。",
+      "referenceOps": [],
+      "expectedArtifacts": ["candidate-report-c", "candidate-table-c", "log-summary-c"],
+      "acceptanceChecks": ["multiple intermediate refs are visible", "context meter updates if telemetry is available"]
+    },
+    {
+      "round": 4,
+      "prompt": "※1 将第一轮报告中这段话和当前结论对比，指出是否出现结论漂移。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※1",
+          "source": "paragraph from candidate report A",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["drift-comparison-note"],
+      "acceptanceChecks": ["old selected text is used", "answer compares against current conclusion"]
+    },
+    {
+      "round": 5,
+      "prompt": "※2 根据最新运行日志中的失败原因修复并继续，不要重跑无关报告。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※2",
+          "source": "latest failure reason in run log",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["repair-note", "repair-run-ref"],
+      "acceptanceChecks": ["repair uses selected failure", "attempt history is preserved"]
+    },
+    {
+      "round": 6,
+      "prompt": "触发或模拟 context near-limit；确认 meter、compact event 和 audit refs 出现，然后继续。",
+      "referenceOps": [],
+      "expectedArtifacts": ["context-compaction-audit-ref"],
+      "acceptanceChecks": ["meter shows watch/near-limit/compacted or blocker", "no infinite retry"]
+    },
+    {
+      "round": 7,
+      "prompt": "※1 compact 后再次围绕旧引用追问：这个早期段落是否仍应保留在最终报告？",
+      "referenceOps": [
+        {
+          "kind": "click-reference-chip",
+          "marker": "※1",
+          "source": "old reference chip from round 4",
+          "expectedHighlight": "old report paragraph is highlighted after compaction"
+        }
+      ],
+      "expectedArtifacts": ["post-compact-reference-note"],
+      "acceptanceChecks": ["old reference remains usable", "backend can recover via refs rather than raw context"]
+    },
+    {
+      "round": 8,
+      "prompt": "输出压缩前后仍一致的最终结论、可复现 refs 和 compact 审计说明。",
+      "referenceOps": [
+        {
+          "kind": "click-object-chip",
+          "source": "final report object reference",
+          "expectedHighlight": "right pane focuses final report"
+        }
+      ],
+      "expectedArtifacts": ["final-report.md", "audit-summary.json"],
+      "acceptanceChecks": ["final conclusion references pre/post compact evidence", "audit refs and artifact refs are present"]
+    }
+  ],
+  "evidencePlan": {
+    "browser": ["screenshot of context meter near-limit/compacted", "screenshot of old chip highlighting source after compact"],
+    "computerUse": ["right-click old report paragraph", "click old reference chip after compact"],
+    "workspace": ["candidate report refs", "compact audit refs", "final report ref"]
+  },
+  "blockerTemplate": "If real context pressure cannot be reached, use UI telemetry simulation and record that backend compaction was not validated.",
+  "scoringDimensions": ["goal-retention", "reference-use", "reasoning-continuity", "execution-capability", "failure-recovery", "artifact-quality", "reproducibility", "ui-usability"]
+}

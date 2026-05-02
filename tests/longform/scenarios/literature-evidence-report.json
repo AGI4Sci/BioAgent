@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "T060",
+  "scenarioId": "longform-literature-evidence-report",
+  "title": "Literature Evidence Evaluation To Reproducible Report",
+  "goal": "Evaluate a biomedical or BioAgent automation claim across multiple turns, preserve explicit references, and deliver a Markdown report plus CSV evidence matrix.",
+  "scenarioPackageId": "literature-evidence-review",
+  "minRounds": 6,
+  "backendRequirement": "real-backend-preferred",
+  "rounds": [
+    {
+      "round": 1,
+      "prompt": "评估 claim：Playwright MCP 是否适合 BioAgent 浏览器自动化技能安装与安全验证。先给出检索计划、证据类型和可复现产物计划。",
+      "referenceOps": [],
+      "expectedArtifacts": ["run-plan", "source-query-list"],
+      "acceptanceChecks": ["backend gives a plan instead of a canned answer", "run/session refs are visible"]
+    },
+    {
+      "round": 2,
+      "prompt": "执行检索并生成 paper list、证据矩阵和初版结论；请同时保存 CSV/Markdown refs。",
+      "referenceOps": [],
+      "expectedArtifacts": ["paper-list", "evidence-matrix", "research-report", "csv-evidence-table"],
+      "acceptanceChecks": ["paper list and evidence matrix appear in results", "object references include report and CSV"]
+    },
+    {
+      "round": 3,
+      "prompt": "※1 这个限制会不会推翻初版结论？请只围绕被引用的限制回答。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※1",
+          "source": "one limitation sentence in the evidence summary",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["updated-limitation-note"],
+      "acceptanceChecks": ["request payload preserves selectedText", "answer explicitly discusses the selected limitation"]
+    },
+    {
+      "round": 4,
+      "prompt": "※2 请重排证据等级，标出低可信证据，并说明变化原因。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※2",
+          "source": "Evidence matrix UI block",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["reranked-evidence-matrix"],
+      "acceptanceChecks": ["answer uses rows from the selected matrix", "low-confidence evidence is marked"]
+    },
+    {
+      "round": 5,
+      "prompt": "※3 解释这个失败或警告 ExecutionUnit 对报告可信度有什么影响，并给出修复或降级策略。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※3",
+          "source": "failed or warning ExecutionUnit",
+          "requiredPayload": ["runId", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["failure-impact-note"],
+      "acceptanceChecks": ["failure log is treated as evidence", "report confidence changes or blocker is recorded"]
+    },
+    {
+      "round": 6,
+      "prompt": "输出最终 Markdown 报告、CSV 证据表和 object references；报告必须包含引用如何改变结论、limitations 和复现步骤。",
+      "referenceOps": [
+        {
+          "kind": "click-object-chip",
+          "source": "final report object reference",
+          "expectedHighlight": "right pane focuses report preview"
+        }
+      ],
+      "expectedArtifacts": ["final-research-report.md", "final-evidence-table.csv"],
+      "acceptanceChecks": ["final report path is clickable", "CSV is previewable", "limitations mention ※1/※2/※3 effects"]
+    }
+  ],
+  "evidencePlan": {
+    "browser": ["screenshot after evidence matrix", "screenshot after final object chip focuses report"],
+    "computerUse": ["right-click selected limitation", "click reference chip and verify highlight"],
+    "workspace": ["session export", "Markdown report ref", "CSV evidence table ref", "ExecutionUnit log ref"]
+  },
+  "blockerTemplate": "Record unavailable backend/model/port/quota, the last visible UI state, and exact rerun command.",
+  "scoringDimensions": ["goal-retention", "reference-use", "reasoning-continuity", "execution-capability", "failure-recovery", "artifact-quality", "reproducibility", "ui-usability"]
+}

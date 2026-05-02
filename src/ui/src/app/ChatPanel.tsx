@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { ChevronDown, ChevronUp, CircleStop, Clock, Copy, Download, MessageSquare, Plus, Quote, RefreshCw, Sparkles, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, CircleStop, Clock, Copy, Download, MessageSquare, Plus, Quote, Sparkles, Trash2, X } from 'lucide-react';
 import { scenarios, type ScenarioId } from '../data';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
-import { compactAgentContext, sendAgentMessageStream, validateSemanticTurnAcceptance } from '../api/agentClient';
+import { sendAgentMessageStream, validateSemanticTurnAcceptance } from '../api/agentClient';
 import { sendBioAgentToolMessage } from '../api/bioagentToolsClient';
-import { buildContextCompactionFailureResult, buildContextCompactionOutcome } from '../contextCompaction';
-import { buildContextWindowMeterModel, estimateContextWindowState, latestContextWindowState, shouldAutoCompact, shouldStartContextCompaction } from '../contextWindow';
+import { buildContextWindowMeterModel, estimateContextWindowState, latestContextWindowState } from '../contextWindow';
 import { builtInScenarioPackageRef } from '../scenarioCompiler/scenarioPackage';
 import { resetSession } from '../sessionStore';
 import { acceptAndRepairAgentResponse, buildBackendAcceptanceRepairPrompt, buildUserGoalSnapshot, shouldRunBackendAcceptanceRepair } from '../turnAcceptance';
@@ -17,6 +16,12 @@ interface HandoffAutoRunRequest {
   id: string;
   targetScenario: ScenarioId;
   prompt: string;
+}
+
+interface ReferenceContextMenuState {
+  x: number;
+  y: number;
+  reference: BioAgentReference;
 }
 
 function isBuiltInScenarioId(value: string): value is ScenarioId {
@@ -102,17 +107,18 @@ export function ChatPanel({
   const [streamEventsHeight, setStreamEventsHeight] = useState(260);
   const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
-  const [pendingCompact, setPendingCompact] = useState(false);
   const [referencePickMode, setReferencePickMode] = useState(false);
   const [pendingReferences, setPendingReferences] = useState<BioAgentReference[]>([]);
+  const [referenceContextMenu, setReferenceContextMenu] = useState<ReferenceContextMenuState | null>(null);
   const activeSessionRef = useRef(session);
+  const inputRef = useRef(input);
   const guidanceQueueRef = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const userAbortRequestedRef = useRef(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const resizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const streamResizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const contextCompactionInFlightRef = useRef(false);
   const messages = session.messages;
   const baseScenarioId = builtInScenarioIdForInstance(scenarioId, scenarioOverride);
   const scenario = scenarios.find((item) => item.id === baseScenarioId) ?? scenarios[0];
@@ -131,20 +137,18 @@ export function ChatPanel({
   }, [session]);
 
   useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  useEffect(() => {
     guidanceQueueRef.current = guidanceQueue;
   }, [guidanceQueue]);
 
   useEffect(() => {
     setStreamEvents([]);
     setGuidanceQueue([]);
-    setPendingCompact(false);
     setErrorText('');
   }, [scenarioId, session.sessionId]);
-
-  useEffect(() => {
-    if (!isSending || !shouldAutoCompact(contextWindowState)) return;
-    setPendingCompact(true);
-  }, [contextWindowState, isSending]);
 
   useEffect(() => {
     if (autoScrollRef.current) {
@@ -175,7 +179,7 @@ export function ChatPanel({
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      addPendingReference(target.reference);
+      addPendingReferenceToComposer(target.reference);
       setReferencePickMode(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -192,6 +196,41 @@ export function ChatPanel({
       document.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [referencePickMode]);
+
+  useEffect(() => {
+    const handleContextMenu = (event: MouseEvent) => {
+      const target = textSelectionReferenceTarget(event);
+      if (!target) {
+        setReferenceContextMenu(null);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setReferenceContextMenu({
+        x: Math.min(event.clientX, window.innerWidth - 190),
+        y: Math.min(event.clientY, window.innerHeight - 72),
+        reference: target.reference,
+      });
+    };
+    document.addEventListener('contextmenu', handleContextMenu, true);
+    return () => document.removeEventListener('contextmenu', handleContextMenu, true);
+  }, []);
+
+  useEffect(() => {
+    if (!referenceContextMenu) return undefined;
+    const close = () => setReferenceContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [referenceContextMenu]);
 
   useEffect(() => {
     if (!autoRunRequest || autoRunRequest.targetScenario !== scenarioId || isSending) return;
@@ -218,9 +257,6 @@ export function ChatPanel({
       handleRunningGuidance(prompt);
       return;
     }
-    if (shouldAutoCompact(contextWindowState)) {
-      await runContextCompaction('auto-threshold-before-send', prompt, session, pendingReferences);
-    }
     await runPrompt(prompt, activeSessionRef.current, pendingReferences);
   }
 
@@ -229,6 +265,27 @@ export function ChatPanel({
       if (current.some((item) => item.id === reference.id)) return current;
       return [...current, reference].slice(0, 8);
     });
+  }
+
+  function addPendingReferenceToComposer(reference: BioAgentReference) {
+    const referenceWithMarker = withComposerMarker(reference, pendingReferences);
+    addPendingReference(referenceWithMarker);
+    const nextInput = appendReferenceMarkerToInput(inputRef.current, referenceWithMarker);
+    inputRef.current = nextInput;
+    onInputChange(nextInput);
+  }
+
+  function removePendingReference(referenceId: string) {
+    const reference = pendingReferences.find((item) => item.id === referenceId);
+    setPendingReferences((current) => current.filter((item) => item.id !== referenceId));
+    if (!reference) return;
+    const nextInput = removeReferenceMarkerFromInput(inputRef.current, reference);
+    inputRef.current = nextInput;
+    onInputChange(nextInput);
+  }
+
+  function focusPendingReference(reference: BioAgentReference) {
+    highlightReferencedContent(reference);
   }
 
   async function runPrompt(prompt: string, baseSession: BioAgentSession, references: BioAgentReference[] = []) {
@@ -261,6 +318,7 @@ export function ChatPanel({
     };
     onSessionChange(optimisticSession);
     onInputChange('');
+    inputRef.current = '';
     setPendingReferences([]);
     setReferencePickMode(false);
     setErrorText('');
@@ -274,6 +332,7 @@ export function ChatPanel({
     setIsSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    userAbortRequestedRef.current = false;
     try {
       let latestRoundTokenUsage: AgentStreamEvent['usage'];
       const handleStreamEvent = (event: AgentStreamEvent) => {
@@ -370,8 +429,13 @@ export function ChatPanel({
       onActiveRunChange(finalResponse.run.id);
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : String(err);
-      const wasInterrupted = controller.signal.aborted || /cancel|abort|已取消|cancelled|canceled/i.test(rawMessage);
-      const message = wasInterrupted ? '用户已中断当前 backend 运行。' : rawMessage;
+      const wasUserInterrupted = userAbortRequestedRef.current;
+      const wasSystemInterrupted = !wasUserInterrupted && (controller.signal.aborted || /cancel|abort|已取消|cancelled|canceled/i.test(rawMessage));
+      const message = wasUserInterrupted
+        ? '用户已中断当前 backend 运行。'
+        : wasSystemInterrupted
+          ? `当前 backend 运行被系统或网络中断：${rawMessage}`
+          : rawMessage;
       setErrorText(message);
       const failedRunId = makeId('run');
       const failedAt = nowIso();
@@ -412,6 +476,7 @@ export function ChatPanel({
     } finally {
       setIsSending(false);
       abortRef.current = null;
+      userAbortRequestedRef.current = false;
       const [nextGuidance, ...rest] = guidanceQueueRef.current;
       if (nextGuidance) {
         setGuidanceQueue(rest);
@@ -423,7 +488,6 @@ export function ChatPanel({
   }
 
   function handleRunningGuidance(prompt: string) {
-    if (shouldAutoCompact(contextWindowState)) setPendingCompact(true);
     const now = nowIso();
     const guidanceMessage: BioAgentMessage = {
       id: makeId('msg'),
@@ -440,6 +504,7 @@ export function ChatPanel({
     activeSessionRef.current = nextSession;
     onSessionChange(nextSession);
     onInputChange('');
+    inputRef.current = '';
     setGuidanceQueue((current) => [...current, prompt]);
     setStreamEvents((current) => [...current.slice(-32), {
       id: makeId('evt'),
@@ -462,92 +527,8 @@ export function ChatPanel({
       detail: '用户请求中断当前 backend 运行；已关闭当前 HTTP stream，并清空排队引导。',
       createdAt: interruptedAt,
     }]);
+    userAbortRequestedRef.current = true;
     abortRef.current.abort();
-  }
-
-  async function runContextCompaction(reason: string, prompt = input.trim(), baseSession = activeSessionRef.current, references = pendingReferences) {
-    if (!shouldStartContextCompaction({
-      state: contextWindowState,
-      running: isSending,
-      inFlight: contextCompactionInFlightRef.current,
-      reason,
-    })) {
-      if (reason === 'auto-threshold-before-send' && isSending) setPendingCompact(true);
-      return false;
-    }
-    contextCompactionInFlightRef.current = true;
-    const startedAt = nowIso();
-    const beforeState = contextWindowState;
-    const request = {
-      sessionId: baseSession.sessionId,
-      scenarioId,
-      agentName: scenario.name,
-      agentDomain: scenario.domain,
-      prompt: prompt || 'BioAgent context compaction preflight',
-      references,
-      roleView: role,
-      messages: baseSession.messages,
-      artifacts: baseSession.artifacts,
-      executionUnits: baseSession.executionUnits,
-      runs: baseSession.runs,
-      config,
-      scenarioOverride,
-      scenarioPackageRef,
-      skillPlanRef,
-      uiPlanRef,
-    };
-    setPendingCompact(false);
-    setStreamEvents((current) => [...current.slice(-31), {
-      id: makeId('evt'),
-      type: 'contextCompaction',
-      label: '上下文压缩',
-      detail: '正在发送统一 compact API preflight',
-      contextCompaction: {
-        status: 'started',
-        source: 'agentserver',
-        backend: config.agentBackend,
-        compactCapability: contextWindowState.compactCapability ?? 'unknown',
-        startedAt,
-        reason,
-      },
-      createdAt: startedAt,
-    }]);
-    try {
-      let result: NonNullable<AgentStreamEvent['contextCompaction']>;
-      try {
-        result = await compactAgentContext(request, reason, abortRef.current?.signal);
-      } catch (error) {
-        result = buildContextCompactionFailureResult({
-          error,
-          reason,
-          backend: config.agentBackend,
-          compactCapability: beforeState.compactCapability,
-          startedAt,
-        });
-      }
-      const completedAt = nowIso();
-      const outcome = buildContextCompactionOutcome({
-        eventId: makeId('evt'),
-        messageId: makeId('msg'),
-        result,
-        beforeState,
-        reason,
-        startedAt,
-        completedAt,
-        fallbackBackend: config.agentBackend,
-      });
-      setStreamEvents((current) => [...current.slice(-31), outcome.event]);
-      const nextSession: BioAgentSession = {
-        ...activeSessionRef.current,
-        messages: [...activeSessionRef.current.messages, outcome.message],
-        updatedAt: completedAt,
-      };
-      activeSessionRef.current = nextSession;
-      onSessionChange(nextSession);
-      return true;
-    } finally {
-      contextCompactionInFlightRef.current = false;
-    }
   }
 
   function beginComposerResize(event: React.MouseEvent<HTMLDivElement>) {
@@ -791,17 +772,6 @@ export function ChatPanel({
             <option value="gemini">Gemini</option>
           </select>
         </label>
-        <ContextWindowMeter
-          state={{ ...contextWindowState, pendingCompact: pendingCompact || contextWindowState.pendingCompact }}
-          running={isSending}
-          onCompact={() => {
-            if (isSending) {
-              setPendingCompact(true);
-              return;
-            }
-            void runContextCompaction('manual-meter-click');
-          }}
-        />
         <div className="panel-actions">
           <IconButton icon={Plus} label="开启新聊天" onClick={onNewChat} />
           <IconButton icon={Clock} label="历史会话" onClick={() => setHistoryOpen((value) => !value)} />
@@ -1020,7 +990,7 @@ export function ChatPanel({
             type="button"
             className={cx('reference-trigger', referencePickMode && 'active')}
             onClick={() => setReferencePickMode((value) => !value)}
-            title="像浏览器检查元素一样，点击页面上的目标自动引用"
+            title="点选模式引用整块 UI；选中文字可右键引用"
           >
             <Quote size={14} />
             点选
@@ -1028,7 +998,8 @@ export function ChatPanel({
           {pendingReferences.length ? (
             <BioAgentReferenceChips
               references={pendingReferences}
-              onRemove={(referenceId) => setPendingReferences((current) => current.filter((reference) => reference.id !== referenceId))}
+              onRemove={removePendingReference}
+              onFocus={focusPendingReference}
             />
           ) : (
             <span className="reference-hint">点选 BioAgent 可见对象作为上下文</span>
@@ -1037,7 +1008,7 @@ export function ChatPanel({
         {referencePickMode ? (
           <div className="reference-pick-banner">
             <Quote size={14} />
-            点击页面上的对象来引用，Esc 取消
+            点击页面对象引用整块 UI，Esc 取消
           </div>
         ) : null}
         <textarea
@@ -1052,6 +1023,10 @@ export function ChatPanel({
           rows={1}
           style={{ height: `${composerHeight}px` }}
         />
+        <ContextWindowMeter
+          state={contextWindowState}
+          running={isSending}
+        />
         {isSending ? (
           <ActionButton icon={CircleStop} variant="coral" onClick={handleAbort}>
             中断
@@ -1061,6 +1036,26 @@ export function ChatPanel({
           {isSending ? '引导' : '发送'}
         </ActionButton>
       </div>
+      {referenceContextMenu ? (
+        <div
+          className="reference-context-menu"
+          style={{ left: `${referenceContextMenu.x}px`, top: `${referenceContextMenu.y}px` }}
+          onClick={(event) => event.stopPropagation()}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              addPendingReferenceToComposer(referenceContextMenu.reference);
+              setReferenceContextMenu(null);
+            }}
+          >
+            <Quote size={14} />
+            引用到对话栏
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1215,32 +1210,21 @@ function enrichRepairRaw(raw: unknown, repairHistory: unknown, sourceRunId: stri
 function ContextWindowMeter({
   state,
   running,
-  onCompact,
 }: {
   state: AgentContextWindowState;
   running: boolean;
-  onCompact: () => void;
 }) {
   const meter = buildContextWindowMeterModel(state, running);
   return (
-    <button
-      type="button"
+    <div
+      role="status"
+      aria-label={`上下文窗口 ${meter.ratioLabel}，${meter.statusLabel}`}
       className={cx('context-window-meter', meter.level, meter.isEstimated && 'estimated', meter.isUnknown && 'unknown')}
-      onClick={onCompact}
       title={meter.title}
       style={{ '--context-window-ratio': meter.ratioStyle } as CSSProperties}
     >
-      <span className="context-window-ring" aria-hidden="true">
-        <span>{meter.ratioLabel}</span>
-      </span>
-      <span className="context-window-copy">
-        <strong>{meter.used}/{meter.windowSize}</strong>
-        <em>{meter.sourceLabel} · {state.backend || 'unknown'} · {meter.statusLabel}</em>
-        <em>{meter.compactLine}</em>
-        <em>{meter.lastLine}</em>
-      </span>
-      <RefreshCw size={13} />
-    </button>
+      <span className="context-window-ring" aria-hidden="true" />
+    </div>
   );
 }
 
@@ -1358,24 +1342,48 @@ function TurnAcceptanceNotice({
 function BioAgentReferenceChips({
   references,
   onRemove,
+  onFocus,
 }: {
   references: BioAgentReference[];
   onRemove?: (referenceId: string) => void;
+  onFocus?: (reference: BioAgentReference) => void;
 }) {
   return (
     <div className="bioagent-reference-strip" aria-label="用户引用的上下文">
       {references.slice(0, 8).map((reference) => (
         <span
+          role="button"
+          tabIndex={0}
           key={reference.id}
           className={cx('bioagent-reference-chip', `kind-${reference.kind}`)}
           title={reference.summary || reference.ref}
+          onClick={() => onFocus?.(reference)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onFocus?.(reference);
+          }}
         >
-          <span>{bioAgentReferenceKindLabel(reference.kind)}</span>
+          <span>{referenceComposerMarker(reference)}</span>
           <strong>{reference.title}</strong>
           {onRemove ? (
-            <button type="button" onClick={() => onRemove(reference.id)} aria-label={`移除引用 ${reference.title}`}>
+            <i
+              role="button"
+              tabIndex={0}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove(reference.id);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                event.stopPropagation();
+                onRemove(reference.id);
+              }}
+              aria-label={`移除引用 ${reference.title}`}
+            >
               <X size={12} />
-            </button>
+            </i>
           ) : null}
         </span>
       ))}
@@ -1395,6 +1403,146 @@ function bioAgentReferenceKindLabel(kind: BioAgentReference['kind']) {
 
 function bioAgentReferenceAttribute(reference: BioAgentReference | undefined) {
   return reference ? JSON.stringify(reference) : undefined;
+}
+
+function appendReferenceMarkerToInput(currentInput: string, reference: BioAgentReference) {
+  const marker = referenceComposerMarker(reference);
+  if (!marker || currentInput.includes(marker)) return currentInput;
+  return [currentInput.trimEnd(), marker].filter(Boolean).join(' ');
+}
+
+function removeReferenceMarkerFromInput(currentInput: string, reference: BioAgentReference) {
+  const marker = referenceComposerMarker(reference);
+  return currentInput
+    .replace(marker, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimStart();
+}
+
+function referenceComposerMarker(reference: BioAgentReference) {
+  const payload = isRecord(reference.payload) ? reference.payload : undefined;
+  const marker = typeof payload?.composerMarker === 'string' ? payload.composerMarker : '';
+  return marker || '※?';
+}
+
+function withComposerMarker(reference: BioAgentReference, currentReferences: BioAgentReference[]) {
+  const existing = currentReferences.find((item) => item.id === reference.id);
+  if (existing) return existing;
+  const marker = nextComposerMarker(currentReferences);
+  return {
+    ...reference,
+    payload: {
+      ...(isRecord(reference.payload) ? reference.payload : {}),
+      composerMarker: marker,
+    },
+  };
+}
+
+function nextComposerMarker(currentReferences: BioAgentReference[]) {
+  const used = new Set(currentReferences.map(referenceComposerMarker));
+  for (let index = 1; index <= currentReferences.length + 1; index += 1) {
+    const marker = `※${index}`;
+    if (!used.has(marker)) return marker;
+  }
+  return `※${currentReferences.length + 1}`;
+}
+
+function highlightReferencedContent(reference: BioAgentReference) {
+  const element = elementForBioAgentReference(reference);
+  if (!element) return;
+  element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  element.classList.add('bioagent-reference-focus');
+  window.setTimeout(() => element.classList.remove('bioagent-reference-focus'), 2200);
+  const payload = isRecord(reference.payload) ? reference.payload : undefined;
+  const selectedText = typeof payload?.selectedText === 'string' ? payload.selectedText : '';
+  if (selectedText) selectTextInElement(element, selectedText);
+}
+
+function elementForBioAgentReference(reference: BioAgentReference) {
+  const payload = isRecord(reference.payload) ? reference.payload : undefined;
+  const sourceRef = typeof payload?.sourceRef === 'string' ? payload.sourceRef : reference.ref;
+  const uiRef = sourceRef.replace(/^ui-text:/, '').replace(/#[^#]*$/, '');
+  if (uiRef.startsWith('ui:')) {
+    const selector = uiRef.slice(3);
+    try {
+      const element = document.querySelector(selector);
+      if (element instanceof HTMLElement) return element;
+    } catch {
+      // Ignore invalid selectors from legacy references and fall back to attribute matching.
+    }
+  }
+  for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-bioagent-reference]'))) {
+    const parsed = parseBioAgentReferenceAttribute(element.dataset.bioagentReference);
+    if (parsed?.id === reference.id || parsed?.ref === sourceRef || parsed?.ref === reference.ref) return element;
+  }
+  return undefined;
+}
+
+function selectTextInElement(element: HTMLElement, text: string) {
+  const range = rangeForTextInElement(element, text);
+  if (!range) return;
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function rangeForTextInElement(element: HTMLElement, text: string) {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const value = node.textContent ?? '';
+    const offset = value.indexOf(text);
+    if (offset >= 0) {
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + text.length);
+      return range;
+    }
+    node = walker.nextNode();
+  }
+  return undefined;
+}
+
+function textSelectionReferenceTarget(event?: MouseEvent): { element: HTMLElement; reference: BioAgentReference } | undefined {
+  const rawTarget = event?.target instanceof Element ? event.target : undefined;
+  if (rawTarget?.closest('.composer, .reference-pick-banner, .settings-dialog, .reference-context-menu')) return undefined;
+  const selection = window.getSelection();
+  const selectedText = selection?.toString().trim();
+  if (!selection || selection.rangeCount === 0 || !selectedText) return undefined;
+  const range = selection.getRangeAt(0);
+  const ancestor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+    ? range.commonAncestorContainer as Element
+    : range.commonAncestorContainer.parentElement;
+  const element = ancestor?.closest<HTMLElement>('[data-bioagent-reference], .message, .registry-slot, .card, .data-preview-table, table, section');
+  if (!element || element.closest('.composer, .reference-pick-banner, .settings-dialog')) return undefined;
+  if (rawTarget && !element.contains(rawTarget) && !rawTarget.contains(element)) return undefined;
+  const sourceReference = parseBioAgentReferenceAttribute(element.dataset.bioagentReference) ?? referenceForUiElement(element);
+  const textHash = stableHash(`${sourceReference.ref}:${selectedText}`);
+  const clippedText = selectedText.length > 2400 ? `${selectedText.slice(0, 2400)}...` : selectedText;
+  return {
+    element,
+    reference: {
+      id: `ref-text-${textHash}`,
+      kind: 'ui',
+      title: `选中文本 · ${selectedText.replace(/\s+/g, ' ').slice(0, 28)}`,
+      ref: `ui-text:${sourceReference.ref}#${textHash}`,
+      sourceId: sourceReference.sourceId,
+      runId: sourceReference.runId,
+      summary: clippedText,
+      locator: {
+        textRange: selectedText.slice(0, 160),
+        region: sourceReference.ref,
+      },
+      payload: {
+        selectedText: clippedText,
+        sourceTitle: sourceReference.title,
+        sourceRef: sourceReference.ref,
+        sourceKind: sourceReference.kind,
+        sourceSummary: sourceReference.summary,
+      },
+    },
+  };
 }
 
 function referenceTargetFromEvent(event: MouseEvent): { element: HTMLElement; reference: BioAgentReference } | undefined {
@@ -1516,6 +1664,18 @@ function stableElementSelector(element: HTMLElement) {
   if (dataRunId) return `[data-run-id="${dataRunId}"]`;
   const className = element.className.toString().split(/\s+/).filter(Boolean).slice(0, 3).join('.');
   return `${element.tagName.toLowerCase()}${className ? `.${className}` : ''}`;
+}
+
+function stableHash(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(31, hash) + value.charCodeAt(index) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function objectReferenceKindLabel(kind: ObjectReference['kind']) {

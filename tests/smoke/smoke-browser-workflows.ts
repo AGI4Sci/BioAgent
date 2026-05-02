@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { chromium, type Browser, type Locator, type Page } from 'playwright-core';
 import { buildBuiltInScenarioPackage } from '../../src/ui/src/scenarioCompiler/scenarioPackage';
 
 const workspace = await mkdtemp(join(tmpdir(), 'bioagent-browser-smoke-'));
@@ -274,6 +274,33 @@ try {
     await referencePage.getByText('Browser smoke reference seed message').first().waitFor({ timeout: 15_000 });
     await referencePage.locator('.object-reference-chip', { hasText: 'Browser smoke UMAP' }).waitFor({ timeout: 15_000 });
     await referencePage.locator('.object-reference-chip', { hasText: 'Browser smoke DE table' }).waitFor({ timeout: 15_000 });
+    logStep('right-click selected text captures a concise composer marker and clickable source highlight');
+    const selectedPhrase = 'inspect the UMAP';
+    const seedMessage = referencePage.locator('.message.scenario', { hasText: 'Browser smoke reference seed message' }).first();
+    const selectedTextBox = await selectTextInLocator(referencePage, seedMessage, selectedPhrase);
+    await referencePage.mouse.click(selectedTextBox.x + Math.min(selectedTextBox.width - 2, 8), selectedTextBox.y + Math.max(2, selectedTextBox.height / 2), { button: 'right' });
+    if (!await referencePage.locator('.reference-context-menu').isVisible({ timeout: 1500 }).catch(() => false)) {
+      await selectTextInLocator(referencePage, seedMessage, selectedPhrase);
+      await seedMessage.dispatchEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: selectedTextBox.x + Math.min(selectedTextBox.width - 2, 8),
+        clientY: selectedTextBox.y + Math.max(2, selectedTextBox.height / 2),
+        button: 2,
+      });
+    }
+    await referencePage.getByRole('menuitem', { name: '引用到对话栏' }).evaluate((button) => {
+      if (button instanceof HTMLElement) button.click();
+    });
+    await referencePage.waitForFunction(() => {
+      const text = Array.from(document.querySelectorAll('[aria-label="用户引用的上下文"] .bioagent-reference-chip'))
+        .map((element) => element.textContent ?? '')
+        .join('\n');
+      const input = document.querySelector<HTMLTextAreaElement>('.chat-panel .composer textarea')?.value ?? '';
+      return text.includes('选中文本') && input.includes('※1');
+    }, null, { timeout: 15_000 });
+    await referencePage.locator('.bioagent-reference-chip', { hasText: '选中文本' }).click();
+    await referencePage.waitForFunction((phrase) => window.getSelection()?.toString().includes(String(phrase)), selectedPhrase, { timeout: 15_000 });
     logStep('point-select captures historical message, chart, table, and file-like object refs for a follow-up');
     await referencePage.getByRole('button', { name: '点选' }).click();
     await referencePage.locator('.message.scenario', { hasText: 'Browser smoke reference seed message' }).click();
@@ -283,17 +310,19 @@ try {
     await referencePage.locator('.object-reference-chip', { hasText: 'Browser smoke DE table' }).click();
     await referencePage.getByRole('button', { name: '点选' }).click();
     await referencePage.locator('.object-reference-chip', { hasText: 'Reference follow-up report' }).click();
-    await referencePage.waitForFunction(() => {
-      const text = Array.from(document.querySelectorAll('[aria-label="用户引用的上下文"] .bioagent-reference-chip'))
-        .map((element) => element.textContent ?? '')
-        .join('\n');
-      return ['msg', 'chart', 'table', 'file'].every((label) => text.includes(label));
-    }, null, { timeout: 15_000 });
-    await referencePage.getByPlaceholder(/输入研究问题/).fill('基于点选的历史消息、图表、表格和文件继续追问，并打开报告预览');
+    await referencePage.waitForFunction(() => document.querySelectorAll('[aria-label="用户引用的上下文"] .bioagent-reference-chip').length >= 5, null, { timeout: 15_000 });
+    const markerPrompt = await referencePage.getByPlaceholder(/输入研究问题/).inputValue();
+    await referencePage.getByPlaceholder(/输入研究问题/).fill(`${markerPrompt} 基于右键文本、点选的历史消息、图表、表格和文件继续追问，并打开报告预览`);
     await referencePage.locator('.chat-panel .composer').getByRole('button', { name: '发送' }).click();
     await referencePage.getByText('Reference follow-up accepted').first().waitFor({ timeout: 15_000 });
     const sentReferences = ((referenceRequests.at(-1)?.references ?? []) as Array<Record<string, unknown>>);
-    assert.deepEqual(['message', 'chart', 'table', 'file'].every((kind) => sentReferences.some((reference) => reference.kind === kind)), true, `follow-up should send message/chart/table/file refs, got ${JSON.stringify(sentReferences)}`);
+    assert.deepEqual(['ui', 'message', 'chart', 'table', 'file'].every((kind) => sentReferences.some((reference) => reference.kind === kind)), true, `follow-up should send text/message/chart/table/file refs, got ${JSON.stringify(sentReferences)}`);
+    const sentTextReference = sentReferences.find((reference) => reference.kind === 'ui' && String(reference.ref).startsWith('ui-text:'));
+    assert.ok(sentTextReference, `selected text reference should be sent, got ${JSON.stringify(sentReferences)}`);
+    assert.equal((sentTextReference.payload as Record<string, unknown>).composerMarker, '※1');
+    assert.equal((sentTextReference.payload as Record<string, unknown>).selectedText, selectedPhrase);
+    assert.match(String(referenceRequests.at(-1)?.prompt ?? ''), /※1/);
+    assert.doesNotMatch(String(referenceRequests.at(-1)?.prompt ?? ''), /inspect the UMAP/);
     logStep('final object chip focuses the right pane and previews the real workspace markdown file');
     await referencePage.locator('.object-reference-chip', { hasText: 'Reference follow-up report' }).last().click();
     await referencePage.locator('.object-focus-banner', { hasText: 'Reference follow-up report' }).waitFor({ timeout: 15_000 });
@@ -333,7 +362,7 @@ try {
       });
     });
     await contextPage.route('http://127.0.0.1:18080/api/agent-server/**', async (route, request) => {
-      compactRequests.push(request.postDataJSON() as Record<string, unknown>);
+      if (/compact/i.test(request.url())) compactRequests.push(request.postDataJSON() as Record<string, unknown>);
       const now = new Date().toISOString();
       await route.fulfill({
         status: 200,
@@ -370,28 +399,26 @@ try {
     await contextPage.getByPlaceholder(/输入研究问题/).waitFor({ timeout: 15_000 });
     logStep('context meter turns watch, then near-limit, from mocked multi-turn usage');
     await sendContextSmokePrompt(contextPage, 'context-window round one usage reaches watch threshold');
-    await contextPage.waitForFunction(() => document.querySelector('.context-window-meter.watch')?.textContent?.includes('72%'), null, { timeout: 15_000 });
+    await contextPage.waitForFunction(() => document.querySelector('.context-window-meter.watch')?.getAttribute('aria-label')?.includes('72%'), null, { timeout: 15_000 });
     assert.equal(compactRequests.length, 0, 'watch-level context should not compact before the next turn');
     await sendContextSmokePrompt(contextPage, 'context-window round two usage reaches auto compact threshold');
-    await contextPage.waitForFunction(() => document.querySelector('.context-window-meter.near-limit')?.textContent?.includes('86%'), null, { timeout: 15_000 });
+    await contextPage.waitForFunction(() => document.querySelector('.context-window-meter.near-limit')?.getAttribute('aria-label')?.includes('86%'), null, { timeout: 15_000 });
     assert.equal(compactRequests.length, 0, 'near-limit usage should wait until the following send to preflight compact');
-    logStep('next send performs compact preflight before the run starts');
+    logStep('next send leaves compact timing to AgentServer preflight');
     await contextPage.getByPlaceholder(/输入研究问题/).fill('context-window round three should compact before sending');
     await contextPage.locator('.chat-panel .composer').getByRole('button', { name: '发送' }).click();
-    await waitForCondition(() => compactRequests.length === 1, 'context compact preflight request');
     await thirdContextRunStarted;
-    assert.equal(contextRunRequests.length, 3, 'third user send should continue into the backend run after compact preflight');
-    assert.equal((compactRequests[0]?.reason), 'auto-threshold-before-send');
-    await contextPage.getByText(/上下文压缩完成|browser smoke compact preflight completed/).waitFor({ timeout: 15_000 });
-    logStep('running turn only marks pending compact and does not issue a duplicate compact request');
+    assert.equal(contextRunRequests.length, 3, 'third user send should continue into the backend run without a frontend compact call');
+    assert.equal(compactRequests.length, 0, 'frontend should not call compact API; AgentServer owns compact timing');
+    logStep('running turn keeps compact timing owned by AgentServer');
     await contextPage.locator('.chat-panel .composer textarea').fill('context-window guidance while backend is still running');
     await contextPage.locator('.chat-panel .composer').getByRole('button', { name: '引导' }).click();
     await contextPage.waitForTimeout(500);
-    assert.equal(compactRequests.length, 1, 'running guidance should not trigger mid-turn compact for unsupported backend timing');
+    assert.equal(compactRequests.length, 0, 'running guidance should not trigger frontend compact');
     releaseThirdContextRun?.();
     await contextPage.getByText('Context smoke response 4').first().waitFor({ timeout: 15_000 });
     assert.equal(contextRunRequests.length, 4, 'queued guidance should run after the active turn without duplicate compact');
-    assert.equal(compactRequests.length, 1, 'context compact preflight should remain single-shot across active and queued turns');
+    assert.equal(compactRequests.length, 0, 'context compact calls should remain owned by AgentServer');
     await captureSmokeScreenshot(contextPage, join(artifactsDir, 'browser-smoke-context-meter.png'));
     await assertNoRawJsonErrors(contextPage, 'context-meter');
     await assertNoUnexplainedDisabledPrimaryButtons(contextPage, 'context-meter');
@@ -466,6 +493,32 @@ async function captureSmokeScreenshot(page: Page, path: string) {
   } catch (error) {
     console.warn(`[ux] skipped screenshot ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+async function selectTextInLocator(page: Page, locator: Locator, phrase: string) {
+  const box = await locator.evaluate((element, selectedPhrase) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const text = node.textContent ?? '';
+      const index = text.indexOf(String(selectedPhrase));
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + String(selectedPhrase).length);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      }
+      node = walker.nextNode();
+    }
+    throw new Error(`Could not select phrase: ${String(selectedPhrase)}`);
+  }, phrase);
+  await page.waitForFunction((selectedPhrase) => window.getSelection()?.toString() === String(selectedPhrase), phrase, { timeout: 15_000 });
+  assert.ok(box && box.width > 0 && box.height > 0, `selected phrase should have a visible range: ${phrase}`);
+  return box;
 }
 
 async function openNavigationPanel(page: Page) {

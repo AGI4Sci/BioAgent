@@ -341,10 +341,19 @@ function evaluateTurnAcceptance(
     failures.push({ code: 'raw-payload-leak', detail: 'Final response appears to expose raw ToolPayload/JSON instead of a user-readable answer.', repairAction: 'presentation-repair' });
   }
   if (snapshot.requiredReferences.length) {
-    const preserved = new Set((response.run.references ?? response.message.references ?? []).map((reference) => reference.ref));
+    const explicitReferences = response.run.references ?? response.message.references ?? [];
+    const preserved = new Set(explicitReferences.map((reference) => reference.ref));
     const missing = snapshot.requiredReferences.filter((ref) => !preserved.has(ref));
     if (missing.length) {
       failures.push({ code: 'missing-explicit-references', detail: `Explicit references were not preserved: ${missing.join(', ')}`, repairAction: 'presentation-repair' });
+    }
+    const unused = explicitReferences.filter((reference) => snapshot.requiredReferences.includes(reference.ref) && !responseReflectsReferenceUse(reference, response, objectReferences));
+    if (unused.length) {
+      failures.push({
+        code: 'unused-explicit-references',
+        detail: `Final answer/artifacts did not reflect explicit reference use: ${unused.map((reference) => reference.ref).join(', ')}`,
+        repairAction: 'artifact-repair',
+      });
     }
   }
   if (snapshot.goalType === 'report' || snapshot.requiredArtifacts.some((artifact) => /report|markdown/i.test(artifact))) {
@@ -458,6 +467,52 @@ function hasVisualization(response: NormalizedAgentResponse, objectReferences: O
   if (response.uiManifest.some((slot) => /plot|chart|visual|image|viewer|graph/i.test(slot.componentId) && slot.artifactRef)) return true;
   if (response.artifacts.some((artifact) => /visual|plot|chart|figure|image|png|svg|html/i.test(`${artifact.type} ${artifact.path ?? ''} ${artifact.dataRef ?? ''}`))) return true;
   return objectReferences.some((reference) => /\.(png|jpe?g|gif|webp|svg|html?)($|[?#])/i.test(reference.ref) || /visual|plot|chart|figure|image/i.test(reference.artifactType ?? ''));
+}
+
+function responseReflectsReferenceUse(reference: BioAgentReference, response: NormalizedAgentResponse, objectReferences: ObjectReference[]) {
+  const haystack = [
+    response.message.content,
+    response.run.response,
+    ...response.artifacts.flatMap((artifact) => [
+      artifact.id,
+      artifact.type,
+      artifact.path,
+      artifact.dataRef,
+      JSON.stringify(artifact.metadata ?? {}),
+    ]),
+    ...objectReferences.flatMap((objectRef) => [
+      objectRef.id,
+      objectRef.title,
+      objectRef.ref,
+      objectRef.summary,
+      objectRef.artifactType,
+    ]),
+  ].filter(Boolean).join('\n').toLowerCase();
+  const payload = isRecord(reference.payload) ? reference.payload : {};
+  const selectedText = typeof payload.selectedText === 'string' ? payload.selectedText : '';
+  const composerMarker = typeof payload.composerMarker === 'string' ? payload.composerMarker : '';
+  const sourceTitle = typeof payload.sourceTitle === 'string' ? payload.sourceTitle : '';
+  const tokens = [
+    composerMarker,
+    reference.ref,
+    reference.sourceId,
+    reference.runId,
+    reference.title,
+    reference.summary,
+    sourceTitle,
+    reference.locator?.textRange,
+    selectedText,
+  ].filter((token): token is string => Boolean(token && token.trim()));
+  return tokens.some((token) => containsMeaningfulReferenceToken(haystack, token));
+}
+
+function containsMeaningfulReferenceToken(haystack: string, token: string) {
+  const normalized = token.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized) return false;
+  if (haystack.includes(normalized)) return true;
+  if (normalized.length > 48 && haystack.includes(normalized.slice(0, 48))) return true;
+  const words = normalized.match(/[\p{L}\p{N}_-]{4,}/gu) ?? [];
+  return words.slice(0, 8).some((word) => haystack.includes(word));
 }
 
 function presentationRepairMessage(content: string, acceptance: TurnAcceptance) {

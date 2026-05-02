@@ -1176,6 +1176,12 @@
   border-radius: 0;
 }
 
+.context-menu-separator {
+  border: 0;
+  border-top: 1px solid #2f2f2f;
+  margin: 4px 0;
+}
+
 .context-menu-vscode button:hover {
   background: #04395e;
   color: #fff;

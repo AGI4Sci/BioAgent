@@ -2,7 +2,7 @@ import type { BioAgentConfig, BioAgentWorkspaceState, RuntimeExecutionUnit } fro
 import type { ScenarioLibraryState } from '../scenarioCompiler/scenarioLibrary';
 import type { ScenarioPackage } from '../scenarioCompiler/scenarioPackage';
 import { parseWorkspaceState } from '../sessionStore';
-import { normalizeConfig, normalizeWorkspaceRootPath } from '../config';
+import { defaultBioAgentConfig, normalizeConfig, normalizeWorkspaceRootPath } from '../config';
 import { BioAgentClientError, reasonFromResponseText, recoverActionsForService } from './clientError';
 
 export interface WorkspaceEntry {
@@ -114,11 +114,26 @@ export interface SkillPromotionValidationResult {
 }
 
 export async function loadFileBackedBioAgentConfig(config: BioAgentConfig): Promise<BioAgentConfig | undefined> {
-  const response = await fetchWorkspace(config, 'load config.local.json', `${config.workspaceWriterBaseUrl}/api/bioagent/config`);
+  const response = await fetchWorkspaceConfigWithFallback(config);
   if (response.status === 404) return undefined;
   if (!response.ok) throw new Error(await workspaceResponseError(response, `Load config failed: HTTP ${response.status}`));
   const json = await response.json() as { config?: unknown };
   return isBioAgentConfig(json.config) ? normalizeConfig(json.config) : undefined;
+}
+
+async function fetchWorkspaceConfigWithFallback(config: BioAgentConfig): Promise<Response> {
+  const primaryUrl = `${config.workspaceWriterBaseUrl}/api/bioagent/config`;
+  try {
+    return await fetchWorkspace(config, 'load config.local.json', primaryUrl);
+  } catch (error) {
+    const fallbackBaseUrl = defaultBioAgentConfig.workspaceWriterBaseUrl;
+    if (config.workspaceWriterBaseUrl === fallbackBaseUrl) throw error;
+    return await fetchWorkspace(
+      { ...config, workspaceWriterBaseUrl: fallbackBaseUrl },
+      'load config.local.json from default Workspace Writer',
+      `${fallbackBaseUrl}/api/bioagent/config`,
+    );
+  }
 }
 
 export async function saveFileBackedBioAgentConfig(config: BioAgentConfig): Promise<BioAgentConfig | undefined> {
@@ -163,6 +178,7 @@ function isBioAgentConfig(value: unknown): value is BioAgentConfig {
     && typeof record.modelName === 'string'
     && typeof record.apiKey === 'string'
     && typeof record.requestTimeoutMs === 'number'
+    && (record.maxContextWindowTokens === undefined || typeof record.maxContextWindowTokens === 'number')
     && typeof record.updatedAt === 'string';
 }
 

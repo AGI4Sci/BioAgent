@@ -32,7 +32,7 @@ export function buildContextWindowMeterModel(state: AgentContextWindowState, run
     isUnknown: state.source === 'unknown',
     compactLine: `compact ${state.compactCapability || 'unknown'}${state.pendingCompact ? ' · pending' : ''}`,
     lastLine: `last ${state.lastCompactedAt ? formatShortTime(state.lastCompactedAt) : 'never'}`,
-    title: running ? `${title}\n运行中达到阈值时只标记 pending compact。` : `${title}\n点击触发统一 compact API。`,
+    title: `${title}\n只读状态；压缩时机由 AgentServer 自动判断。`,
   };
 }
 
@@ -50,7 +50,7 @@ export function latestContextWindowState(events: AgentStreamEvent[]) {
 
 export function estimateContextWindowState(session: BioAgentSession, config: BioAgentConfig, events: AgentStreamEvent[]): AgentContextWindowState {
   const usage = latestTokenUsage(events);
-  const modelWindow = estimateModelContextWindow(config.modelName);
+  const modelWindow = config.maxContextWindowTokens || estimateModelContextWindow(config.modelName);
   const textChars = session.messages.slice(-24).reduce((sum, message) => sum + message.content.length + (message.expandable?.length ?? 0), 0);
   const artifactChars = session.artifacts.slice(-12).reduce((sum, artifact) => sum + JSON.stringify({
     id: artifact.id,

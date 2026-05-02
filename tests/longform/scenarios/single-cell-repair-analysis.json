@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "T060",
+  "scenarioId": "longform-single-cell-repair-analysis",
+  "title": "Single Cell Analysis Plan, Execution, And Repair",
+  "goal": "Design and execute or scaffold a reproducible scRNA-seq analysis, use referenced slots/logs/figures/tables, repair failures, and deliver notebook plus report refs.",
+  "scenarioPackageId": "omics-differential-exploration",
+  "minRounds": 7,
+  "backendRequirement": "real-backend-preferred",
+  "rounds": [
+    {
+      "round": 1,
+      "prompt": "为一个公开或 fixture scRNA-seq 数据集设计疾病相关细胞类型分析：QC、聚类、marker gene、差异表达和可视化。",
+      "referenceOps": [],
+      "expectedArtifacts": ["analysis-plan", "input-requirements"],
+      "acceptanceChecks": ["plan includes explicit data assumptions", "does not invent unavailable raw FASTQ processing"]
+    },
+    {
+      "round": 2,
+      "prompt": "※1 只使用这个 UIManifest 数据表/输入 slot，不要读取其它输入；给出执行计划更新。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※1",
+          "source": "UIManifest data table or input slot",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["slot-constrained-plan"],
+      "acceptanceChecks": ["backend acknowledges selected slot", "prompt carries marker but not full slot payload"]
+    },
+    {
+      "round": 3,
+      "prompt": "运行或生成可复现任务代码；如果缺依赖或失败，请保留日志 refs。",
+      "referenceOps": [],
+      "expectedArtifacts": ["task-code", "execution-log", "partial-results"],
+      "acceptanceChecks": ["execution unit is visible", "failure is not disguised as success"]
+    },
+    {
+      "round": 4,
+      "prompt": "※2 根据这段失败日志自主修复并重跑一次；说明修复改变了什么。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※2",
+          "source": "failure log excerpt",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["repair-attempt", "fixed-task-code"],
+      "acceptanceChecks": ["repair request quotes or summarizes selected failure", "attempt history records before/after"]
+    },
+    {
+      "round": 5,
+      "prompt": "※3 这两个 cluster 是否应该合并？请基于被点选的图和已有指标回答。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※3",
+          "source": "UMAP or cluster plot UI",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["cluster-merge-rationale"],
+      "acceptanceChecks": ["answer uses selected plot context", "uncertainty and required validation are stated"]
+    },
+    {
+      "round": 6,
+      "prompt": "※4 解释这些 marker gene 行支持的细胞类型注释依据。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※4",
+          "source": "several marker gene table rows",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["annotation-rationale"],
+      "acceptanceChecks": ["selected rows affect annotation", "answer separates evidence from speculation"]
+    },
+    {
+      "round": 7,
+      "prompt": "基于已有 refs 追加差异表达和富集分析，不重跑无关步骤；输出 notebook、figure refs、marker table 和结论报告。",
+      "referenceOps": [
+        {
+          "kind": "click-object-chip",
+          "source": "notebook or figure object reference",
+          "expectedHighlight": "right pane focuses selected artifact"
+        }
+      ],
+      "expectedArtifacts": ["analysis-notebook", "umap-figure", "marker-table", "final-report"],
+      "acceptanceChecks": ["existing artifacts are reused", "final report lists repair and reference effects"]
+    }
+  ],
+  "evidencePlan": {
+    "browser": ["screenshot of UMAP/table refs", "screenshot of final notebook or report preview"],
+    "computerUse": ["right-click failure log text", "click marker chip to highlight source"],
+    "workspace": ["task code ref", "stdout/stderr refs", "notebook ref", "figure/table refs"]
+  },
+  "blockerTemplate": "Record missing dataset/dependency/backend, visible failure log, and which rounds were completed as UI-only smoke.",
+  "scoringDimensions": ["goal-retention", "reference-use", "reasoning-continuity", "execution-capability", "failure-recovery", "artifact-quality", "reproducibility", "ui-usability"]
+}

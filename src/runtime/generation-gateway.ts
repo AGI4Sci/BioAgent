@@ -573,6 +573,7 @@ function normalizeGatewayRequest(body: Record<string, unknown>): GatewayRequest 
     agentBackend: typeof body.agentBackend === 'string' ? body.agentBackend : undefined,
     modelProvider: typeof body.modelProvider === 'string' ? body.modelProvider : undefined,
     modelName: typeof body.modelName === 'string' ? body.modelName : undefined,
+    maxContextWindowTokens: finiteNumber(body.maxContextWindowTokens),
     llmEndpoint: normalizeLlmEndpoint(body.llmEndpoint),
     scenarioPackageRef: normalizeScenarioPackageRef(body.scenarioPackageRef),
     skillPlanRef: typeof body.skillPlanRef === 'string' ? body.skillPlanRef : undefined,
@@ -1471,12 +1472,13 @@ function agentServerContextPolicy(request: GatewayRequest) {
 function estimateWorkspaceContextWindowState(params: {
   backend: string;
   modelName?: string;
+  maxContextWindowTokens?: number;
   usedTokens: number;
   source: 'estimate' | 'unknown';
   budget?: WorkspaceRuntimeContextBudget;
   auditRefs?: string[];
 }) {
-  const windowTokens = estimateModelContextWindow(params.modelName);
+  const windowTokens = params.maxContextWindowTokens ?? estimateModelContextWindow(params.modelName);
   const ratio = windowTokens ? params.usedTokens / windowTokens : undefined;
   return {
     backend: params.backend,
@@ -1500,6 +1502,7 @@ function estimateWorkspaceContextWindowState(params: {
 function handoffContextWindowState(params: {
   backend: string;
   modelName?: string;
+  maxContextWindowTokens?: number;
   rawRef: string;
   rawSha1: string;
   rawBytes: number;
@@ -1514,6 +1517,7 @@ function handoffContextWindowState(params: {
   return estimateWorkspaceContextWindowState({
     backend: params.backend,
     modelName: params.modelName,
+    maxContextWindowTokens: params.maxContextWindowTokens,
     usedTokens: params.normalizedTokens,
     source: 'estimate',
     auditRefs: params.auditRefs,
@@ -2162,6 +2166,7 @@ async function requestAgentServerGeneration(params: {
       contextWindowState: estimateWorkspaceContextWindowState({
         backend,
         modelName: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        maxContextWindowTokens: params.request.maxContextWindowTokens,
         usedTokens: Math.ceil((contextEnvelopeBytes + generationPrompt.length) / 4),
         source: 'estimate',
       }),
@@ -2259,6 +2264,7 @@ async function requestAgentServerGeneration(params: {
       contextWindowState: handoffContextWindowState({
         backend,
         modelName: llmRuntime.llmEndpoint?.modelName ?? params.request.modelName,
+        maxContextWindowTokens: params.request.maxContextWindowTokens,
         rawRef: normalizedHandoff.rawRef,
         rawSha1: normalizedHandoff.rawSha1,
         rawBytes: normalizedHandoff.rawBytes,

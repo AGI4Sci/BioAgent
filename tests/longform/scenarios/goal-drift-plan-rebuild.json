@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "T060",
+  "scenarioId": "longform-goal-drift-plan-rebuild",
+  "title": "Goal Drift And Reference Constrained Research Plan Rebuild",
+  "goal": "Test whether BioAgent preserves selected constraints, discards obsolete assumptions, and rebuilds an executable plan under changing user goals.",
+  "scenarioPackageId": "literature-evidence-review",
+  "minRounds": 7,
+  "backendRequirement": "real-backend-preferred",
+  "rounds": [
+    {
+      "round": 1,
+      "prompt": "提出一个宽泛研究目标：设计 BioAgent 引用交互如何影响复杂科研任务连续性的研究计划。",
+      "referenceOps": [],
+      "expectedArtifacts": ["initial-plan", "hypothesis-list"],
+      "acceptanceChecks": ["initial plan separates hypotheses from tasks"]
+    },
+    {
+      "round": 2,
+      "prompt": "产出初始计划、假设列表、里程碑和需要的数据/工具。",
+      "referenceOps": [],
+      "expectedArtifacts": ["hypothesis-list", "milestone-table"],
+      "acceptanceChecks": ["plan has explicit assumptions and acceptance criteria"]
+    },
+    {
+      "round": 3,
+      "prompt": "※1 只保留这条主线，删除或降级其它假设。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※1",
+          "source": "one hypothesis from the hypothesis list",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["narrowed-plan"],
+      "acceptanceChecks": ["selected hypothesis controls the updated plan", "obsolete hypotheses are marked dropped"]
+    },
+    {
+      "round": 4,
+      "prompt": "※2 解释这个无关结果为什么不应进入主线；如果它仍有价值，请放入附录或风险项。",
+      "referenceOps": [
+        {
+          "kind": "point-select-ui-block",
+          "marker": "※2",
+          "source": "unrelated result UI block",
+          "requiredPayload": ["sourceRef", "sourceKind", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["irrelevance-rationale"],
+      "acceptanceChecks": ["unrelated UI reference is not over-weighted", "main plan remains constrained by ※1"]
+    },
+    {
+      "round": 5,
+      "prompt": "加入新约束：预算只允许两周内完成，不能采购新数据，必须使用现有 workspace refs 和已有 BioAgent skills。",
+      "referenceOps": [],
+      "expectedArtifacts": ["constraint-update"],
+      "acceptanceChecks": ["plan acknowledges budget/time/data constraints"]
+    },
+    {
+      "round": 6,
+      "prompt": "※3 基于前一轮这段约束文字，重写计划、里程碑和验收标准。",
+      "referenceOps": [
+        {
+          "kind": "right-click-selected-text",
+          "marker": "※3",
+          "source": "budget/time/data constraint sentence",
+          "requiredPayload": ["selectedText", "sourceRef", "composerMarker"]
+        }
+      ],
+      "expectedArtifacts": ["replanned-milestones", "acceptance-criteria"],
+      "acceptanceChecks": ["selected constraint overrides stale goals", "milestones are feasible within two weeks"]
+    },
+    {
+      "round": 7,
+      "prompt": "输出最终 project plan、risk register 和 next actions；说明 ※1、※2、※3 分别如何改变计划。",
+      "referenceOps": [
+        {
+          "kind": "click-object-chip",
+          "source": "final plan or risk register object reference",
+          "expectedHighlight": "right pane focuses final plan/risk register"
+        }
+      ],
+      "expectedArtifacts": ["project-plan.md", "risk-register.csv", "next-actions.md"],
+      "acceptanceChecks": ["final plan has completion criteria", "risk register is previewable", "reference effects are explicit"]
+    }
+  ],
+  "evidencePlan": {
+    "browser": ["screenshot of narrowed plan", "screenshot of final risk register preview"],
+    "computerUse": ["right-click hypothesis/constraint text", "click final object chip"],
+    "workspace": ["project plan ref", "risk register ref", "session export"]
+  },
+  "blockerTemplate": "Record backend/UI limitation and complete text-selection/reference smoke where possible.",
+  "scoringDimensions": ["goal-retention", "reference-use", "reasoning-continuity", "execution-capability", "failure-recovery", "artifact-quality", "reproducibility", "ui-usability"]
+}

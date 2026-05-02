@@ -516,6 +516,119 @@ function Sidebar({
     }
   }
 
+  async function openFolderFromContext(path: string) {
+    setSelectedEntry({ path, kind: 'folder' });
+    setExpandedFolders((prev) => new Set([...prev, path]));
+    await ensureFolderLoaded(path);
+  }
+
+  async function toggleFolderExpanded(path: string, nextExpanded?: boolean) {
+    const shouldExpand = typeof nextExpanded === 'boolean' ? nextExpanded : !expandedFolders.has(path);
+    if (shouldExpand) {
+      setExpandedFolders((prev) => new Set([...prev, path]));
+      await ensureFolderLoaded(path);
+      return;
+    }
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+  }
+
+  async function handleContextMenuAction(action: 'create-file' | 'create-folder' | 'rename' | 'delete') {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    await runWorkspaceAction(action, entry);
+  }
+
+  async function handleContextMenuOpen() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry) return;
+    if (entry.kind === 'folder') {
+      await openFolderFromContext(entry.path);
+      return;
+    }
+    await openWorkspaceEntry(entry);
+  }
+
+  async function handleContextMenuToggleFolder() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry || entry.kind !== 'folder') return;
+    await toggleFolderExpanded(entry.path);
+  }
+
+  async function handleContextMenuCopyPath() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry?.path) return;
+    await navigator.clipboard?.writeText(entry.path);
+    setWorkspaceNotice(`已复制路径 ${entry.path}`);
+  }
+
+  function toWorkspaceRelativePath(path: string): string {
+    const root = explorerWorkspaceRoot(config).replace(/\/+$/, '');
+    const current = path.replace(/\/+$/, '');
+    if (root && current.startsWith(`${root}/`)) return current.slice(root.length + 1);
+    if (root && current === root) return '.';
+    return current;
+  }
+
+  async function handleContextMenuCopyRelativePath() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry?.path) return;
+    const relativePath = toWorkspaceRelativePath(entry.path);
+    await navigator.clipboard?.writeText(relativePath);
+    setWorkspaceNotice(`已复制相对路径 ${relativePath}`);
+  }
+
+  async function handleContextMenuRevealInFolder() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry?.path) return;
+    try {
+      setWorkspaceError('');
+      await openWorkspaceObject(config, 'reveal-in-folder', entry.path, config.workspacePath);
+      setWorkspaceNotice(`已在系统文件管理器定位 ${entry.name}`);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err));
+      setWorkspaceNotice('');
+    }
+  }
+
+  async function handleContextMenuOpenExternal() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry?.path) return;
+    try {
+      setWorkspaceError('');
+      await openWorkspaceObject(config, 'open-external', entry.path, config.workspacePath);
+      setWorkspaceNotice(`已使用系统默认方式打开 ${entry.name}`);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err));
+      setWorkspaceNotice('');
+    }
+  }
+
+  async function handleContextMenuOpenInWorkbench() {
+    const entry = contextMenu?.entry;
+    setContextMenu(null);
+    if (!entry || entry.kind !== 'file') return;
+    try {
+      setWorkspaceError('');
+      const file = await readWorkspaceFile(entry.path, config);
+      onWorkbenchFileOpened?.(file);
+      setPage('workbench');
+      setWorkspaceNotice(`已在工作台打开 ${file.name}`);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : String(err));
+      setWorkspaceNotice('');
+    }
+  }
+
   function renderExplorerDepth(depth: number, dirPath: string): ReactNode {
     const entries = folderChildren[dirPath];
     if (entries === undefined) {
@@ -805,27 +918,36 @@ function Sidebar({
                     {contextMenu.entry?.kind === 'folder' ? (
                       <button
                         type="button"
-                        onClick={() => {
-                          const path = contextMenu.entry?.path;
-                          setContextMenu(null);
-                          if (!path) return;
-                          setExpandedFolders((prev) => new Set([...prev, path]));
-                          void ensureFolderLoaded(path);
-                        }}
+                        onClick={() => void handleContextMenuToggleFolder()}
                       >
-                        展开
+                        {expandedFolders.has(contextMenu.entry.path) ? '折叠' : '展开'}
+                      </button>
+                    ) : null}
+                    {contextMenu.entry ? (
+                      <button type="button" onClick={() => void handleContextMenuOpen()}>
+                        {contextMenu.entry.kind === 'folder' ? '打开文件夹' : '打开'}
                       </button>
                     ) : null}
                     {contextMenu.entry?.kind === 'file' ? (
-                      <button type="button" onClick={() => contextMenu.entry && void openWorkspaceEntry(contextMenu.entry)}>打开</button>
+                      <button type="button" onClick={() => void handleContextMenuOpenInWorkbench()}>在工作台打开</button>
                     ) : null}
-                    <button type="button" onClick={() => void runWorkspaceAction('create-file', contextMenu.entry)}>新建文件</button>
-                    <button type="button" onClick={() => void runWorkspaceAction('create-folder', contextMenu.entry)}>新建文件夹</button>
-                    {contextMenu.entry ? <button type="button" onClick={() => void runWorkspaceAction('rename', contextMenu.entry)}>重命名</button> : null}
+                    <hr className="context-menu-separator" />
+                    <button type="button" onClick={() => void handleContextMenuAction('create-file')}>新建文件</button>
+                    <button type="button" onClick={() => void handleContextMenuAction('create-folder')}>新建文件夹</button>
+                    {contextMenu.entry ? <button type="button" onClick={() => void handleContextMenuAction('rename')}>重命名</button> : null}
                     {contextMenu.entry ? (
-                      <button type="button" onClick={() => void navigator.clipboard?.writeText(contextMenu.entry?.path || '')}>复制路径</button>
+                      <button type="button" onClick={() => void handleContextMenuCopyPath()}>复制路径</button>
                     ) : null}
-                    {contextMenu.entry ? <button type="button" className="danger" onClick={() => void runWorkspaceAction('delete', contextMenu.entry)}>删除</button> : null}
+                    {contextMenu.entry ? (
+                      <button type="button" onClick={() => void handleContextMenuCopyRelativePath()}>复制相对路径</button>
+                    ) : null}
+                    {contextMenu.entry ? (
+                      <button type="button" onClick={() => void handleContextMenuRevealInFolder()}>在文件管理器中显示</button>
+                    ) : null}
+                    {contextMenu.entry ? (
+                      <button type="button" onClick={() => void handleContextMenuOpenExternal()}>系统默认程序打开</button>
+                    ) : null}
+                    {contextMenu.entry ? <button type="button" className="danger" onClick={() => void handleContextMenuAction('delete')}>删除</button> : null}
                   </div>
                 ) : null}
                 <details className="explorer-folder-picker">
@@ -1078,6 +1200,16 @@ function SettingsDialog({
               step={10000}
               value={config.requestTimeoutMs}
               onChange={(event) => onChange({ requestTimeoutMs: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            <span>Max Context Window</span>
+            <input
+              type="number"
+              min={1000}
+              step={1000}
+              value={config.maxContextWindowTokens}
+              onChange={(event) => onChange({ maxContextWindowTokens: Number(event.target.value) })}
             />
           </label>
         </div>

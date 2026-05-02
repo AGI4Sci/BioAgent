@@ -312,6 +312,66 @@ test('backend repair budget exhaustion prevents another rerun', () => {
   assert.equal(shouldRunBackendAcceptanceRepair(acceptance), false);
 });
 
+test('explicit references must be reflected in the final answer or artifacts', () => {
+  const reference = {
+    id: 'ref-text-limitation',
+    kind: 'ui' as const,
+    title: '选中文本 · low sample size',
+    ref: 'ui-text:message:msg-limitation#abc',
+    sourceId: 'msg-limitation',
+    summary: 'low sample size weakens the claim',
+    payload: {
+      composerMarker: '※1',
+      selectedText: 'low sample size weakens the claim',
+      sourceRef: 'message:msg-limitation',
+    },
+  };
+  const snapshot = buildUserGoalSnapshot({
+    turnId: 'turn-reference-unused',
+    prompt: '※1 这个限制会不会推翻结论？',
+    scenarioId: 'literature-evidence-review',
+    references: [reference],
+  });
+  const response = responseWithContent('结论仍然成立。');
+  response.message.references = [reference];
+  response.run.references = [reference];
+
+  const accepted = acceptAndRepairAgentResponse({ snapshot, response, session: baseSession });
+
+  assert.equal(accepted.message.acceptance?.pass, false);
+  assert.equal(accepted.message.acceptance?.failures.some((failure) => failure.code === 'unused-explicit-references'), true);
+  assert.equal(shouldRunBackendAcceptanceRepair(accepted.message.acceptance), true);
+});
+
+test('explicit references pass when selected evidence changes the answer', () => {
+  const reference = {
+    id: 'ref-text-limitation',
+    kind: 'ui' as const,
+    title: '选中文本 · low sample size',
+    ref: 'ui-text:message:msg-limitation#abc',
+    sourceId: 'msg-limitation',
+    summary: 'low sample size weakens the claim',
+    payload: {
+      composerMarker: '※1',
+      selectedText: 'low sample size weakens the claim',
+      sourceRef: 'message:msg-limitation',
+    },
+  };
+  const snapshot = buildUserGoalSnapshot({
+    turnId: 'turn-reference-used',
+    prompt: '※1 这个限制会不会推翻结论？',
+    scenarioId: 'literature-evidence-review',
+    references: [reference],
+  });
+  const response = responseWithContent('※1 提到的 low sample size weakens the claim，因此我会把结论降级为暂定支持。');
+  response.message.references = [reference];
+  response.run.references = [reference];
+
+  const accepted = acceptAndRepairAgentResponse({ snapshot, response, session: baseSession });
+
+  assert.equal(accepted.message.acceptance?.pass, true);
+});
+
 function responseFixture({
   runId,
   content,

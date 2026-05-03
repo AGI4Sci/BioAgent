@@ -51,6 +51,7 @@ export async function sendSciForgeToolMessage(
   const selectedComponentIds = selectedComponentsForCurrentTurn(input.prompt, configuredComponentIds);
   const selectedSkillIds = selectedRuntimeSkillIds(input, skillDomain);
   const selectedToolIds = selectedRuntimeToolIds(input);
+  const selectedToolContracts = selectedRuntimeToolContracts(selectedToolIds);
   const expectedArtifactTypes = expectedArtifactsForCurrentTurn({
     scenarioId: builtInScenarioId,
     prompt: input.prompt,
@@ -112,6 +113,7 @@ export async function sendSciForgeToolMessage(
       references: referenceSummary,
       availableSkills: selectedSkillIds,
       selectedToolIds,
+      selectedToolContracts,
       expectedArtifactTypes,
       selectedComponentIds,
       availableComponentIds: configuredComponentIds,
@@ -141,11 +143,12 @@ export async function sendSciForgeToolMessage(
         availableComponentIds: configuredComponentIds,
         selectedSkillIds,
         selectedToolIds,
+        selectedToolContracts,
         artifactExpectationMode: expectedArtifactTypes.length ? 'explicit-current-turn' : 'backend-decides',
         rawUserPrompt: input.prompt,
         contextIsolation: contextPolicy,
         agentDispatchPolicy: 'agentserver-decides',
-        agentContext: buildAgentContext(input, recentConversation, artifactSummary, recentExecutionRefs, configuredComponentIds, artifactAccessPolicy),
+        agentContext: buildAgentContext(input, recentConversation, artifactSummary, recentExecutionRefs, configuredComponentIds, artifactAccessPolicy, selectedToolContracts),
       },
     };
     const requestBodyText = JSON.stringify(requestBody);
@@ -783,6 +786,7 @@ function summarizeArtifacts(input: SendAgentMessageInput) {
     status: artifactStatus(artifact),
     failureReason: artifactFailureReason(artifact),
     fileRefs: collectArtifactFileRefs(artifact),
+    imageMemoryRefs: collectArtifactImageMemoryRefs(artifact),
     metadata: compactRecord(artifact.metadata),
     dataSummary: summarizeArtifactData(artifact.data),
   }));
@@ -800,6 +804,7 @@ function buildArtifactAccessPolicy(
     artifact.path ? `file:${artifact.path}` : undefined,
     artifact.dataRef ? `file:${artifact.dataRef}` : undefined,
     ...(artifact.fileRefs ?? []).map((ref) => `file:${ref}`),
+    ...(artifact.imageMemoryRefs ?? []).map((ref) => `file:${ref}`),
   ])).slice(0, 32);
   const executionRefs = uniqueStrings(recentExecutionRefs.flatMap((unit) => [
     unit.outputRef ? `file:${unit.outputRef}` : undefined,
@@ -816,6 +821,7 @@ function buildArtifactAccessPolicy(
       'Do not cat or paste full JSON/markdown/log artifacts unless the current user explicitly asks for full content.',
       'For verification, prefer bounded reads: file metadata, schema keys, counts, jq-selected fields, head/tail, or concise excerpts.',
       'When comparing large artifacts, read only the fields needed for the current question and cite the artifact/ref path.',
+      'For vision/computer-use image memory, use screenshot file refs, thumbnails, hashes, and step summaries; never inline dataUrl/base64 screenshot bytes into model context.',
       'If the summary is enough, answer from refs and dataSummary without reopening the file.',
     ],
     explicitCurrentTurnRefs: explicitRefs,
@@ -844,6 +850,44 @@ function selectedRuntimeSkillIds(input: SendAgentMessageInput, skillDomain: stri
 
 function selectedRuntimeToolIds(input: SendAgentMessageInput) {
   return uniqueStrings(input.scenarioOverride?.selectedToolIds ?? []);
+}
+
+function selectedRuntimeToolContracts(selectedToolIds: string[]) {
+  return selectedToolIds.flatMap((toolId) => {
+    if (toolId !== 'local.vision-sense') return [{ id: toolId, selected: true }];
+    return [{
+      id: 'local.vision-sense',
+      selected: true,
+      kind: 'sense-plugin',
+      modality: 'vision',
+      packageRoot: 'packages/senses/vision-sense',
+      readmePath: 'packages/tools/local/vision-sense/SKILL.md',
+      skillTemplate: 'packages/skills/installed/local/vision-gui-task/SKILL.md',
+      inputContract: {
+        textField: 'text',
+        modalitiesField: 'modalities',
+        acceptedModalities: ['screenshot', 'image'],
+      },
+      outputContract: {
+        kind: 'text',
+        formats: ['application/json', 'application/x-ndjson', 'text/x-computer-use-command'],
+        actions: ['click', 'type_text', 'press_key', 'scroll', 'wait'],
+      },
+      executionBoundary: 'text-signal-only',
+      missingRuntimeBridgePolicy: {
+        behavior: 'diagnose-or-fail-closed',
+        reason: 'local.vision-sense only emits auditable text signals and trace refs; a browser/desktop executor bridge plus screenshot source must execute real GUI actions.',
+        noFallbackRepoScan: true,
+        expectedFailureUnit: 'Return failed-with-reason when no GUI executor/screenshot bridge is configured for this run.',
+      },
+      computerUsePolicy: {
+        executorOwnedBy: 'upstream Computer Use provider or browser/desktop adapter',
+        noDomOrAccessibilityReads: true,
+        highRiskPolicy: 'reject unless explicitly confirmed upstream',
+        tracePolicy: 'preserve screenshot refs, planned action, grounding summary, execution status, pixel diff, and failureReason; never inline screenshot base64 into chat context',
+      },
+    }];
+  });
 }
 
 function summarizeSciForgeReferences(input: SendAgentMessageInput) {
@@ -961,10 +1005,17 @@ function summarizeArtifactData(data: unknown) {
       stderrRef: data.stderrRef,
       logRef: data.logRef,
       reportRef: data.reportRef,
+      traceRef: data.traceRef,
+      visionTraceRef: data.visionTraceRef,
+      screenshotRef: data.screenshotRef,
+      beforeScreenshotRef: data.beforeScreenshotRef,
+      afterScreenshotRef: data.afterScreenshotRef,
+      finalScreenshotRef: data.finalScreenshotRef,
       paperListRef: data.paperListRef,
       pdfDir: data.pdfDir,
       downloadDir: data.downloadDir,
     }),
+    imageMemory: summarizeVisionImageMemory(data),
   };
 }
 
@@ -1008,7 +1059,7 @@ function collectArtifactFileRefs(value: unknown) {
   const visit = (entry: unknown, key = '') => {
     if (refs.size >= 24) return;
     if (typeof entry === 'string') {
-      if (looksLikeRef(entry) || /path|ref|file|dir|pdf|download|log|stdout|stderr|output|code/i.test(key)) refs.add(entry);
+      if (looksLikeRef(entry) || /path|ref|file|dir|pdf|download|log|stdout|stderr|output|code|screenshot|image|thumb|crosshair/i.test(key)) refs.add(entry);
       return;
     }
     if (Array.isArray(entry)) {
@@ -1024,11 +1075,59 @@ function collectArtifactFileRefs(value: unknown) {
   return refs.size ? Array.from(refs) : undefined;
 }
 
+function summarizeVisionImageMemory(data: Record<string, unknown>) {
+  const refs = collectArtifactImageMemoryRefs(data) ?? [];
+  const steps = Array.isArray(data.steps) ? data.steps : Array.isArray(data.trace) ? data.trace : [];
+  if (!refs.length && !steps.length) return undefined;
+  return {
+    policy: 'file-refs-only',
+    refs: refs.slice(0, 24),
+    stepCount: steps.length || undefined,
+    recentSteps: steps.slice(-5).map((step, index) => {
+      const record = isRecord(step) ? step : {};
+      return compactRecord({
+        index: typeof record.index === 'number' ? record.index : steps.length - Math.min(5, steps.length) + index,
+        beforeScreenshotRef: record.beforeScreenshotRef ?? record.before_screenshot_ref,
+        afterScreenshotRef: record.afterScreenshotRef ?? record.after_screenshot_ref,
+        crosshairScreenshotRef: record.crosshairScreenshotRef ?? record.crosshair_screenshot_ref,
+        action: record.action ?? record.plannedAction ?? record.planned_action,
+        target: record.target ?? record.targetDescription ?? record.target_description,
+        grounding: record.grounding,
+        pixelDiff: record.pixelDiff ?? record.pixel_diff,
+        failureReason: record.failureReason ?? record.failure_reason,
+      });
+    }).filter(Boolean),
+  };
+}
+
+function collectArtifactImageMemoryRefs(value: unknown) {
+  const refs = new Set<string>();
+  const visit = (entry: unknown, key = '') => {
+    if (refs.size >= 32) return;
+    if (typeof entry === 'string') {
+      if (isDataUrl(entry)) return;
+      if (isImageMemoryRef(entry) || /screenshot|image|thumb|crosshair/i.test(key)) refs.add(entry);
+      return;
+    }
+    if (Array.isArray(entry)) {
+      for (const item of entry.slice(0, 48)) visit(item, key);
+      return;
+    }
+    if (!isRecord(entry)) return;
+    for (const [childKey, childValue] of Object.entries(entry).slice(0, 64)) {
+      visit(childValue, childKey);
+    }
+  };
+  visit(value);
+  return refs.size ? Array.from(refs) : undefined;
+}
+
 function compactRecord(value: unknown) {
   if (!isRecord(value)) return undefined;
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value).slice(0, 24)) {
-    if (typeof entry === 'string') out[key] = entry.length > 500 ? `${entry.slice(0, 500)}...` : entry;
+    if (typeof entry === 'string' && isDataUrl(entry)) out[key] = '[image dataUrl omitted; use file/image refs instead]';
+    else if (typeof entry === 'string') out[key] = entry.length > 500 ? `${entry.slice(0, 500)}...` : entry;
     else if (typeof entry === 'number' || typeof entry === 'boolean' || entry == null) out[key] = entry;
     else if (Array.isArray(entry)) out[key] = entry.slice(0, 12);
     else if (isRecord(entry)) out[key] = Object.fromEntries(Object.entries(entry).slice(0, 8));
@@ -1037,7 +1136,15 @@ function compactRecord(value: unknown) {
 }
 
 function looksLikeRef(value: string) {
-  return /\.sciforge\/|stdout|stderr|output|input|\.json|\.log|\.py|\.ipynb|\.r$/i.test(value);
+  return /\.sciforge\/|stdout|stderr|output|input|\.json|\.log|\.py|\.ipynb|\.r|\.png|\.jpe?g|\.gif|\.webp|\.svg$/i.test(value);
+}
+
+function isImageMemoryRef(value: string) {
+  return !isDataUrl(value) && /(?:^artifact:|^file:|\.sciforge\/|\.bioagent\/|workspace:\/\/|\/).*\.(?:png|jpe?g|gif|webp|svg)$/i.test(value);
+}
+
+function isDataUrl(value: string) {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
 }
 
 function safeWorkspaceName(value: string) {
@@ -1096,6 +1203,7 @@ function buildAgentContext(
   recentExecutionRefs: ReturnType<typeof summarizeExecutionRefs>,
   availableComponentIds: string[],
   artifactAccessPolicy = buildArtifactAccessPolicy(input, artifactSummary, recentExecutionRefs),
+  selectedToolContracts = selectedRuntimeToolContracts(selectedRuntimeToolIds(input)),
 ) {
   const scenario = input.scenarioOverride;
   return {
@@ -1111,6 +1219,8 @@ function buildAgentContext(
     artifactAccessPolicy,
     currentReferences: summarizeSciForgeReferences(input),
     availableComponentIds,
+    selectedToolIds: selectedRuntimeToolIds(input),
+    selectedToolContracts,
     artifacts: artifactSummary,
     recentExecutionRefs,
     workspacePersistence: workspacePersistenceSummary(input),
@@ -1119,6 +1229,7 @@ function buildAgentContext(
       'Use this context only as supporting evidence for AgentServer-side intent reasoning.',
       'Do not let UI hints, scenario text, or historical requests override the current raw user prompt.',
       'For prior artifacts, prefer refs and bounded excerpts over full file reads unless the user explicitly requests full content.',
+      'When local.vision-sense is selected, treat it as an optional vision sense plugin: build text + screenshot/image modality requests, emit text-form Computer Use commands, and keep trace refs compact across follow-up turns.',
     ],
   };
 }

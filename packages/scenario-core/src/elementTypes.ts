@@ -39,7 +39,7 @@ export interface SkillElement extends ElementManifestBase {
 
 export interface ToolElement extends ElementManifestBase {
   kind: 'tool';
-  toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime';
+  toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime' | 'sense-plugin';
   skillDomains: SkillDomain[];
   producesArtifactTypes?: string[];
   requiredConfig?: string[];

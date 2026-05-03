@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
 import { ChevronDown, ChevronUp, Download, FileCode, FilePlus, Play } from 'lucide-react';
 import { type ScenarioId } from '../data';
 import { SCENARIO_SPECS, componentManifest } from '../scenarioSpecs';
@@ -19,6 +19,20 @@ import type { RuntimeHealthItem } from '../runtimeHealth';
 import { exportJsonFile } from './exportUtils';
 import { ActionButton, Badge, cx } from './uiPrimitives';
 
+type BuilderLegacyStepId = 'describe' | 'elements' | 'contract' | 'quality' | 'publish';
+
+type BuilderChromePaneId =
+  | 'scene-info'
+  | 'agent-runtime-ui'
+  | 'scenario-package-ui'
+  | 'skills'
+  | 'tools'
+  | 'artifacts'
+  | 'failure-policies'
+  | 'contract'
+  | 'quality'
+  | 'publish';
+
 export function ScenarioBuilderPanel({
   scenarioId,
   scenario,
@@ -29,6 +43,7 @@ export function ScenarioBuilderPanel({
   onChange,
   agentRuntimeComponentIds,
   onAgentRuntimeComponentIdsChange,
+  chromeEmbedded,
 }: {
   scenarioId: ScenarioId;
   scenario: ScenarioRuntimeOverride;
@@ -40,10 +55,70 @@ export function ScenarioBuilderPanel({
   /** When set (e.g. workbench), exposes AgentServer `availableComponentIds` as the same selectable component list as the scenario UI allowlist. */
   agentRuntimeComponentIds?: string[];
   onAgentRuntimeComponentIdsChange?: (ids: string[]) => void;
+  /** Workbench: single chrome toggle expands this panel body directly (no nested summary row). */
+  chromeEmbedded?: boolean;
 }) {
-  const initialSelection = useMemo(() => defaultElementSelectionForScenario(scenarioId, scenario), [scenarioId]);
+  const initialSelection = useMemo(
+    () => defaultElementSelectionForScenario(scenarioId, scenario),
+    [
+      scenarioId,
+      scenario.skillDomain,
+      scenario.defaultComponents,
+      scenario.allowedComponents,
+      scenario.selectedSkillIds,
+      scenario.selectedToolIds,
+    ],
+  );
   const [selection, setSelection] = useState<ScenarioElementSelection>(initialSelection);
-  const [builderStep, setBuilderStep] = useState<'describe' | 'elements' | 'contract' | 'quality' | 'publish'>('describe');
+  const [legacyStep, setLegacyStep] = useState<BuilderLegacyStepId>('describe');
+  const [chromePane, setChromePane] = useState<BuilderChromePaneId>('scene-info');
+  const describeSectionRef = useRef<HTMLElement>(null);
+  const elementsSectionRef = useRef<HTMLElement>(null);
+  const contractSectionRef = useRef<HTMLElement>(null);
+  const qualitySectionRef = useRef<HTMLElement>(null);
+  const publishSectionRef = useRef<HTMLElement>(null);
+  const legacySectionRefs: Record<BuilderLegacyStepId, RefObject<HTMLElement | null>> = {
+    describe: describeSectionRef,
+    elements: elementsSectionRef,
+    contract: contractSectionRef,
+    quality: qualitySectionRef,
+    publish: publishSectionRef,
+  };
+  const chromeNavItems = useMemo((): Array<{ id: BuilderChromePaneId; label: string }> => {
+    const items: Array<{ id: BuilderChromePaneId; label: string }> = [
+      { id: 'scene-info', label: '场景信息' },
+    ];
+    if (onAgentRuntimeComponentIdsChange) {
+      items.push({ id: 'agent-runtime-ui', label: 'Agent 运行时 UI' });
+    }
+    items.push(
+      { id: 'scenario-package-ui', label: '场景 UI allowlist' },
+      { id: 'skills', label: 'Skills' },
+      { id: 'tools', label: 'Tools' },
+      { id: 'artifacts', label: 'Artifacts' },
+      { id: 'failure-policies', label: '失败策略' },
+      { id: 'contract', label: '场景契约' },
+      { id: 'quality', label: '质量检查' },
+      { id: 'publish', label: '发布运行' },
+    );
+    return items;
+  }, [onAgentRuntimeComponentIdsChange]);
+  useEffect(() => {
+    if (!chromeEmbedded) return;
+    if (chromePane === 'agent-runtime-ui' && !onAgentRuntimeComponentIdsChange) {
+      setChromePane('scenario-package-ui');
+    }
+  }, [chromeEmbedded, chromePane, onAgentRuntimeComponentIdsChange]);
+  function navigateLegacyStep(step: BuilderLegacyStepId) {
+    setLegacyStep(step);
+    requestAnimationFrame(() => {
+      legacySectionRefs[step].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+  function legacyStepMuted(step: BuilderLegacyStepId) {
+    return legacyStep !== step;
+  }
+  const metadataBuilderStep = chromeEmbedded ? chromePane : legacyStep;
   const [previewTab, setPreviewTab] = useState<'scenario' | 'skill' | 'ui' | 'validation'>('scenario');
   const [advancedPreviewOpen, setAdvancedPreviewOpen] = useState(false);
   const [publishStatus, setPublishStatus] = useState('');
@@ -147,7 +222,7 @@ export function ScenarioBuilderPanel({
           ...(compileResult.package as ScenarioPackage & { metadata?: Record<string, unknown> }).metadata,
           recommendationReasons,
           compiledFrom: {
-            builderStep,
+            builderStep: metadataBuilderStep,
             skillDomain: selection.skillDomain ?? scenario.skillDomain,
             selectedSkillIds: selection.selectedSkillIds,
             selectedToolIds: selection.selectedToolIds,
@@ -180,204 +255,393 @@ export function ScenarioBuilderPanel({
       : previewTab === 'ui'
         ? compileResult.uiPlan
         : compileResult.validationReport;
+
+  function DescribeFields() {
+    return (
+      <>
+        <label>
+          <span>场景名称</span>
+          <input
+            value={scenario.title}
+            onChange={(event) => {
+              patch({ title: event.target.value });
+              patchSelection({ title: event.target.value });
+            }}
+          />
+        </label>
+        <label className="wide">
+          <span>场景描述</span>
+          <input
+            value={scenario.description}
+            onChange={(event) => {
+              patch({ description: event.target.value });
+              patchSelection({ description: event.target.value });
+            }}
+          />
+        </label>
+      </>
+    );
+  }
+
+  function AgentRuntimeUiSelector() {
+    if (!onAgentRuntimeComponentIdsChange) return null;
+    return (
+      <ElementSelector
+        title="Agent 运行时 UI 白名单"
+        description="发往 AgentServer 的 availableComponentIds；每行包含组件 ID、标题与说明。与左侧「组件工作台」勾选列表一致。"
+        options={componentOptions.map((component) => {
+          const popover = componentElementPopover(component.componentId);
+          return {
+            id: component.componentId,
+            label: component.label,
+            detail: component.description,
+            meta: popover.meta,
+          };
+        })}
+        selected={agentRuntimeComponentIds ?? []}
+        onToggle={(id) => {
+          const current = agentRuntimeComponentIds ?? [];
+          const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+          onAgentRuntimeComponentIdsChange(unique(next));
+        }}
+        onSelectMany={(ids) => onAgentRuntimeComponentIdsChange(unique([...(agentRuntimeComponentIds ?? []), ...ids]))}
+        onClearMany={(ids) => onAgentRuntimeComponentIdsChange((agentRuntimeComponentIds ?? []).filter((item) => !ids.includes(item)))}
+      />
+    );
+  }
+
+  function ScenarioPackageUiSelector() {
+    return (
+      <ElementSelector
+        title="场景 UI allowlist（Scenario package）"
+        description="每行一个可渲染 UI 组件；勾选项写入 Scenario 的 defaultComponents，用于编译 UI plan 与默认视图。"
+        options={componentOptions.map((component) => {
+          const popover = componentElementPopover(component.componentId);
+          return {
+            id: component.componentId,
+            label: component.label,
+            detail: component.description,
+            meta: popover.meta,
+          };
+        })}
+        selected={scenario.defaultComponents}
+        onToggle={toggleComponent}
+        onSelectMany={(ids) => setSelectedComponents(unique([...scenario.defaultComponents, ...ids]))}
+        onClearMany={(ids) => setSelectedComponents(scenario.defaultComponents.filter((id) => !ids.includes(id)))}
+      />
+    );
+  }
+
+  function SkillsSelector() {
+    return (
+      <ElementSelector
+        title="Skills"
+        options={skillOptions.map((skill) => ({
+          id: skill.id,
+          label: skill.label,
+          detail: skill.description,
+          meta: `produces ${skill.outputArtifactTypes.join(', ') || 'runtime artifacts'} · ${skill.requiredCapabilities.map((item) => `${item.capability}:${item.level}`).join(', ') || 'no extra capability profile'}`,
+        }))}
+        selected={selection.selectedSkillIds}
+        onToggle={(id) => toggleSelectionList('selectedSkillIds', id)}
+        onSelectMany={(ids) => setSelectionList('selectedSkillIds', [...selection.selectedSkillIds, ...ids])}
+        onClearMany={(ids) => setSelectionList('selectedSkillIds', selection.selectedSkillIds.filter((id) => !ids.includes(id)))}
+      />
+    );
+  }
+
+  function ToolsSelector() {
+    return (
+      <ElementSelector
+        title="Tools"
+        options={toolOptions.map((tool) => ({
+          id: tool.id,
+          label: tool.label,
+          detail: tool.description,
+          meta: `${tool.toolType} · produces ${(tool.producesArtifactTypes ?? []).join(', ') || 'supporting runtime data'}`,
+        }))}
+        selected={selection.selectedToolIds ?? []}
+        onToggle={(id) => toggleSelectionList('selectedToolIds', id)}
+        onSelectMany={(ids) => setSelectionList('selectedToolIds', [...(selection.selectedToolIds ?? []), ...ids])}
+        onClearMany={(ids) => setSelectionList('selectedToolIds', (selection.selectedToolIds ?? []).filter((id) => !ids.includes(id)))}
+      />
+    );
+  }
+
+  function ArtifactsSelector() {
+    return (
+      <ElementSelector
+        title="Artifacts"
+        options={artifactOptions.map((artifact) => ({
+          id: artifact.artifactType,
+          label: artifact.label,
+          detail: artifact.description,
+          meta: `producer ${artifact.producerSkillIds.join(', ') || 'none'} · consumer ${artifact.consumerComponentIds.join(', ') || 'none'} · handoff ${artifact.handoffTargets.join(', ') || 'none'}`,
+        }))}
+        selected={selection.selectedArtifactTypes}
+        onToggle={(id) => toggleSelectionList('selectedArtifactTypes', id)}
+        onSelectMany={(ids) => setSelectionList('selectedArtifactTypes', [...selection.selectedArtifactTypes, ...ids])}
+        onClearMany={(ids) => setSelectionList('selectedArtifactTypes', selection.selectedArtifactTypes.filter((id) => !ids.includes(id)))}
+      />
+    );
+  }
+
+  function FailurePoliciesSelector() {
+    return (
+      <ElementSelector
+        title="Failure policies"
+        options={elementRegistry.failurePolicies.map((policy) => ({
+          id: policy.id,
+          label: policy.label,
+          detail: policy.description,
+          meta: `fallback ${policy.fallbackComponentId} · ${policy.recoverActions.join(', ')}`,
+        }))}
+        selected={selection.selectedFailurePolicyIds ?? []}
+        onToggle={(id) => toggleSelectionList('selectedFailurePolicyIds', id)}
+        onSelectMany={(ids) => setSelectionList('selectedFailurePolicyIds', [...(selection.selectedFailurePolicyIds ?? []), ...ids])}
+        onClearMany={(ids) => setSelectionList('selectedFailurePolicyIds', (selection.selectedFailurePolicyIds ?? []).filter((id) => !ids.includes(id)))}
+      />
+    );
+  }
+
+  const bodyVisible = chromeEmbedded || expanded;
   return (
-    <section className={cx('scenario-settings', expanded && 'expanded')}>
-      <button className="scenario-settings-summary" onClick={onToggle}>
-        <FileCode size={16} />
-        <span>Scenario Builder</span>
-        <strong>{scenario.skillDomain}</strong>
-        <em>{compileResult.package.id}@{compileResult.package.version} · {compileResult.validationReport.ok ? 'valid' : 'needs fixes'}</em>
-        {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
-      {expanded ? (
-        <div className="scenario-settings-body">
-          <div className="builder-stepper" aria-label="Scenario Builder steps">
-            {[
-              ['describe', '需求描述'],
-              ['elements', '推荐元素'],
-              ['contract', '编辑契约'],
-              ['quality', '质量检查'],
-              ['publish', '发布运行'],
-            ].map(([id, label], index) => (
-              <button key={id} className={cx(builderStep === id && 'active')} onClick={() => setBuilderStep(id as typeof builderStep)}>
-                <span>{index + 1}</span>
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className={cx('builder-step-panel', builderStep !== 'describe' && 'muted')}>
-            <label>
-              <span>场景名称</span>
-              <input
-                value={scenario.title}
-                onChange={(event) => {
-                  patch({ title: event.target.value });
-                  patchSelection({ title: event.target.value });
-                }}
-              />
-            </label>
-            <label className="wide">
-              <span>场景描述</span>
-              <input
-                value={scenario.description}
-                onChange={(event) => {
-                  patch({ description: event.target.value });
-                  patchSelection({ description: event.target.value });
-                }}
-              />
-            </label>
-          </div>
-          <div className={cx('builder-step-panel', builderStep !== 'elements' && 'muted')}>
-            {onAgentRuntimeComponentIdsChange ? (
-              <ElementSelector
-                title="Agent 运行时 UI 白名单"
-                description="发往 AgentServer 的 availableComponentIds；每行包含组件 ID、标题与说明。与左侧「组件工作台」勾选列表一致。"
-                options={componentOptions.map((component) => {
-                  const popover = componentElementPopover(component.componentId);
-                  return {
-                    id: component.componentId,
-                    label: component.label,
-                    detail: component.description,
-                    meta: popover.meta,
-                  };
-                })}
-                selected={agentRuntimeComponentIds ?? []}
-                onToggle={(id) => {
-                  const current = agentRuntimeComponentIds ?? [];
-                  const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-                  onAgentRuntimeComponentIdsChange(unique(next));
-                }}
-                onSelectMany={(ids) => onAgentRuntimeComponentIdsChange(unique([...(agentRuntimeComponentIds ?? []), ...ids]))}
-                onClearMany={(ids) => onAgentRuntimeComponentIdsChange((agentRuntimeComponentIds ?? []).filter((item) => !ids.includes(item)))}
-              />
-            ) : null}
-            <ElementSelector
-              title="场景 UI allowlist（Scenario package）"
-              description="每行一个可渲染 UI 组件；勾选项写入 Scenario 的 defaultComponents，用于编译 UI plan 与默认视图。"
-              options={componentOptions.map((component) => {
-                const popover = componentElementPopover(component.componentId);
-                return {
-                  id: component.componentId,
-                  label: component.label,
-                  detail: component.description,
-                  meta: popover.meta,
-                };
-              })}
-              selected={scenario.defaultComponents}
-              onToggle={toggleComponent}
-              onSelectMany={(ids) => setSelectedComponents(unique([...scenario.defaultComponents, ...ids]))}
-              onClearMany={(ids) => setSelectedComponents(scenario.defaultComponents.filter((id) => !ids.includes(id)))}
-            />
-            <ElementSelector
-              title="Skills"
-              options={skillOptions.map((skill) => ({
-                id: skill.id,
-                label: skill.label,
-                detail: skill.description,
-                meta: `produces ${skill.outputArtifactTypes.join(', ') || 'runtime artifacts'} · ${skill.requiredCapabilities.map((item) => `${item.capability}:${item.level}`).join(', ') || 'no extra capability profile'}`,
-              }))}
-              selected={selection.selectedSkillIds}
-              onToggle={(id) => toggleSelectionList('selectedSkillIds', id)}
-              onSelectMany={(ids) => setSelectionList('selectedSkillIds', [...selection.selectedSkillIds, ...ids])}
-              onClearMany={(ids) => setSelectionList('selectedSkillIds', selection.selectedSkillIds.filter((id) => !ids.includes(id)))}
-            />
-            <ElementSelector
-              title="Tools"
-              options={toolOptions.map((tool) => ({
-                id: tool.id,
-                label: tool.label,
-                detail: tool.description,
-                meta: `${tool.toolType} · produces ${(tool.producesArtifactTypes ?? []).join(', ') || 'supporting runtime data'}`,
-              }))}
-              selected={selection.selectedToolIds ?? []}
-              onToggle={(id) => toggleSelectionList('selectedToolIds', id)}
-              onSelectMany={(ids) => setSelectionList('selectedToolIds', [...(selection.selectedToolIds ?? []), ...ids])}
-              onClearMany={(ids) => setSelectionList('selectedToolIds', (selection.selectedToolIds ?? []).filter((id) => !ids.includes(id)))}
-            />
-            <ElementSelector
-              title="Artifacts"
-              options={artifactOptions.map((artifact) => ({
-                id: artifact.artifactType,
-                label: artifact.label,
-                detail: artifact.description,
-                meta: `producer ${artifact.producerSkillIds.join(', ') || 'none'} · consumer ${artifact.consumerComponentIds.join(', ') || 'none'} · handoff ${artifact.handoffTargets.join(', ') || 'none'}`,
-              }))}
-              selected={selection.selectedArtifactTypes}
-              onToggle={(id) => toggleSelectionList('selectedArtifactTypes', id)}
-              onSelectMany={(ids) => setSelectionList('selectedArtifactTypes', [...selection.selectedArtifactTypes, ...ids])}
-              onClearMany={(ids) => setSelectionList('selectedArtifactTypes', selection.selectedArtifactTypes.filter((id) => !ids.includes(id)))}
-            />
-            <ElementSelector
-              title="Failure policies"
-              options={elementRegistry.failurePolicies.map((policy) => ({
-                id: policy.id,
-                label: policy.label,
-                detail: policy.description,
-                meta: `fallback ${policy.fallbackComponentId} · ${policy.recoverActions.join(', ')}`,
-              }))}
-              selected={selection.selectedFailurePolicyIds ?? []}
-              onToggle={(id) => toggleSelectionList('selectedFailurePolicyIds', id)}
-              onSelectMany={(ids) => setSelectionList('selectedFailurePolicyIds', [...(selection.selectedFailurePolicyIds ?? []), ...ids])}
-              onClearMany={(ids) => setSelectionList('selectedFailurePolicyIds', (selection.selectedFailurePolicyIds ?? []).filter((id) => !ids.includes(id)))}
-            />
-          </div>
-          <div className={cx('builder-step-panel', builderStep !== 'contract' && 'muted')}>
-            <label className="wide">
-              <span>Scenario markdown</span>
-              <textarea
-                value={scenario.scenarioMarkdown}
-                onChange={(event) => {
-                  patch({ scenarioMarkdown: event.target.value });
-                  patchSelection({ scenarioMarkdown: event.target.value });
-                }}
-              />
-            </label>
-          </div>
-          <div className="builder-recommendation-summary">
-            <strong>推荐组合</strong>
-            <span>基于 skill domain={selection.skillDomain ?? scenario.skillDomain}，当前会生成 {compileResult.uiPlan.slots.length} 个 UI slot、{compileResult.skillPlan.skillIRs.length} 个 skill step。</span>
-            <span>发布前会检查 producer/consumer、fallback、runtime profile 和 package quality gate。</span>
-            <ul>
-              {recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}
-            </ul>
-          </div>
-          <div className={cx('scenario-preview-panel', builderStep !== 'contract' && 'muted')}>
-            <button className="advanced-preview-toggle" onClick={() => setAdvancedPreviewOpen((value) => !value)}>
-              {advancedPreviewOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              {advancedPreviewOpen ? '收起高级 JSON contract' : '展开高级 JSON contract'}
-            </button>
-            {advancedPreviewOpen ? (
-              <>
-                <div className="scenario-preview-tabs">
-                  {(['scenario', 'skill', 'ui', 'validation'] as const).map((tab) => (
-                    <button key={tab} className={cx(previewTab === tab && 'active')} onClick={() => setPreviewTab(tab)}>{tab}</button>
-                  ))}
-                </div>
-                <pre className="inspector-json">{JSON.stringify(previewJson, null, 2)}</pre>
-              </>
-            ) : null}
-          </div>
-          <div className={cx('manifest-diagnostics', builderStep !== 'quality' && 'muted')}>
-            <strong>Quality gate</strong>
-            <span><Badge variant={qualityCounts.blocking ? 'danger' : 'success'}>{qualityCounts.blocking} blocking</Badge></span>
-            <span><Badge variant={qualityCounts.warning ? 'warning' : 'muted'}>{qualityCounts.warning} warning</Badge></span>
-            <span><Badge variant="info">{qualityCounts.note} note</Badge></span>
-            <code>{qualityReport.items.slice(0, 3).map((item) => `${item.severity}:${item.code}`).join(' · ') || 'ready'}</code>
-          </div>
-          <div className={cx('scenario-publish-row', builderStep !== 'publish' && 'muted')}>
-            <div>
-              <Badge variant={compileResult.validationReport.ok ? 'success' : 'warning'}>
-                {compileResult.validationReport.ok ? 'validation ok' : `${compileResult.validationReport.issues.length} issues`}
-              </Badge>
-              {publishStatus ? <span>{publishStatus}</span> : null}
-            </div>
-            <div>
-              <ActionButton icon={FilePlus} variant="secondary" onClick={() => void saveCompiled('draft')}>保存 draft</ActionButton>
-              <ActionButton icon={Play} disabled={!compileResult.validationReport.ok} onClick={() => void saveCompiled('published')}>发布</ActionButton>
-              {publishStatus.includes('已发布') ? <ActionButton icon={Download} variant="secondary" onClick={() => exportJsonFile(`${compileResult.package.id}-${compileResult.package.version}.scenario-package.json`, compileResult.package)}>导出 package</ActionButton> : null}
-            </div>
-          </div>
+    <section className={cx('scenario-settings', bodyVisible && 'expanded', chromeEmbedded && 'scenario-settings-chrome-embedded')}>
+      {chromeEmbedded ? (
+        <div className="scenario-settings-chrome-heading">
+          <FileCode size={16} />
+          <span>Scenario Builder</span>
+          <strong>{scenario.skillDomain}</strong>
+          <em>{compileResult.package.id}@{compileResult.package.version} · {compileResult.validationReport.ok ? 'valid' : 'needs fixes'}</em>
         </div>
+      ) : (
+        <button type="button" className="scenario-settings-summary" onClick={onToggle}>
+          <FileCode size={16} />
+          <span>Scenario Builder</span>
+          <strong>{scenario.skillDomain}</strong>
+          <em>{compileResult.package.id}@{compileResult.package.version} · {compileResult.validationReport.ok ? 'valid' : 'needs fixes'}</em>
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+      )}
+      {bodyVisible ? (
+        chromeEmbedded ? (
+          <div className="scenario-settings-body">
+            <nav className="builder-chrome-nav" aria-label="Scenario Builder">
+              {chromeNavItems.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={cx('nav-item', chromePane === id && 'active')}
+                  aria-current={chromePane === id ? 'page' : undefined}
+                  onClick={() => setChromePane(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+            <div className="builder-chrome-pane">
+              {chromePane === 'scene-info' ? (
+                <div className="builder-step-panel">
+                  <DescribeFields />
+                </div>
+              ) : null}
+              {chromePane === 'agent-runtime-ui' && onAgentRuntimeComponentIdsChange ? (
+                <div className="builder-step-panel">
+                  <AgentRuntimeUiSelector />
+                </div>
+              ) : null}
+              {chromePane === 'scenario-package-ui' ? (
+                <div className="builder-step-panel">
+                  <ScenarioPackageUiSelector />
+                </div>
+              ) : null}
+              {chromePane === 'skills' ? (
+                <div className="builder-step-panel">
+                  <SkillsSelector />
+                </div>
+              ) : null}
+              {chromePane === 'tools' ? (
+                <div className="builder-step-panel">
+                  <ToolsSelector />
+                </div>
+              ) : null}
+              {chromePane === 'artifacts' ? (
+                <div className="builder-step-panel">
+                  <ArtifactsSelector />
+                </div>
+              ) : null}
+              {chromePane === 'failure-policies' ? (
+                <div className="builder-step-panel">
+                  <FailurePoliciesSelector />
+                </div>
+              ) : null}
+              {chromePane === 'contract' ? (
+                <>
+                  <div className="builder-step-panel">
+                    <label className="wide">
+                      <span>Scenario markdown</span>
+                      <textarea
+                        value={scenario.scenarioMarkdown}
+                        onChange={(event) => {
+                          patch({ scenarioMarkdown: event.target.value });
+                          patchSelection({ scenarioMarkdown: event.target.value });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="builder-recommendation-summary">
+                    <strong>推荐组合</strong>
+                    <span>基于 skill domain={selection.skillDomain ?? scenario.skillDomain}，当前会生成 {compileResult.uiPlan.slots.length} 个 UI slot、{compileResult.skillPlan.skillIRs.length} 个 skill step。</span>
+                    <span>发布前会检查 producer/consumer、fallback、runtime profile 和 package quality gate。</span>
+                    <ul>
+                      {recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}
+                    </ul>
+                  </div>
+                  <div className="scenario-preview-panel">
+                    <button type="button" className="advanced-preview-toggle" onClick={() => setAdvancedPreviewOpen((value) => !value)}>
+                      {advancedPreviewOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      {advancedPreviewOpen ? '收起高级 JSON contract' : '展开高级 JSON contract'}
+                    </button>
+                    {advancedPreviewOpen ? (
+                      <>
+                        <div className="scenario-preview-tabs">
+                          {(['scenario', 'skill', 'ui', 'validation'] as const).map((tab) => (
+                            <button key={tab} type="button" className={cx(previewTab === tab && 'active')} onClick={() => setPreviewTab(tab)}>{tab}</button>
+                          ))}
+                        </div>
+                        <pre className="inspector-json">{JSON.stringify(previewJson, null, 2)}</pre>
+                      </>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+              {chromePane === 'quality' ? (
+                <div className="manifest-diagnostics">
+                  <strong>Quality gate</strong>
+                  <span><Badge variant={qualityCounts.blocking ? 'danger' : 'success'}>{qualityCounts.blocking} blocking</Badge></span>
+                  <span><Badge variant={qualityCounts.warning ? 'warning' : 'muted'}>{qualityCounts.warning} warning</Badge></span>
+                  <span><Badge variant="info">{qualityCounts.note} note</Badge></span>
+                  <code>{qualityReport.items.slice(0, 3).map((item) => `${item.severity}:${item.code}`).join(' · ') || 'ready'}</code>
+                </div>
+              ) : null}
+              {chromePane === 'publish' ? (
+                <div className="scenario-publish-row">
+                  <div>
+                    <Badge variant={compileResult.validationReport.ok ? 'success' : 'warning'}>
+                      {compileResult.validationReport.ok ? 'validation ok' : `${compileResult.validationReport.issues.length} issues`}
+                    </Badge>
+                    {publishStatus ? <span>{publishStatus}</span> : null}
+                  </div>
+                  <div>
+                    <ActionButton icon={FilePlus} variant="secondary" onClick={() => void saveCompiled('draft')}>保存 draft</ActionButton>
+                    <ActionButton icon={Play} disabled={!compileResult.validationReport.ok} onClick={() => void saveCompiled('published')}>发布</ActionButton>
+                    {publishStatus.includes('已发布') ? <ActionButton icon={Download} variant="secondary" onClick={() => exportJsonFile(`${compileResult.package.id}-${compileResult.package.version}.scenario-package.json`, compileResult.package)}>导出 package</ActionButton> : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <div className="scenario-settings-body">
+            <div className="builder-stepper" aria-label="Scenario Builder steps">
+              {([
+                ['describe', '需求描述'],
+                ['elements', '推荐元素'],
+                ['contract', '编辑契约'],
+                ['quality', '质量检查'],
+                ['publish', '发布运行'],
+              ] as const satisfies ReadonlyArray<readonly [BuilderLegacyStepId, string]>).map(([id, label], index) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={cx(legacyStep === id && 'active')}
+                  aria-current={legacyStep === id ? 'step' : undefined}
+                  onClick={() => navigateLegacyStep(id)}
+                >
+                  <span>{index + 1}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <section ref={describeSectionRef} className="builder-step-section" aria-label="需求描述">
+              <div className={cx('builder-step-panel', legacyStepMuted('describe') && 'muted')}>
+                <DescribeFields />
+              </div>
+            </section>
+            <section ref={elementsSectionRef} className="builder-step-section" aria-label="推荐元素">
+              <div className={cx('builder-step-panel', legacyStepMuted('elements') && 'muted')}>
+                <AgentRuntimeUiSelector />
+                <ScenarioPackageUiSelector />
+                <SkillsSelector />
+                <ToolsSelector />
+                <ArtifactsSelector />
+                <FailurePoliciesSelector />
+              </div>
+            </section>
+            <section ref={contractSectionRef} className="builder-step-section" aria-label="编辑契约">
+              <div className={cx('builder-step-panel', legacyStepMuted('contract') && 'muted')}>
+                <label className="wide">
+                  <span>Scenario markdown</span>
+                  <textarea
+                    value={scenario.scenarioMarkdown}
+                    onChange={(event) => {
+                      patch({ scenarioMarkdown: event.target.value });
+                      patchSelection({ scenarioMarkdown: event.target.value });
+                    }}
+                  />
+                </label>
+              </div>
+              <div className={cx('builder-recommendation-summary', legacyStepMuted('contract') && 'muted')}>
+                <strong>推荐组合</strong>
+                <span>基于 skill domain={selection.skillDomain ?? scenario.skillDomain}，当前会生成 {compileResult.uiPlan.slots.length} 个 UI slot、{compileResult.skillPlan.skillIRs.length} 个 skill step。</span>
+                <span>发布前会检查 producer/consumer、fallback、runtime profile 和 package quality gate。</span>
+                <ul>
+                  {recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              </div>
+              <div className={cx('scenario-preview-panel', legacyStepMuted('contract') && 'muted')}>
+                <button type="button" className="advanced-preview-toggle" onClick={() => setAdvancedPreviewOpen((value) => !value)}>
+                  {advancedPreviewOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  {advancedPreviewOpen ? '收起高级 JSON contract' : '展开高级 JSON contract'}
+                </button>
+                {advancedPreviewOpen ? (
+                  <>
+                    <div className="scenario-preview-tabs">
+                      {(['scenario', 'skill', 'ui', 'validation'] as const).map((tab) => (
+                        <button key={tab} type="button" className={cx(previewTab === tab && 'active')} onClick={() => setPreviewTab(tab)}>{tab}</button>
+                      ))}
+                    </div>
+                    <pre className="inspector-json">{JSON.stringify(previewJson, null, 2)}</pre>
+                  </>
+                ) : null}
+              </div>
+            </section>
+            <section ref={qualitySectionRef} className="builder-step-section" aria-label="质量检查">
+              <div className={cx('manifest-diagnostics', legacyStepMuted('quality') && 'muted')}>
+                <strong>Quality gate</strong>
+                <span><Badge variant={qualityCounts.blocking ? 'danger' : 'success'}>{qualityCounts.blocking} blocking</Badge></span>
+                <span><Badge variant={qualityCounts.warning ? 'warning' : 'muted'}>{qualityCounts.warning} warning</Badge></span>
+                <span><Badge variant="info">{qualityCounts.note} note</Badge></span>
+                <code>{qualityReport.items.slice(0, 3).map((item) => `${item.severity}:${item.code}`).join(' · ') || 'ready'}</code>
+              </div>
+            </section>
+            <section ref={publishSectionRef} className="builder-step-section" aria-label="发布运行">
+              <div className={cx('scenario-publish-row', legacyStepMuted('publish') && 'muted')}>
+                <div>
+                  <Badge variant={compileResult.validationReport.ok ? 'success' : 'warning'}>
+                    {compileResult.validationReport.ok ? 'validation ok' : `${compileResult.validationReport.issues.length} issues`}
+                  </Badge>
+                  {publishStatus ? <span>{publishStatus}</span> : null}
+                </div>
+                <div>
+                  <ActionButton icon={FilePlus} variant="secondary" onClick={() => void saveCompiled('draft')}>保存 draft</ActionButton>
+                  <ActionButton icon={Play} disabled={!compileResult.validationReport.ok} onClick={() => void saveCompiled('published')}>发布</ActionButton>
+                  {publishStatus.includes('已发布') ? <ActionButton icon={Download} variant="secondary" onClick={() => exportJsonFile(`${compileResult.package.id}-${compileResult.package.version}.scenario-package.json`, compileResult.package)}>导出 package</ActionButton> : null}
+                </div>
+              </div>
+            </section>
+          </div>
+        )
       ) : null}
     </section>
   );

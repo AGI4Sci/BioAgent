@@ -10,6 +10,7 @@ import { composeRuntimeUiManifest } from './runtime-ui-manifest.js';
 import { cleanUrl, clipForAgentServerJson, clipForAgentServerPrompt, errorMessage, excerptAroundFailureLine, extractLikelyErrorLine, generatedTaskArchiveRel, hashJson, headForAgentServer, isRecord, isTaskInputRel, readTextIfExists, safeWorkspaceRel, summarizeTextChange, tailForAgentServer, toRecordList, toStringList, uniqueStrings } from './gateway-utils.js';
 import { normalizeBackendHandoff } from './workspace-task-input.js';
 import { normalizeGatewayRequest as normalizeGatewayRequestFromModule } from './gateway/gateway-request.js';
+import { tryRunVisionSenseRuntime } from './vision-sense-runtime.js';
 import { toolPackageManifests } from '../../packages/tools';
 
 const SKILL_DOMAIN_SET = new Set<SciForgeSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
@@ -84,6 +85,8 @@ type AgentServerGenerationResult =
 
 export async function runWorkspaceRuntimeGateway(body: Record<string, unknown>, callbacks: WorkspaceRuntimeCallbacks = {}): Promise<ToolPayload> {
   const request = normalizeGatewayRequestFromModule(body);
+  const visionSensePayload = await tryRunVisionSenseRuntime(request, callbacks);
+  if (visionSensePayload) return visionSensePayload;
   const skills = await loadSkillRegistry(request);
   const skill = agentServerGenerationSkill(request.skillDomain);
   emitWorkspaceRuntimeEvent(callbacks, {
@@ -3717,6 +3720,11 @@ function buildAgentServerGenerationPrompt(request: {
     description: string;
     producesArtifactTypes: string[];
     selected: boolean;
+    docs?: { readmePath?: string; agentSummary?: string };
+    packageRoot?: string;
+    requiredConfig?: string[];
+    tags?: string[];
+    sensePlugin?: Record<string, unknown>;
   }>;
   artifactSchema: Record<string, unknown>;
   uiManifestContract: Record<string, unknown>;
@@ -3754,6 +3762,8 @@ function buildAgentServerGenerationPrompt(request: {
     'Generate fresh task code only when the current turn truly asks for new work or no prior executable artifact can satisfy the request.',
     'Put generated task paths under .sciforge/tasks when possible. SciForge will archive any returned taskFiles under .sciforge/tasks/<run-id>/ before execution.',
     'Do not force self-contained task code when a better installed/workspace tool exists. Prefer the best available tool, record the tool id/version/command in ExecutionUnit, and write only the adapter/glue needed for reproducibility from inputPath and outputPath.',
+    'When availableTools or selectedToolIds includes id="local.vision-sense", treat the current turn as having an optional pure-vision Computer Use sense plugin available: construct text + screenshot/image modality requests, keep the package executor-agnostic, emit text-form click/type_text/press_key/scroll/wait commands or vision-trace artifacts, and preserve only compact screenshot refs/grounding/execution/pixel-diff summaries across turns. Do not read DOM or accessibility tree for that vision path, and fail closed for send/delete/pay/authorize/publish actions unless upstream confirmation is explicit.',
+    'If local.vision-sense is selected but no GUI executor/browser/desktop bridge or screenshot input is configured for the current run, do not scan the repository to compensate. Return a concise ToolPayload diagnosis or failed-with-reason ExecutionUnit that says the vision sense contract was detected but the runtime executor bridge is missing, and include the next expected vision-trace file-ref shape instead of fabricating GUI results.',
     'Large-file contract: uploaded PDFs, images, spreadsheets, binary blobs, extracted full text, and large logs must stay as workspace refs. Do not inline base64, do not print full extracted text to stdout/stderr, and do not paste full document text into final JSON.',
     'For uploaded PDFs or long documents, generated tasks should read the file by path/dataRef, write any full extraction to .sciforge/artifacts or .sciforge/task-results, and return only bounded excerpts, section summaries, page/figure locators, hashes, and clickable file/artifact refs.',
     'Bibliographic verification contract: never mark a PMID, DOI, trial id, citation, or paper record as corrected/verified unless the returned title, year, journal, and identifier correspond to the same work as the source claim.',
@@ -3814,14 +3824,22 @@ function summarizeToolsForAgentServer(request: GatewayRequest) {
     .slice(0, 12);
   return uniqueById([...selectedTools, ...domainTools])
     .slice(0, 16)
-    .map((tool) => ({
-      id: tool.id,
-      label: tool.label,
-      toolType: tool.toolType,
-      description: clipForAgentServerPrompt(tool.description, 420) || '',
-      producesArtifactTypes: [...(tool.producesArtifactTypes ?? [])],
-      selected: selectedIds.has(tool.id),
-    }));
+    .map((tool) => {
+      const sensePlugin = 'sensePlugin' in tool ? tool.sensePlugin : undefined;
+      return {
+        id: tool.id,
+        label: tool.label,
+        toolType: tool.toolType,
+        description: clipForAgentServerPrompt(tool.description, 420) || '',
+        producesArtifactTypes: [...(tool.producesArtifactTypes ?? [])],
+        selected: selectedIds.has(tool.id),
+        docs: tool.docs,
+        packageRoot: tool.packageRoot,
+        requiredConfig: [...(tool.requiredConfig ?? [])],
+        tags: [...tool.tags],
+        sensePlugin: sensePlugin ? clipForAgentServerJson(sensePlugin, 4) as Record<string, unknown> : undefined,
+      };
+    });
 }
 
 function uniqueById<T extends { id: string }>(values: readonly T[]) {

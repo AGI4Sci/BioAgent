@@ -33,7 +33,7 @@ export interface MarkdownToolPackage {
   label: string;
   description: string;
   source: 'package';
-  toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime';
+  toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime' | 'sense-plugin';
   skillDomains: SciForgeSkillDomain[];
   producesArtifactTypes?: string[];
   requiredConfig?: string[];
@@ -44,6 +44,25 @@ export interface MarkdownToolPackage {
   sourceUrl?: string;
   mcpCommand?: string;
   mcpArgs?: string[];
+  sensePlugin?: {
+    id: string;
+    modality: string;
+    inputContract: {
+      textField: string;
+      modalitiesField: string;
+      acceptedModalities: string[];
+    };
+    outputContract: {
+      kind: 'text';
+      formats: string[];
+      commandSchema?: Record<string, unknown>;
+    };
+    executionBoundary: 'text-signal-only' | 'direct-executor' | 'hybrid';
+    safety: {
+      defaultRiskLevel: 'low' | 'medium' | 'high';
+      highRiskPolicy: 'reject' | 'require-confirmation' | 'allow';
+    };
+  };
 }
 
 export async function discoverMarkdownSkillPackages(root = resolve(process.cwd(), 'packages', 'skills')): Promise<MarkdownSkillPackage[]> {
@@ -121,7 +140,16 @@ async function readMarkdownSkillPackage(root: string, path: string): Promise<Mar
   const id = provider === 'scp' ? `scp.${safeName}` : safeName;
   const description = String(frontmatter.description || sectionAfterHeading(text, 'Description') || firstMarkdownParagraph(text) || `Markdown skill ${rawName}.`).trim();
   const skillDomains = inferSkillDomains(`${id} ${description} ${text.slice(0, 5000)}`);
-  const outputArtifactTypes = inferOutputArtifactTypes(`${id} ${description} ${text.slice(0, 8000)}`);
+  const explicitOutputArtifactTypes = frontmatterList(frontmatter.outputArtifactTypes);
+  const outputArtifactTypes = explicitOutputArtifactTypes.length ? explicitOutputArtifactTypes : inferOutputArtifactTypes(`${id} ${description} ${text.slice(0, 8000)}`);
+  const extraRequiredCapabilities = frontmatterList(frontmatter.requiredCapabilities);
+  const inputContract: Record<string, unknown> = {
+    prompt: 'Free-text request matched against this SKILL.md.',
+    skillMarkdownRef: readmePath,
+  };
+  if (typeof frontmatter.visionTaskRequest === 'string' && frontmatter.visionTaskRequest.trim()) {
+    inputContract.visionTaskRequest = frontmatter.visionTaskRequest.trim();
+  }
   return {
     id,
     packageName: `@sciforge-skill/${safeName}`,
@@ -131,13 +159,11 @@ async function readMarkdownSkillPackage(root: string, path: string): Promise<Mar
     description,
     source: 'package',
     skillDomains,
-    inputContract: {
-      prompt: 'Free-text request matched against this SKILL.md.',
-      skillMarkdownRef: readmePath,
-    },
+    inputContract,
     outputArtifactTypes,
     entrypointType: 'markdown-skill',
     requiredCapabilities: [
+      ...extraRequiredCapabilities.map((capability) => ({ capability, level: 'external-tool' as const })),
       { capability: 'agentserver-generation', level: 'self-healing' },
       { capability: 'artifact-emission', level: 'schema-checked' },
     ],
@@ -157,15 +183,21 @@ async function readMarkdownSkillPackage(root: string, path: string): Promise<Mar
 async function readMarkdownToolPackage(root: string, path: string): Promise<MarkdownToolPackage> {
   const text = await readFile(path, 'utf8');
   const frontmatter = parseMarkdownFrontmatter(text);
-  const packageRoot = relative(process.cwd(), dirname(path));
+  const packageRoot = typeof frontmatter.packageRoot === 'string' && frontmatter.packageRoot.trim()
+    ? frontmatter.packageRoot.trim()
+    : relative(process.cwd(), dirname(path));
   const readmePath = relative(process.cwd(), path);
   const rawName = String(frontmatter.name || firstHeading(text) || basename(dirname(path)));
   const safeName = safeSkillId(rawName);
   const provider = inferProvider(root, path, frontmatter);
   const id = provider ? `${provider}.${safeName}` : safeName;
   const description = String(frontmatter.description || sectionAfterHeading(text, 'Description') || firstMarkdownParagraph(text) || `Markdown tool ${rawName}.`).trim();
-  const skillDomains = inferSkillDomains(`${id} ${description} ${text.slice(0, 5000)}`);
-  const outputArtifactTypes = inferOutputArtifactTypes(`${id} ${description} ${text.slice(0, 8000)}`).filter((type) => type !== 'runtime-artifact');
+  const explicitSkillDomains = frontmatterList(frontmatter.skillDomains).filter(isSkillDomain);
+  const skillDomains = explicitSkillDomains.length ? explicitSkillDomains : inferSkillDomains(`${id} ${description} ${text.slice(0, 5000)}`);
+  const explicitOutputArtifactTypes = frontmatterList(frontmatter.producesArtifactTypes);
+  const outputArtifactTypes = explicitOutputArtifactTypes.length
+    ? explicitOutputArtifactTypes
+    : inferOutputArtifactTypes(`${id} ${description} ${text.slice(0, 8000)}`).filter((type) => type !== 'runtime-artifact');
   const mcpArgs = frontmatterList(frontmatter.mcpArgs);
   return {
     id,
@@ -189,6 +221,54 @@ async function readMarkdownToolPackage(root: string, path: string): Promise<Mark
     sourceUrl: typeof frontmatter.sourceUrl === 'string' ? frontmatter.sourceUrl : undefined,
     mcpCommand: typeof frontmatter.mcpCommand === 'string' ? frontmatter.mcpCommand : undefined,
     mcpArgs: mcpArgs.length ? mcpArgs : undefined,
+    sensePlugin: buildSensePluginManifest(safeName, frontmatter),
+  };
+}
+
+function buildSensePluginManifest(safeName: string, frontmatter: Record<string, unknown>): MarkdownToolPackage['sensePlugin'] | undefined {
+  if (frontmatter.toolType !== 'sense-plugin') return undefined;
+  const modality = typeof frontmatter.modality === 'string' && frontmatter.modality.trim() ? frontmatter.modality.trim() : safeName.replace(/-sense$/, '');
+  const acceptedModalities = frontmatterList(frontmatter.acceptedModalities);
+  return {
+    id: `sciforge.${safeName}`,
+    modality,
+    inputContract: {
+      textField: 'text',
+      modalitiesField: 'modalities',
+      acceptedModalities: acceptedModalities.length ? acceptedModalities : modality === 'vision' ? ['screenshot', 'image'] : [modality],
+    },
+    outputContract: {
+      kind: 'text',
+      formats: ['application/json', 'application/x-ndjson', 'text/x-computer-use-command'],
+      commandSchema: modality === 'vision' ? computerUseCommandSchema() : undefined,
+    },
+    executionBoundary: 'text-signal-only',
+    safety: {
+      defaultRiskLevel: 'low',
+      highRiskPolicy: 'reject',
+    },
+  };
+}
+
+function computerUseCommandSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    required: ['action'],
+    properties: {
+      action: { enum: ['click', 'type_text', 'press_key', 'scroll', 'wait'] },
+      target: {
+        type: 'object',
+        properties: {
+          x: { type: 'number' },
+          y: { type: 'number' },
+          description: { type: 'string' },
+        },
+      },
+      text: { type: 'string' },
+      key: { type: 'string' },
+      direction: { enum: ['up', 'down', 'left', 'right'] },
+      riskLevel: { enum: ['low', 'medium', 'high'] },
+    },
   };
 }
 
@@ -270,6 +350,10 @@ function inferSkillDomains(text: string): SciForgeSkillDomain[] {
   return Array.from(domains);
 }
 
+function isSkillDomain(value: string): value is SciForgeSkillDomain {
+  return value === 'literature' || value === 'structure' || value === 'omics' || value === 'knowledge';
+}
+
 function inferOutputArtifactTypes(text: string) {
   const lower = text.toLowerCase();
   const types = new Set<string>();
@@ -286,11 +370,12 @@ function inferOutputArtifactTypes(text: string) {
 }
 
 function inferToolType(text: string, explicit: unknown): MarkdownToolPackage['toolType'] {
-  if (explicit === 'database' || explicit === 'runner' || explicit === 'connector' || explicit === 'llm-backend' || explicit === 'visual-runtime') return explicit;
+  if (explicit === 'database' || explicit === 'runner' || explicit === 'connector' || explicit === 'llm-backend' || explicit === 'visual-runtime' || explicit === 'sense-plugin') return explicit;
   const lower = text.toLowerCase();
   if (/\b(database|pubmed|chembl|uniprot|kegg|ncbi|api)\b/.test(lower)) return 'database';
   if (/\b(browser|playwright|mcp|connector|web automation)\b/.test(lower)) return 'connector';
   if (/\b(model|llm|agentserver|openai|anthropic)\b/.test(lower)) return 'llm-backend';
+  if (/\b(sense|modality|screenshot|computer use|computer-use|vision)\b/.test(lower)) return 'sense-plugin';
   if (/\b(viewer|visual|render|plot|chart)\b/.test(lower)) return 'visual-runtime';
   return 'runner';
 }

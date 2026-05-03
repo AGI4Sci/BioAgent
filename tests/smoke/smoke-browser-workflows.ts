@@ -124,14 +124,13 @@ try {
     await page.getByRole('button', { name: '生成场景设置' }).click();
     await page.locator('code', { hasText: 'point-set-viewer' }).first().waitFor();
     await page.getByRole('button', { name: /进入.*工作台/ }).click();
-    await page.getByText('Scenario Builder').waitFor();
-    await page.locator('.scenario-settings-summary').click();
-    await page.getByLabel('Scenario Builder steps').getByRole('button', { name: /需求描述/ }).waitFor();
-    await page.getByRole('button', { name: /推荐元素/ }).click();
+    await expandWorkbenchChrome(page);
+    await page.getByLabel('Scenario Builder').getByRole('button', { name: '场景信息' }).waitFor();
+    await page.getByRole('button', { name: '场景 UI allowlist' }).click();
     await page.locator('.component-selector button').first().hover();
     await page.locator('.element-popover').first().waitFor({ state: 'visible', timeout: 15_000 });
     await page.getByText(/producer|accepts|fallback|skill domain/).first().waitFor({ timeout: 15_000 });
-    await page.getByRole('button', { name: /编辑契约/ }).click();
+    await page.getByRole('button', { name: '场景契约' }).click();
     await captureSmokeScreenshot(page, join(artifactsDir, 'browser-smoke-builder-collapsed.png'));
     await page.getByLabel('结果区 focus mode').getByRole('button', { name: '只看执行单元' }).evaluate((button) => {
       if (button instanceof HTMLElement) button.click();
@@ -175,6 +174,7 @@ try {
     await page.getByLabel('排序 Scenario Library').selectOption('title');
     await omicsDraftOrBuiltInCard.waitFor({ timeout: 15_000 });
     await omicsDraftOrBuiltInCard.getByRole('button', { name: /打开|导入并打开/ }).first().click();
+    await expandWorkbenchChrome(page);
     await page.getByText('Scenario Builder').waitFor();
     await page.locator('code', { hasText: /workspace.*@1\.0\.0|omics-differential-exploration.*@/ }).first().waitFor({ timeout: 15_000 });
     await page.getByText(/将使用|输入研究问题后即可运行/).waitFor({ timeout: 15_000 });
@@ -270,6 +270,7 @@ try {
       has: referencePage.locator('code').filter({ hasText: /^omics-differential-exploration$/ }),
     }).first();
     await omicsReferenceCard.getByRole('button', { name: /打开|导入并打开/ }).first().click();
+    await expandWorkbenchChrome(referencePage);
     await referencePage.getByText('Scenario Builder').waitFor({ timeout: 15_000 });
     await referencePage.getByText('Browser smoke reference seed message').first().waitFor({ timeout: 15_000 });
     await referencePage.locator('.object-reference-chip', { hasText: 'Browser smoke UMAP' }).waitFor({ timeout: 15_000 });
@@ -395,6 +396,7 @@ try {
     } else {
       await literatureCard.getByRole('button', { name: '打开', exact: true }).click();
     }
+    await expandWorkbenchChrome(contextPage);
     await contextPage.getByText('Scenario Builder').waitFor({ timeout: 15_000 });
     await contextPage.getByPlaceholder(/输入研究问题/).waitFor({ timeout: 15_000 });
     logStep('context meter turns watch, then near-limit, from mocked multi-turn usage');
@@ -533,6 +535,14 @@ async function clickMobileWorkbenchTab(page: Page, name: 'Builder' | 'Chat' | 'R
   await page.getByLabel('移动端工作区视图').getByRole('button', { name, exact: true }).evaluate((button) => {
     if (button instanceof HTMLElement) button.click();
   });
+}
+
+async function expandWorkbenchChrome(page: Page) {
+  const toggle = page.locator('.workbench-chrome-toggle-main');
+  await toggle.waitFor({ state: 'visible', timeout: 15_000 });
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') {
+    await toggle.click();
+  }
 }
 
 function browserSmokeTimelineEvent() {
@@ -922,7 +932,7 @@ async function writeReferenceScenarioPackage() {
 }
 
 async function assertNoCriticalOverflow(page: Page, label: string) {
-  const offenders = await page.evaluate(() => Array.from(document.querySelectorAll('button, .scenario-card, .scenario-settings-summary, .scenario-publish-row, .manifest-diagnostics'))
+  const offenders = await page.evaluate(() => Array.from(document.querySelectorAll('button, .scenario-card, .scenario-settings-chrome-heading, .scenario-publish-row, .manifest-diagnostics'))
     .map((element) => {
       const box = element.getBoundingClientRect();
       const html = element instanceof HTMLElement ? element.innerText.trim().replace(/\s+/g, ' ').slice(0, 80) : element.tagName;

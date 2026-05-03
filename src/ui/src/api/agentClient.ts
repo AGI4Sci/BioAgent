@@ -79,6 +79,7 @@ function agentSystemPrompt(input: SendAgentMessageInput) {
     protocol,
     runtimeScenario ? '用户编辑后的 Scenario 设置:' : '',
     runtimeScenario ? JSON.stringify(runtimeScenario, null, 2) : '',
+    selectedRuntimeToolInstructions(input),
   ].join('\n');
 }
 
@@ -114,6 +115,7 @@ function buildPrompt(input: SendAgentMessageInput) {
     artifactContext.length ? JSON.stringify(artifactAccessPolicy, null, 2) : '',
     referenceContext.length ? '用户本轮显式引用对象:' : '',
     referenceContext.length ? JSON.stringify(referenceContext, null, 2) : '',
+    selectedRuntimeToolInstructions(input),
     '',
     'Scope check metadata:',
     JSON.stringify(scopeCheck(builtInScenarioId, input.prompt), null, 2),
@@ -148,6 +150,8 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         domain: input.agentDomain,
         nativeTools: scenario.nativeTools,
         fallbackTools: scenario.fallbackTools,
+        selectedToolIds: input.scenarioOverride?.selectedToolIds ?? [],
+        selectedToolContracts: selectedRuntimeToolContracts(input.scenarioOverride?.selectedToolIds ?? []),
       },
     },
     input: {
@@ -164,6 +168,7 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         skillPlanRef: input.skillPlanRef,
         uiPlanRef: input.uiPlanRef,
         scenarioOverride: input.scenarioOverride,
+        selectedToolContracts: selectedRuntimeToolContracts(input.scenarioOverride?.selectedToolIds ?? []),
         artifacts: artifactSummary,
         artifactAccessPolicy: buildArtifactAccessPolicy(input, artifactSummary),
         references: summarizeSciForgeReferences(input.references ?? []),
@@ -212,7 +217,9 @@ function previewReferencePayload(payload: unknown): unknown {
   if (!isRecord(payload)) return payload;
   const preview: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload).slice(0, 8)) {
-    if (typeof value === 'string') {
+    if (typeof value === 'string' && isDataUrl(value)) {
+      preview[key] = '[image dataUrl omitted; use file/image refs instead]';
+    } else if (typeof value === 'string') {
       preview[key] = clipPromptText(value, 360);
     } else if (Array.isArray(value)) {
       preview[key] = { count: value.length, preview: value.slice(0, 4).map((item) => previewReferencePayload(item)) };
@@ -234,6 +241,8 @@ function summarizeArtifacts(artifacts: RuntimeArtifact[]) {
     metadata: previewReferencePayload(artifact.metadata),
     dataRef: artifact.dataRef,
     path: artifact.path,
+    fileRefs: collectArtifactFileRefs(artifact),
+    imageMemoryRefs: collectArtifactImageMemoryRefs(artifact),
     dataPreview: previewArtifactData(artifact.data),
   }));
 }
@@ -245,6 +254,8 @@ function buildArtifactAccessPolicy(input: SendAgentMessageInput, artifacts: Retu
     artifact.id ? `artifact:${artifact.id}` : undefined,
     artifact.path ? `file:${artifact.path}` : undefined,
     artifact.dataRef ? `file:${artifact.dataRef}` : undefined,
+    ...(artifact.fileRefs ?? []).map((ref) => `file:${ref}`),
+    ...(artifact.imageMemoryRefs ?? []).map((ref) => `file:${ref}`),
   ]).filter((ref): ref is string => Boolean(ref))).slice(0, 32);
   return {
     mode: 'refs-first-bounded-read',
@@ -255,6 +266,7 @@ function buildArtifactAccessPolicy(input: SendAgentMessageInput, artifacts: Retu
       'Do not cat or paste full JSON/markdown/log artifacts unless the current user explicitly asks for full content.',
       'For verification, prefer bounded reads: file metadata, schema keys, counts, jq-selected fields, head/tail, or concise excerpts.',
       'When comparing large artifacts, read only the fields needed for the current question and cite the artifact/ref path.',
+      'For vision/computer-use image memory, use screenshot file refs, thumbnails, hashes, and step summaries; never inline dataUrl/base64 screenshot bytes into model context.',
       'If the summary is enough, answer from refs and dataPreview without reopening the file.',
     ],
     explicitCurrentTurnRefs: explicitRefs,
@@ -268,6 +280,10 @@ function previewArtifactData(data: unknown): unknown {
   if (!isRecord(data)) return data;
   const preview: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data).slice(0, 8)) {
+    if (key === 'dataUrl' && typeof value === 'string' && isDataUrl(value)) {
+      preview[key] = '[image dataUrl omitted; use file/image refs instead]';
+      continue;
+    }
     if (Array.isArray(value)) {
       preview[key] = { count: value.length, preview: value.slice(0, 3).map((item) => previewArtifactData(item)) };
     } else if (typeof value === 'string') {
@@ -278,6 +294,8 @@ function previewArtifactData(data: unknown): unknown {
       preview[key] = value;
     }
   }
+  const imageMemory = summarizeVisionImageMemory(data);
+  if (imageMemory) preview.imageMemory = imageMemory;
   return preview;
 }
 
@@ -285,6 +303,134 @@ function clipPromptText(value: unknown, limit: number) {
   if (typeof value !== 'string') return undefined;
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
+
+function selectedRuntimeToolInstructions(input: SendAgentMessageInput) {
+  const contracts = selectedRuntimeToolContracts(input.scenarioOverride?.selectedToolIds ?? []);
+  if (!contracts.length) return '';
+  return [
+    '用户激活的可用工具契约:',
+    JSON.stringify(contracts, null, 2),
+    '如果 local.vision-sense 被激活，按 text + screenshot/image modalities -> text 的 sense-plugin 使用；只输出可审计 Computer Use 文字信号或 vision-trace refs，不读取 DOM/accessibility，不把截图 base64 放入多轮上下文，高风险 GUI 动作必须拒绝或要求上游确认。',
+  ].join('\n');
+}
+
+function collectArtifactFileRefs(value: unknown) {
+  const refs = new Set<string>();
+  const visit = (entry: unknown, key = '') => {
+    if (refs.size >= 24) return;
+    if (typeof entry === 'string') {
+      if (looksLikeRef(entry) || /path|ref|file|dir|pdf|download|log|stdout|stderr|output|code|screenshot|image|thumb|crosshair/i.test(key)) refs.add(entry);
+      return;
+    }
+    if (Array.isArray(entry)) {
+      for (const item of entry.slice(0, 24)) visit(item, key);
+      return;
+    }
+    if (!isRecord(entry)) return;
+    for (const [childKey, childValue] of Object.entries(entry).slice(0, 48)) {
+      visit(childValue, childKey);
+    }
+  };
+  visit(value);
+  return refs.size ? Array.from(refs) : undefined;
+}
+
+function summarizeVisionImageMemory(data: Record<string, unknown>) {
+  const refs = collectArtifactImageMemoryRefs(data) ?? [];
+  const steps = Array.isArray(data.steps) ? data.steps : Array.isArray(data.trace) ? data.trace : [];
+  if (!refs.length && !steps.length) return undefined;
+  return {
+    policy: 'file-refs-only',
+    refs: refs.slice(0, 24),
+    stepCount: steps.length || undefined,
+    recentSteps: steps.slice(-5).map((step, index) => {
+      const record = isRecord(step) ? step : {};
+      return previewReferencePayload({
+        index: typeof record.index === 'number' ? record.index : steps.length - Math.min(5, steps.length) + index,
+        beforeScreenshotRef: record.beforeScreenshotRef ?? record.before_screenshot_ref,
+        afterScreenshotRef: record.afterScreenshotRef ?? record.after_screenshot_ref,
+        crosshairScreenshotRef: record.crosshairScreenshotRef ?? record.crosshair_screenshot_ref,
+        action: record.action ?? record.plannedAction ?? record.planned_action,
+        target: record.target ?? record.targetDescription ?? record.target_description,
+        grounding: record.grounding,
+        pixelDiff: record.pixelDiff ?? record.pixel_diff,
+        failureReason: record.failureReason ?? record.failure_reason,
+      });
+    }).filter(Boolean),
+  };
+}
+
+function collectArtifactImageMemoryRefs(value: unknown) {
+  const refs = new Set<string>();
+  const visit = (entry: unknown, key = '') => {
+    if (refs.size >= 32) return;
+    if (typeof entry === 'string') {
+      if (isDataUrl(entry)) return;
+      if (isImageMemoryRef(entry) || /screenshot|image|thumb|crosshair/i.test(key)) refs.add(entry);
+      return;
+    }
+    if (Array.isArray(entry)) {
+      for (const item of entry.slice(0, 48)) visit(item, key);
+      return;
+    }
+    if (!isRecord(entry)) return;
+    for (const [childKey, childValue] of Object.entries(entry).slice(0, 64)) {
+      visit(childValue, childKey);
+    }
+  };
+  visit(value);
+  return refs.size ? Array.from(refs) : undefined;
+}
+
+function looksLikeRef(value: string) {
+  return /\.sciforge\/|stdout|stderr|output|input|\.json|\.log|\.py|\.ipynb|\.r|\.png|\.jpe?g|\.gif|\.webp|\.svg$/i.test(value);
+}
+
+function isImageMemoryRef(value: string) {
+  return !isDataUrl(value) && /(?:^artifact:|^file:|\.sciforge\/|\.bioagent\/|workspace:\/\/|\/).*\.(?:png|jpe?g|gif|webp|svg)$/i.test(value);
+}
+
+function isDataUrl(value: string) {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+}
+
+function selectedRuntimeToolContracts(selectedToolIds: string[]) {
+  return uniqueStrings(selectedToolIds).flatMap((toolId) => {
+    if (toolId !== 'local.vision-sense') return [{ id: toolId, selected: true }];
+    return [{
+      id: 'local.vision-sense',
+      selected: true,
+      kind: 'sense-plugin',
+      modality: 'vision',
+      packageRoot: 'packages/senses/vision-sense',
+      readmePath: 'packages/tools/local/vision-sense/SKILL.md',
+      skillTemplate: 'packages/skills/installed/local/vision-gui-task/SKILL.md',
+      inputContract: {
+        textField: 'text',
+        modalitiesField: 'modalities',
+        acceptedModalities: ['screenshot', 'image'],
+      },
+      outputContract: {
+        kind: 'text',
+        formats: ['application/json', 'application/x-ndjson', 'text/x-computer-use-command'],
+        actions: ['click', 'type_text', 'press_key', 'scroll', 'wait'],
+      },
+      executionBoundary: 'text-signal-only',
+      missingRuntimeBridgePolicy: {
+        behavior: 'diagnose-or-fail-closed',
+        reason: 'local.vision-sense only emits auditable text signals and trace refs; a browser/desktop executor bridge plus screenshot source must execute real GUI actions.',
+        noFallbackRepoScan: true,
+        expectedFailureUnit: 'Return failed-with-reason when no GUI executor/screenshot bridge is configured for this run.',
+      },
+      computerUsePolicy: {
+        executorOwnedBy: 'upstream Computer Use provider or browser/desktop adapter',
+        noDomOrAccessibilityReads: true,
+        highRiskPolicy: 'reject unless explicitly confirmed upstream',
+        tracePolicy: 'preserve screenshot refs, planned action, grounding summary, execution status, pixel diff, and failureReason; never inline screenshot base64 into chat context',
+      },
+    }];
+  });
 }
 
 function buildRuntimeConfig(input: SendAgentMessageInput): NonNullable<AgentServerRunPayload['runtime']> {
@@ -304,6 +450,8 @@ function buildRuntimeConfig(input: SendAgentMessageInput): NonNullable<AgentServ
       skillDomain: input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain,
       nativeToolFirst: true,
       maxContextWindowTokens: input.config.maxContextWindowTokens,
+      selectedToolIds: input.scenarioOverride?.selectedToolIds ?? [],
+      selectedToolContracts: selectedRuntimeToolContracts(input.scenarioOverride?.selectedToolIds ?? []),
       autoApprove: true,
       sandbox: 'danger-full-access',
     },

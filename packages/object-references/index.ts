@@ -47,6 +47,7 @@ function asNumber(value: unknown): number | undefined {
 }
 
 function titleForArtifact(artifact: RuntimeArtifact) {
+  if (artifact.type === 'vision-trace') return String(artifact.metadata?.title || (isRecord(artifact.data) ? artifact.data.task : undefined) || artifact.path || artifact.dataRef || artifact.id);
   return String(artifact.metadata?.title || artifact.metadata?.name || artifact.path || artifact.dataRef || artifact.id);
 }
 
@@ -225,6 +226,7 @@ export function objectReferenceForUploadedArtifact(artifact: RuntimeArtifact): O
 }
 
 export function objectReferenceForArtifactSummary(artifact: RuntimeArtifact, runId?: string): ObjectReference {
+  const finalScreenshotRef = visionTraceFinalScreenshotRef(artifact);
   return {
     id: runId ? `chat-key-${artifact.id}` : `obj-artifact-${artifact.id}`,
     kind: 'artifact',
@@ -234,10 +236,12 @@ export function objectReferenceForArtifactSummary(artifact: RuntimeArtifact, run
     preferredView: artifact.type === 'uploaded-image' || artifact.type === 'uploaded-pdf' ? 'preview' : 'generic-artifact-inspector',
     runId,
     status: 'available',
+    summary: artifact.type === 'vision-trace' && finalScreenshotRef ? `Vision trace; final screenshot: ${finalScreenshotRef}` : undefined,
     provenance: {
       dataRef: artifact.dataRef,
       path: artifact.path,
       producer: artifact.producerScenario,
+      screenshotRef: finalScreenshotRef,
     },
   };
 }
@@ -647,6 +651,13 @@ function summarizeReferencePayload(data: unknown) {
     previewRows: rows?.slice(0, 5),
     markdownPreview: typeof data.markdown === 'string' ? data.markdown.slice(0, 1000) : undefined,
   };
+}
+
+function visionTraceFinalScreenshotRef(artifact: RuntimeArtifact) {
+  if (artifact.type !== 'vision-trace') return undefined;
+  return asString(artifact.metadata?.finalScreenshotRef)
+    || asString(artifact.metadata?.latestScreenshotRef)
+    || (isRecord(artifact.data) ? asString(artifact.data.finalScreenshotRef) || asString(artifact.data.latestScreenshotRef) : undefined);
 }
 
 function fileKindForPath(path: string, language = '') {

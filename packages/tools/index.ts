@@ -37,7 +37,122 @@ export const toolPackageManifests = [
     "mcpArgs": [
       "@playwright/mcp@latest"
     ]
+  },
+  {
+    "id": "local.vision-sense",
+    "packageName": "@sciforge-tool/vision-sense",
+    "kind": "tool",
+    "version": "1.0.0",
+    "label": "vision-sense",
+    "description": "Vision Sense Plugin for turning text plus screenshot/image modalities into text-form Computer Use signals and auditable vision traces.",
+    "source": "package",
+    "toolType": "sense-plugin",
+    "skillDomains": [
+      "knowledge"
+    ],
+    "producesArtifactTypes": [
+      "vision-trace"
+    ],
+    "requiredConfig": [
+      "shared-llm-config",
+      "kv-ground-base-url",
+      "gui-executor"
+    ],
+    "docs": {
+      "readmePath": "packages/tools/local/vision-sense/SKILL.md",
+      "agentSummary": "Vision Sense Plugin for turning text plus screenshot/image modalities into text-form Computer Use signals and auditable vision traces."
+    },
+    "packageRoot": "packages/senses/vision-sense",
+    "tags": [
+      "package",
+      "local",
+      "knowledge",
+      "vision",
+      "modality:vision",
+      "gui",
+      "grounding",
+      "computer-use",
+      "kv-ground"
+    ],
+    "provider": "local",
+    "sensePlugin": {
+      "id": "sciforge.vision-sense",
+      "modality": "vision",
+      "inputContract": {
+        "textField": "text",
+        "modalitiesField": "modalities",
+        "acceptedModalities": [
+          "screenshot",
+          "image"
+        ]
+      },
+      "outputContract": {
+        "kind": "text",
+        "formats": [
+          "application/json",
+          "application/x-ndjson",
+          "text/x-computer-use-command"
+        ],
+        "commandSchema": {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "enum": [
+                "click",
+                "type_text",
+                "press_key",
+                "scroll",
+                "wait"
+              ]
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            },
+            "text": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "up",
+                "down",
+                "left",
+                "right"
+              ]
+            },
+            "riskLevel": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      },
+      "executionBoundary": "text-signal-only",
+      "safety": {
+        "defaultRiskLevel": "low",
+        "highRiskPolicy": "reject"
+      }
+    }
   }
 ] as const satisfies readonly ToolPackageManifest[];
 
-export type { ToolPackageManifest, ToolPackageSource } from './types';
+export type { SensePluginManifest, ToolPackageManifest, ToolPackageSource } from './types';

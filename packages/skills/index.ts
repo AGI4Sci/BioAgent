@@ -6792,6 +6792,65 @@ export const skillPackageManifests = [
     ],
     "scpToolId": "202",
     "scpHubUrl": "https://scphub.intern-ai.org.cn/skill/202"
+  },
+  {
+    "id": "vision-gui-task",
+    "packageName": "@sciforge-skill/vision-gui-task",
+    "kind": "skill",
+    "version": "1.0.0",
+    "label": "vision-gui-task",
+    "description": "Template skill for converting low-risk GUI requests into SciForge VisionTaskRequest payloads and running the vision-sense tool.",
+    "source": "package",
+    "skillDomains": [
+      "knowledge"
+    ],
+    "inputContract": {
+      "prompt": "Free-text request matched against this SKILL.md.",
+      "skillMarkdownRef": "packages/skills/installed/local/vision-gui-task/SKILL.md",
+      "visionTaskRequest": "packages/senses/vision-sense/sciforge_vision_sense/types.py:VisionTaskRequest"
+    },
+    "outputArtifactTypes": [
+      "vision-trace"
+    ],
+    "entrypointType": "markdown-skill",
+    "requiredCapabilities": [
+      {
+        "capability": "vision-sense",
+        "level": "external-tool"
+      },
+      {
+        "capability": "agentserver-generation",
+        "level": "self-healing"
+      },
+      {
+        "capability": "artifact-emission",
+        "level": "schema-checked"
+      }
+    ],
+    "failureModes": [
+      "backend-unavailable",
+      "missing-input",
+      "schema-mismatch"
+    ],
+    "examplePrompts": [
+      "vision gui task",
+      "template converting requests sciforge visiontaskrequest payloads running vision",
+      "Use vision gui task and return structured SciForge artifacts"
+    ],
+    "docs": {
+      "readmePath": "packages/skills/installed/local/vision-gui-task/SKILL.md",
+      "agentSummary": "Template skill for converting low-risk GUI requests into SciForge VisionTaskRequest payloads and running the vision-sense tool."
+    },
+    "packageRoot": "packages/skills/installed/local/vision-gui-task",
+    "tags": [
+      "package",
+      "local",
+      "knowledge",
+      "vision",
+      "gui",
+      "computer-use",
+      "template"
+    ]
   }
 ] as const satisfies readonly SkillPackageManifest[];
 

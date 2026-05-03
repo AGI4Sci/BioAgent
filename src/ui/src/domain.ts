@@ -81,6 +81,7 @@ export interface ObjectReference {
     version?: string;
     hash?: string;
     size?: number;
+    screenshotRef?: string;
   };
 }
 

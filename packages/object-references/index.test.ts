@@ -4,6 +4,7 @@ import {
   artifactReferenceKind,
   artifactTypeForPath,
   objectReferenceChipModel,
+  objectReferenceForArtifactSummary,
   objectReferenceForUploadedArtifact,
   pathForObjectReference,
   referenceForObjectReference,
@@ -73,6 +74,21 @@ const selection = referenceForTextSelection({ sourceReference: source, selectedT
 assert.equal(selection?.kind, 'ui');
 assert.ok(selection?.ref.startsWith('ui-text:file:reports/final.md#'));
 assert.equal(referenceForTextSelection({ sourceReference: source, selectedText: '  ' }), undefined);
+
+const visionTrace: RuntimeArtifact = {
+  id: 'vision-run-1',
+  type: 'vision-trace',
+  producerScenario: 'biomedical-knowledge-graph',
+  schemaVersion: '1',
+  path: '.sciforge/vision-runs/run-1/trace.json',
+  dataRef: '.sciforge/vision-runs/run-1/trace.json',
+  metadata: { source: 'local.vision-sense', finalScreenshotRef: '.sciforge/vision-runs/run-1/final.png' },
+  data: { task: 'Click a search suggestion', finalScreenshotRef: '.sciforge/vision-runs/run-1/final.png' },
+};
+const visionObject = objectReferenceForArtifactSummary(visionTrace, 'run-1');
+assert.equal(visionObject.title, 'Click a search suggestion');
+assert.equal(visionObject.provenance?.screenshotRef, '.sciforge/vision-runs/run-1/final.png');
+assert.match(visionObject.summary ?? '', /final screenshot/);
 
 const marked = withComposerMarker(source, []);
 assert.equal((marked.payload as { composerMarker: string }).composerMarker, '※1');

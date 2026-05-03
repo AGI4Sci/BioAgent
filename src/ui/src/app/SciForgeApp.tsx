@@ -1259,7 +1259,7 @@ function Workbench({
   const baseScenarioId = builtInScenarioIdForInstance(scenarioId, scenarioOverride);
   const scenarioView = scenarios.find((item) => item.id === baseScenarioId) ?? scenarios[0];
   const scenarioSpec = SCENARIO_PRESETS[baseScenarioId];
-  const runtimeScenario = scenarioOverride ?? {
+  const runtimeScenario: ScenarioRuntimeOverride = scenarioOverride ?? {
     title: scenarioSpec.title,
     description: scenarioSpec.description,
     skillDomain: scenarioSpec.skillDomain,
@@ -1269,7 +1269,6 @@ function Workbench({
     fallbackComponent: scenarioSpec.componentPolicy.fallbackComponent,
   };
   const [resultsCollapsed, setResultsCollapsed] = useState(false);
-  const [settingsExpanded, setSettingsExpanded] = useState(false);
   const [workbenchChromeExpanded, setWorkbenchChromeExpanded] = useState(false);
   const [mobileWorkbenchLayout, setMobileWorkbenchLayout] = useState(false);
   const [mobilePane, setMobilePane] = useState<'builder' | 'chat' | 'results'>('chat');
@@ -1278,19 +1277,12 @@ function Workbench({
   const [chatColumnWidth, setChatColumnWidth] = useState(42);
   const workbenchResizeRef = useRef<{ startX: number; startWidth: number; gridWidth: number } | null>(null);
   const runtimeHealth = useRuntimeHealth(config);
+  const visionSenseToolId = 'local.vision-sense';
+  const visionSenseActive = (runtimeScenario.selectedToolIds ?? []).includes(visionSenseToolId);
   const defaultResultSlots = useMemo(
     () => compileScenarioIRFromSelection(defaultElementSelectionForScenario(baseScenarioId, runtimeScenario)).uiPlan.slots,
     [baseScenarioId, runtimeScenario],
   );
-  const scenarioCompileSummary = useMemo(() => {
-    const compileResult = compileScenarioIRFromSelection(defaultElementSelectionForScenario(baseScenarioId, runtimeScenario));
-    return {
-      packageId: compileResult.package.id,
-      packageVersion: compileResult.package.version,
-      valid: compileResult.validationReport.ok,
-    };
-  }, [baseScenarioId, runtimeScenario]);
-
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 760px)');
     const sync = () => setMobileWorkbenchLayout(mq.matches);
@@ -1325,6 +1317,17 @@ function Workbench({
     setMobilePane('results');
   }
 
+  function toggleVisionSense() {
+    const currentToolIds = runtimeScenario.selectedToolIds ?? [];
+    const selectedToolIds = currentToolIds.includes(visionSenseToolId)
+      ? currentToolIds.filter((id) => id !== visionSenseToolId)
+      : [...currentToolIds, visionSenseToolId];
+    onScenarioOverrideChange(scenarioId, {
+      ...runtimeScenario,
+      selectedToolIds,
+    });
+  }
+
   function beginWorkbenchResize(event: React.MouseEvent<HTMLDivElement>) {
     const grid = event.currentTarget.parentElement;
     if (!grid) return;
@@ -1352,41 +1355,43 @@ function Workbench({
   return (
     <main className="workbench workbench-canvas-shell codex-quiet-shell">
       <div className="workbench-chrome">
-        <button
-          type="button"
-          className="workbench-chrome-toggle"
-          onClick={() => setWorkbenchChromeExpanded((value) => !value)}
-          aria-expanded={showWorkbenchChromeBody}
-        >
-          <div className="scenario-large-icon workbench-chrome-icon" style={{ color: scenarioView.color, background: `${scenarioView.color}18` }}>
-            <scenarioView.icon size={22} />
+        <div className="workbench-chrome-toggle">
+          <button
+            type="button"
+            className="workbench-chrome-toggle-main"
+            onClick={() => setWorkbenchChromeExpanded((value) => !value)}
+            aria-expanded={showWorkbenchChromeBody}
+          >
+            <div className="scenario-large-icon workbench-chrome-icon" style={{ color: scenarioView.color, background: `${scenarioView.color}18` }}>
+              <scenarioView.icon size={22} />
+            </div>
+            <span className="workbench-chrome-title">{runtimeScenario.title}</span>
+            {workbenchChromeExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+          <div className="workbench-sense-actions" aria-label="感官插件">
+            <button
+              type="button"
+              className={cx('sense-toggle', visionSenseActive && 'active')}
+              aria-pressed={visionSenseActive}
+              onClick={toggleVisionSense}
+              title={visionSenseActive ? '取消 vision-sense 感官' : '激活 vision-sense 感官'}
+            >
+              <Eye size={14} />
+              <span>vision-sense</span>
+              <small>{visionSenseActive ? 'on' : 'off'}</small>
+            </button>
           </div>
-          <span className="workbench-chrome-title">{runtimeScenario.title}</span>
-          <span className="workbench-chrome-meta">
-            {scenarioCompileSummary.packageId}@{scenarioCompileSummary.packageVersion}
-            {' · '}
-            {scenarioCompileSummary.valid ? 'valid' : 'needs fixes'}
-            {availableComponentIds.length ? ` · UI×${availableComponentIds.length}` : ''}
-          </span>
-          {workbenchChromeExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </button>
+        </div>
         {showWorkbenchChromeBody ? (
           <div className="workbench-chrome-body">
-            <div className="workbench-header workbench-header-nested">
-              <div className="scenario-title">
-                <div className="scenario-large-icon" style={{ color: scenarioView.color, background: `${scenarioView.color}18` }}>
-                  <scenarioView.icon size={24} />
-                </div>
-                <h1 style={{ color: scenarioView.color }}>{runtimeScenario.title}</h1>
-              </div>
-            </div>
             <ScenarioBuilderPanel
               scenarioId={baseScenarioId}
               scenario={runtimeScenario}
               config={config}
               runtimeHealth={runtimeHealth}
-              expanded={settingsExpanded}
-              onToggle={() => setSettingsExpanded((value) => !value)}
+              expanded
+              onToggle={() => {}}
+              chromeEmbedded
               onChange={(override) => onScenarioOverrideChange(scenarioId, override)}
               agentRuntimeComponentIds={availableComponentIds}
               onAgentRuntimeComponentIdsChange={onAvailableComponentIdsChange}

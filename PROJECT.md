@@ -16,6 +16,156 @@
 
 ## 任务板
 
+### T082 可插拔模态感官：Vision Sense Tool MVP
+
+状态：Python MVP package、root tool/skill discovery、mock integration 和 KV-Ground live smoke 已完成；Browser MVP 与 SciForge UI trace preview 尚未完成。
+
+#### 背景
+- SciForge 需要逐步拥有可插拔的模态感知能力，把“眼睛”“耳朵”等感官做成独立工具模块，优先放在 `packages/` 下，供 skill registry、AgentServer、workspace-local task code 和未来多模态 agent 编排按需发现与调用。
+- 第一阶段从视觉开始，实现一个纯视觉 Computer Use MVP：看屏幕、理解目标、规划下一步、ground 到坐标、执行、验证，再循环。
+- 参考设计文档：`docs/vision_tool/vision_computer_use_agent_mvp.md`。核心约束保持不变：纯视觉路线，不读 DOM，不读 accessibility tree，VLM 不直接输出坐标，Planner 只输出动作类型和视觉目标描述。
+- Grounding 第一版使用 KV-Ground 服务，使用说明见 `docs/vision_tool/KV_GROUND_ERVICE_GUIDANCE.md`：运行时通过 `grounderConfig.baseUrl` 或 `SCIFORGE_VISION_KV_GROUND_URL` 配置 `/health` 与 `/predict/` 访问地址，`/predict/` 接收 `image_path` 与 `text_prompt`，返回输入图片原始尺寸下的像素坐标。
+- VLM 第一版使用 `qwen3.6-plus`，复用当前 LLM 的 base URL 与 API key，不在 vision package 中新增独立密钥体系；只允许通过统一配置读取模型名、base URL、API key、超时和重试策略。
+
+#### 设计原则
+- 感官是 tool，不是业务策略：vision package 只提供观察、定位、执行和验证能力；任务意图、科研策略和 artifact 决策仍由上层 skill/agent 负责。
+- 包边界独立：新增视觉模块应位于 `packages/senses/vision-sense` 或等价 package 名称下，拥有自己的 `pyproject.toml`、`README.md`、Python package、`tests/` 与清晰 exports；不从 app 内部私有路径拿实现。
+- 统一 Sense Contract：视觉、听觉等未来感官共享最小契约，包括 capability manifest、输入输出 schema、配置 schema、运行日志、失败原因、artifact refs 和安全边界。
+- 纯视觉 MVP 优先跑通，不提前引入复杂恢复：第一版只实现单候选 Planner、KV-Ground 单模型定位、一次 crosshair retry、像素级变化验证、max steps / 连续失败退出。
+- 可审计优先：每一步必须记录截图 ref、screen summary、visible texts、planner action、grounding 请求/响应、执行结果、pixel diff、failure reason，方便后续复盘和训练失败模式。
+- 安全边界前置：MVP 默认只允许低风险 GUI 操作；发送、删除、付款、授权、外部发布等高风险动作必须 fail closed 或要求上层显式确认后才允许扩展。
+
+#### 第一阶段范围
+- 新增一个独立视觉感官 package，例如 `packages/senses/vision-sense`，暴露 `runVisionTask(task, options)` 和更底层的 observer/planner/grounder/executor/verifier 组合能力。
+- 支持 Chrome/Edge 等单窗口线性 GUI 任务的 MVP loop：截图稳定检测、VLM 完成判断、VLM 下一步规划、KV-Ground 定位、鼠标键盘执行、像素级变化验证。
+- 动作空间限定为 `click`、`type_text`、`press_key`、`scroll`；文本输入通过 clipboard paste；暂不支持 drag、double click、right click、hotkey 和跨应用窗口切换。
+- VLM 统一使用 `qwen3.6-plus`，通过现有 LLM base URL 与 API key 调用；prompt 需要固定 JSON 输出 schema，禁止返回坐标。
+- KV-Ground adapter 负责健康检查、图片可访问性处理、`/predict/` 调用、像素坐标归一化、失败分类和本地/远端图片上传策略。
+- MVP 只做像素级 post-action verifier，不判断语义正确性；任务是否完成由下一轮 VLM completion check 决定。
+
+#### Package / API TODO
+- [x] 确定 package 名称与目录：使用 `packages/senses/vision-sense`，本轮完成 Python 包骨架。
+- [x] 在 root workspace / package catalog 中接入 vision sense package。
+- [x] 定义 `SenseManifest` 通用契约：`id`、`modality`、`capabilities`、`inputs`、`outputs`、`configSchema`、`safety`、`runtimeRequirements`、`observability`、`version`。
+- [x] 定义 `VisionTaskRequest`：包含 `task`、`app/window target`、`maxSteps`、`riskPolicy`、`modelConfigRef`、`grounderConfig`、`screenshotPolicy`、`artifactOutputDir`。
+- [x] 定义 `VisionTaskResult`：包含 `status`、`reason`、`steps`、`finalScreenshotRef`、`artifacts`、`metrics`、`failureDiagnostics`。
+- [x] 定义 `VisionStepRecord`：包含 `beforeScreenshotRef`、`screenSummary`、`visibleTexts`、`completionCheck`、`plannedAction`、`grounding`、`execution`、`afterScreenshotRef`、`pixelDiff`。
+- [x] 输出 package README 的 `Agent quick contract`：何时使用、输入输出、能力限制、配置项、失败处理、安全边界、测试方式。
+- [x] 确认 `sciforge_vision_sense/__init__.py` 导出当前 Python MVP public API：contract、manifest、observer、planner、KV-Ground、executor、verifier、VLM helper 与 runner 入口。
+
+#### VLM / qwen3.6-plus TODO
+- [x] 找到并复用 SciForge 当前 LLM 配置读取路径，确认 base URL、API key、headers、timeout、retry 与 provider event logging 的统一入口。（package 只接收 shared config ref / `VisionVlmConfig`，不新增密钥体系；provider event logging 留给上层 runtime）
+- [x] 新增 vision VLM client，默认 `model=qwen3.6-plus`，允许通过配置覆盖，但禁止在 package 内硬编码密钥。
+- [x] 实现 VLM screenshot message 适配：支持 PNG/JPEG base64 或 provider 所需 image content 格式，并记录 token/latency/错误摘要。
+- [x] 编写 completion-check prompt：输入任务、当前截图、步骤历史，输出 `{ "done": boolean, "reason": string, "confidence": number }`。
+- [x] 编写 planner prompt：输入任务、screen summary、visible texts、最近动作历史，输出单个 JSON action，action 中只允许自然语言 `target_description`，不允许坐标。
+- [x] 编写 crosshair verification prompt：输入带准星截图与 target description，输出准星是否落在目标上；失败时可输出 revised target description。
+
+#### KV-Ground Adapter TODO
+- [x] 实现 `KvGroundClient.health()`，调用 `GET /health` 并校验 `ok`、`model_dir`、CUDA/GPU 状态，失败时返回可诊断错误。
+- [x] 实现 `KvGroundClient.predict(imageRef, textPrompt)`，调用 `POST /predict/`，解析 `coordinates`、`raw_text`、`image_size`。
+- [x] 处理图片路径策略：本地文件、HTTP URL、远端服务器可读路径三种输入必须显式区分；MVP 可先要求配置 `remoteImageUploader` 或只支持服务端可访问 URL。
+- [x] 实现像素坐标、归一化坐标、截图像素坐标、系统鼠标坐标之间的转换，并覆盖 device pixel ratio。
+- [x] 实现两阶段定位：整屏粗定位，扩展 bbox crop 后局部精定位；如果 KV-Ground 仅返回点坐标，MVP 先用固定 crop 半径模拟粗定位窗口，并在 README 标明限制。
+- [x] 实现 crosshair retry：预测点绘制准星后交给 VLM 验证；失败时使用 revised target description 最多重试一次。
+- [x] 增加连续 grounding failure 计数，达到 3 次返回失败并附带请求/响应日志。
+
+#### Visual Observer TODO
+- [x] 实现截图获取接口，抽象出 `ScreenCaptureProvider`，便于本地 Computer Use、Playwright screenshot 或未来原生 runtime 接入。
+- [x] 实现屏幕稳定检测：每 0.3 秒截图一次，连续两帧变化面积低于 1% 判定稳定，最长等待 8 秒。
+- [x] 实现屏幕摘要：用 qwen3.6-plus 生成一句 screen summary。
+- [x] 实现可见文本列表：MVP 可先由 VLM 提取 `[{ text, approximateRegion }]`，后续再接 OCR；必须在 README 标明不是 DOM/accessibility。
+- [x] 记录截图 artifact refs，避免把大图直接塞进多轮上下文。
+
+#### Executor / Verifier TODO
+- [x] 定义 `GuiExecutor` 接口：`click`、`typeText`、`pressKey`、`scroll`，并把系统坐标转换封装在 executor 边界。
+- [x] 实现文本输入 clipboard paste，避免逐字输入导致不稳定。
+- [x] 每个动作执行后等待屏幕稳定，再进入 verifier。
+- [x] 实现 pixel diff verifier：输出变化面积比例；低于 0.5% 标记 `possiblyNoEffect`。
+- [x] 实现退出条件：`done`、`maxSteps=30`、连续 grounding 失败 3 次、连续无变化 5 步。
+
+#### SciForge 集成 TODO
+- [x] 将 vision sense package 加入 package/tool discovery，使上层 skill 能发现它是 `modality=vision` 的 tool。
+- [x] 定义一个最小 vision skill 或 workspace-local task template，用于把用户的 GUI 任务转成 `VisionTaskRequest`。
+- [x] AgentServer handoff 中只传 vision run 的轻量 refs/summary，不全量回放截图和大日志。（Python package 提供 `compact_vision_result_for_handoff`，上层可直接使用）
+- [x] 将 `vision-sense` 从“已登记工具包”升级为可调用 Sense Plugin：统一 `text + modalities -> text` 的调用 envelope，输出坐标、操作信号、控制代码等文本格式结果，方便后续 audio/其它感官复用。
+- [x] 在 `vision-sense` 内补 Computer Use 文本信号适配层：把 screenshot/image refs + 用户文本目标转换为 `click/type_text/press_key/scroll` 等可审计 text command，不在感官包内硬绑定某个桌面执行器。
+- [x] 将 tool discovery manifest 补充 sense-plugin 元数据：输入模态、输出格式、text command schema、execution boundary 和安全策略。
+- [x] 增加 focused tests 覆盖 sense-plugin envelope、Computer Use text command 输出、manifest 元数据和低风险动作边界。
+- [x] 激活 `vision-sense` 后，将 `selectedToolContracts` 注入 SciForge 多轮聊天 handoff、agent context 和直接 AgentServer metadata，使后端明确获得 text + screenshot/image -> Computer Use text signal 的执行边界。
+- [ ] 结果区新增或复用 artifact preview 展示 vision run trace：步骤列表、截图缩略图、planned action、grounding 点、pixel diff、失败原因。
+- [ ] 将 high-risk GUI action 与 SciForge 当前安全/确认机制打通，MVP 默认禁用高风险动作。
+
+#### 测试与验收 TODO
+- [x] Unit tests：VLM JSON schema 解析、planner 禁止坐标、KV-Ground 响应解析、坐标转换、pixel diff、退出条件。
+- [x] Contract tests：`SenseManifest`、`VisionTaskRequest`、`VisionTaskResult` 与 package README 示例保持一致。
+- [x] Integration smoke：mock VLM + mock KV-Ground 跑完整 3 步任务，验证 trace artifact、失败诊断和 max step 行为。
+- [x] Live smoke：连接用户当前配置的 KV-Ground `/health`，用测试截图调用 `/predict/`，确认返回坐标和 image size 可被 adapter 正确消费。
+- [ ] Browser MVP 验收：在干净浏览器里完成一个低风险线性任务，例如搜索指定论文标题并停在 PDF 下载页；不读 DOM/accessibility，全程通过视觉 trace 证明闭环。
+- [x] Handoff smoke：激活 `local.vision-sense` 时，确认多轮聊天请求包含 sense-plugin contract、Computer Use text command schema、trace compaction policy 和 no DOM/accessibility 边界。
+- [x] 成本与上下文验收：VLM 调用、截图 refs、grounding 日志进入可审计 trace，但多轮上下文只传摘要和 refs，不把图片 base64 直接塞回 AgentServer。
+
+### T083 激活 Vision Sense 后增强多轮 Computer Use 能力
+
+状态：进行中。本轮已完成 handoff/context 增强、focused smoke、一次真实网页端多轮验证、独立 vision package runtime 补强、真实截图落盘 trace、KV-Ground live curl 验证与默认共享盘路径识别；最新原则已调整为“通用 Computer Use loop 优先”，不得为 Word/PPT 或任何示例应用写专用补丁；仍需接入真实 VisionPlanner/Grounder/Verifier 与结果区 trace preview。
+
+#### 通用性原则
+- vision-sense 的主路径必须适配任何桌面应用：只依赖截图、视觉规划、grounding、鼠标键盘动作、验证和 trace，不依赖某个 app 的私有 API。
+- App-specific shortcut 不属于主能力路径；本阶段先删除 Word/PPT 专用 shortcut，避免用案例补丁伪装通用能力。
+- 若缺 VisionPlanner / Grounder / GuiExecutor / Verifier，必须返回结构化 `failed-with-reason` 和真实截图 refs；不得退回扫描仓库、读取 `.sciforge` 历史文件或生成示例成功结果。
+- `vision-trace` 必须记录通用 action schema：`click`、`double_click`、`drag`、`type_text`、`press_key`、`hotkey`、`scroll`、`wait`，并明确 `appSpecificShortcuts: []`。
+
+#### 背景
+- `packages/senses/vision-sense` 已实现纯视觉 Computer Use MVP package，并通过 `local.vision-sense` 注册为 `sense-plugin` tool。
+- SciForge UI 已有 `vision-sense` 激活按钮，能把 `local.vision-sense` 写入 Scenario Builder 的 `selectedToolIds`。
+- 之前 AgentServer 只能看到较瘦的 tool id/description，缺少输入模态、输出文字命令、执行边界、安全策略和多轮 trace compaction 规则，导致激活 vision 后不一定能稳定转化为 Computer Use 能力。
+
+#### TODO
+- [x] 将 `vision-sense` 补成可独立发布资源包：保持 `sciforge_vision_sense` 只依赖标准库/声明依赖，不 import SciForge app 私有模块；README、pyproject、public exports、tests 覆盖真实 trace runtime。
+- [x] 实现截图落盘 adapter：提供本地文件 screenshot store、可替换的 `ScreenCaptureProvider`、macOS `screencapture` 可选 provider，以及测试用 static provider；每个 screenshot ref 必须对应真实 PNG 文件。
+- [x] 增加多显示器 / 目标窗口支持：macOS provider 支持显式 `displayId`、`windowId` 或 rect capture，并把 display/window/rect metadata 写入 screenshot refs；SciForge bridge 后续必须根据当前浏览器窗口选择目标屏幕，不能让 VLM 猜。
+- [x] 实现 `vision-trace` writer / validator：写出 JSON artifact 前校验 screenshot refs 存在、PNG header 可读、sha256/mime/width/height 完整；缺失截图时返回 failed validation，不允许把占位路径冒充 image memory。
+- [x] 实现临时 text-agent runtime：允许调用方用一个简单 text agent 代替 SciForge/AgentServer，基于截图 ref 产出视觉对象识别、低风险 action plan、Computer Use text signal 和 trace artifact。
+- [x] 单元测试覆盖独立包 runtime：真实 PNG 写入、trace JSON 校验、缺失截图失败、text-agent 复杂两步流程、handoff compact 不含 base64。
+- [x] 修正 KV-Ground 路径识别配置：服务共享盘路径前缀不在 package 中硬编码，必须通过 `remote_path_prefixes` / `grounderConfig.remotePathPrefixes` / `SCIFORGE_VISION_KV_GROUND_REMOTE_PATH_PREFIXES` 显式配置；本机 `.sciforge/*.png` 仍要求 uploader/shared mount/显式 `allow_service_local_paths`，避免服务读不到本机路径。
+- [x] SciForge runtime 端到端复测：重启 `localhost:5173` / workspace server 后，通过 `/api/sciforge/tools/run` 激活 `local.vision-sense`，真实调用 Word bridge 创建复杂 Word 文档；确认 `.sciforge/vision-runs/word-e2e-001/*.png`、`vision-trace.json` 和 `sciforge-vision-word-output.docx` 均真实存在，trace 只保存文件引用。
+- [x] Word 端到端负向实测：在 `localhost:5173` 切换屏幕后激活 `vision-sense on`，要求 SciForge 使用 Word 创建复杂文档；结果未创建 Word 文档、未生成 `.sciforge/vision-runs/word-e2e-001/*.png`，AgentServer 反而执行 `find ... workspace/.sciforge ...`，说明当前组合不能准确使用 Word，缺口是 SciForge runtime bridge 而不是 vision-sense 包级截图能力。
+- [x] 多显示器截图实测：切屏后用 `MacOSScreencaptureProvider(display_id=1/2)` 生成 `workspace/.sciforge/vision-runs/word-screen-switch-001/display-{1,2}/screen.png` 与 `vision-trace.json`，均通过真实 PNG/sha256/尺寸校验；后续 bridge 必须根据当前目标窗口选择 display/window/rect，不能让 VLM 猜屏幕。
+- [x] 增加 runtime 硬闸：当 `local.vision-sense` 被选中且用户请求真实 GUI/Word/PowerPoint 操作时，workspace runtime 先路由到本地 `vision-sense` bridge；bridge 禁用或未支持的 app 返回结构化 `failed-with-reason`，不再交给 AgentServer 扫描仓库或 `.sciforge` 历史文件。
+- [x] 删除 Word/Office 专用 bridge：移除桌面应用专属文档生成、保存面板脚本和专属 artifact 成功路径，防止为单个例子写死。
+- [x] 改为通用 Vision Computer Use loop：SciForge runtime 只接受通用 action schema，执行截图、通用鼠标键盘动作、after 截图、file-ref-only `vision-trace.json`，不包含 app-specific shortcut。
+- [x] 增加 SciForge runtime bridge smoke：`smoke:vision-sense-runtime` 覆盖 bridge 禁用时 fail-closed、缺 planner/grounder action 时结构化失败、dry-run 通用 action 成功、4 张 display 截图真实落盘、trace 不含 base64/dataUrl 且 `appSpecificShortcuts=[]`。
+- [ ] 接入真实 VisionPlanner：把用户目标 + screenshot refs 转为通用 action plan，不允许 planner 输出 app 私有 API 调用。
+- [ ] 接入真实 Grounder：用 KV-Ground 或等价服务把视觉目标转为屏幕坐标，并写入 trace；路径/端口/共享盘仍必须来自配置。
+- [ ] 接入真实 Verifier：每步执行后基于截图变化、目标状态和完成判断决定继续/停止，不能只看文件是否生成。
+- [ ] 修复 `vision-trace` 前端重复 key：Vite 控制台持续报 `Encountered two children with the same key artifact-note-...-vision-trace`，多轮 trace artifact 需要稳定唯一 key，避免结果区重复/遗漏。
+- [x] 复查 `packages/senses/vision-sense` 实现边界：确认 package 只负责观察、规划、grounding、文字信号和 trace，不直接绑定桌面执行器。
+- [x] 复查 SciForge 多轮聊天 handoff：确认 `selectedToolIds` 从 UI 进入 workspace runtime / AgentServer gateway。
+- [x] 增强网页端 runtime request：激活 `local.vision-sense` 时，在 `uiState.selectedToolContracts` 和 `agentContext.selectedToolContracts` 中传入 sense-plugin contract。
+- [x] 增强直接 AgentServer request：把 `local.vision-sense` contract 放入 system prompt、用户 prompt metadata 和 runtime metadata，避免绕过 workspace runtime 时丢失 vision 能力。
+- [x] 增强 workspace gateway 的 `availableTools` 摘要：向 AgentServer 暴露 docs、packageRoot、requiredConfig、tags 和 `sensePlugin` contract。
+- [x] 增加 focused smoke 覆盖：激活 `local.vision-sense` 后，多轮请求必须携带 no DOM/accessibility、text-signal-only、Computer Use command format 和 compact trace policy。
+- [x] 增强 image memory 策略：vision/computer-use 截图记忆以 `.sciforge/...png` / artifact file refs、step summary、pixel diff 和 trace refs 进入多轮上下文，明确禁止 dataUrl/base64 截图进入 handoff。
+- [x] 增加复杂多轮 Computer Use image-memory smoke：上一轮包含多个 screenshot/crosshair/final screenshot refs 和潜在 dataUrl 时，下一轮只复用文件引用与轻量摘要。
+- [x] 用网页端真实多轮聊天验证第一轮：通过 Computer Use 在 Edge 打开 `http://127.0.0.1:5173/`，开启 `vision-sense on` 并发送两轮低风险 Computer Use 测试 prompt；确认 UI toggle、selectedToolIds 和多轮 failed-run context 能进入 handoff。
+- [x] 记录真实验证失败模式：当前后端仍按普通 AgentServer workspace task 处理，第一轮长时间扫描/等待且未产生真实 `vision-trace`；第二轮 handoff 仍只有较薄 `availableTools` 摘要，最终显示 `AgentServer generation request failed: fetch failed` / 修复 rerun 被取消；说明源码增强需要重启/接入 runtime bridge，且必须避免用全仓扫描补偿缺失 GUI executor。
+- [x] 用更复杂的网页端 Computer Use 案例复测：第三轮要求识别聊天输入框、发送按钮、结果区、右侧 failed 诊断块，规划两步低风险 GUI 流程，并输出带 `beforeScreenshotRef` / `crosshairScreenshotRef` / `afterScreenshotRef` / `plannedAction` / `grounding` / `pixelDiff` / `failureReason` 的 `vision-trace` JSON 草案。
+- [x] 复杂案例产物验证：`workspace/.sciforge/vision-runs/complex-003/vision-trace-draft.json` 成功生成，包含 2 个 steps、`finalScreenshotRef` 和 7 个 `.sciforge/vision-runs/complex-003/*.png` 引用；但目录下没有实际 PNG 文件，所以这只是 file-ref shape 草案，不是已落盘截图记忆。实际 `data:image/...;base64,` 匹配数为 0，`base64` 只出现在 policy 文本中。
+- [x] 复杂案例结论：当前可在多轮聊天中产生可点击 `vision-trace` artifact 和 file-ref-only trace 草案；但还不能称为真实 image memory 或真实视觉执行闭环，因为运行时缺实际截图落盘、`ScreenCaptureProvider`、VLM endpoint、KV-Ground service 和 `GuiExecutor` bridge。
+- [ ] 增加 vision trace artifact validation：如果 `vision-trace` 中的 screenshot refs 指向 `.png`，运行结束前必须校验文件存在、sha256/mime/尺寸可读；缺失时将 artifact 标为 `draft` / `failed-with-reason`，并在 UI 中显示 missing screenshot refs，避免把占位路径说成真实截图记忆。
+- [x] 记录结果区聚焦问题：第三轮 current run 显示 completed/gate pass，但右侧结果区仍混入上一轮 failed `EU-literature-*` / acceptance repair 诊断并显示“运行需要处理”；后续需要让结果区按当前 run artifact/executionUnits 更严格隔离，避免旧 failure 抢占 completed run 的主视图。
+- [x] 补强缺失 bridge 策略：`local.vision-sense` contract 增加 `missingRuntimeBridgePolicy`，并在 AgentServer generation prompt 中要求缺 GUI executor/screenshot bridge 时返回诊断或 `failed-with-reason`，不得扫描仓库来伪造 Computer Use。
+- [ ] 重启/刷新本地 runtime 后复测网页端多轮聊天：确认 handoff 中出现完整 `selectedToolContracts` / `sensePlugin` contract，缺 bridge 时能快速诊断，接入 bridge 后能保留真实 `vision-trace` refs。
+- [ ] 接入真实截图上传/共享盘映射：KV-Ground `/predict/` 已验证可读用户提供的服务共享路径，但本机 `.sciforge/vision-runs/*.png` 需要同步到服务可读路径后才能 ground；当前没有可用的上传 API / 可写共享目录 / 远端挂载配置，需由运行时注入 host、port、remote dir 或 HTTP upload adapter。
+- [ ] 增强结果区 trace preview：展示 step screenshot refs、planned action、grounding 点、execution status、pixel diff 和 failureReason。
+- [ ] 修复 completed run 的结果区隔离：当前 run 有 `vision-trace` artifact 时，主结果应优先展示当前 artifact 和当前 ExecutionUnit，不应被旧 failed run / acceptance repair blocker 抢占。
+- [ ] 接入高风险动作确认：`send/delete/pay/authorize/publish` 等操作必须进入 SciForge 确认机制，否则保持 fail closed。
+- [ ] 增加 Browser MVP 回归脚本：干净浏览器中完成低风险线性任务，并断言上下文中不出现截图 base64 或 DOM/accessibility 数据。
+
+#### 后续感官扩展占位
+- [ ] 抽象 `packages/audio-sense` 的未来契约：音频输入、转写、声源/事件检测、时间戳证据、隐私与录音授权边界。
+- [ ] 抽象多感官融合层：同一任务可引用 vision/audio 等 sense traces，但决策仍由上层 agent/skill 组合，不把策略写死在单个感官包中。
+
 ### T081 网页端真实多轮 Chat Agent 执行与预览验收
 
 状态：进行中。
@@ -225,72 +375,3 @@
 - Focused SciForge tests 通过：`npm run test -- src/ui/src/api/sciforgeToolsClient.test.ts src/ui/src/api/agentClient.test.ts src/ui/src/contextCompaction.test.ts` 实际执行全套相关 tests，`122 pass / 0 fail`；`npx tsc --noEmit --pretty false` 通过。
 - Focused AgentServer tests 通过：`npm run test -- tests/agent-server-preflight-compaction.test.ts tests/codex-chat-responses-adapter.test.ts tests/codex-app-server-adapter.test.ts` 实际执行当前 tests，`93 pass / 0 fail`。
 - 真实浏览器 20+ 人工轮次与至少两次真实 AgentServer/backend compaction tag 仍未完成；当前只有 smoke 证明 24 轮 UI 事件，两次真实 backend compaction 还需要继续压测。
-
-### T078 多轮上下文复用、Context Window 计量与 Token 开销优化
-
-状态：已完成。
-
-#### 背景
-- 10 轮以上复杂续问时，SciForge 需要像 Codex 桌面版一样复用同一会话背景：长期事实走 workspace refs 和稳定 ledger，最近消息负责短期意图。
-- 当前 context window meter 存在误导风险：本地估算只看最近若干消息，长对话后可能不再单调；provider cumulative usage 又容易被误解成当前窗口占用。
-- 多轮请求上下文要保持通用，不允许针对某个科研案例、artifact id 或组件写特殊补丁。
-
-#### TODO
-- [x] 用真实 UI 多轮对话暴露：artifact merge 旧结果覆盖新结果、重复 key、结果渲染未合并 artifact top-level/data/content 字段。
-- [x] 修正 artifact/execution merge：后续响应优先，同时保持用户已有 session 对象不被丢弃。
-- [x] 修正结果渲染 payload 合并：通用支持 top-level、data、content 三类 artifact 字段布局。
-- [x] 将续问上下文摘要从“最早 N 个 artifact/execution”改为“最近 N 个”，避免后续轮次复用过期 workspace refs。
-- [x] 增加稳定 conversation ledger 与 contextReusePolicy：全会话按 append-only 顺序保留短摘要和 digest，最近 16 条保留更完整意图窗口。
-- [x] 修正 context window 本地估算：使用全会话消息、runs、artifact refs、execution refs 的轻量累计，不因超过 24 条消息而下降。
-- [x] 增加 12+ 轮单测：验证 ledger 完整、最近窗口稳定、最新 artifact/execution refs 被使用、AgentContext 与 UIState 一致。
-- [x] 使用浏览器/应用服务复测多轮续问体验，确认用户可见 meter、工作日志、结果区行为一致。
-- [x] 跑完整验证：typecheck、test、build。
-
-### T077 Design System / Theme Package 模块化
-
-状态：已完成。
-
-#### 背景
-- 当前 UI 已有 `uiPrimitives.tsx`、CSS variables 和 dark/light theme，但基础组件、主题 token、页面布局样式仍散落在 `src/ui/src/app` 与多份 CSS 中。
-- 白天模式和未来更多主题都需要统一 design token，而不是每个页面单独补丁。
-- UI component packages、Scenario Builder、Chat、Results、Workspace Explorer 都应该复用同一套 primitives、tokens 和交互状态。
-
-#### TODO
-- [x] 新增 `packages/design-system`，定义 Button、IconButton、Badge、Card、TabBar、SectionHeader、EmptyState、Input、Select、Details、Panel 等基础组件。
-- [x] 将 `src/ui/src/app/uiPrimitives.tsx` 迁移或适配到 design-system 包，保留兼容导出以降低一次性改动风险。
-- [x] 建立语义 token：surface、surface-muted、surface-raised、border、text、accent、danger、warning、shadow、focus-ring、radius、spacing。
-- [x] 将 dark/light theme 变量集中到 design-system，并让主 app 只挂载 theme class。
-- [x] 梳理 CSS 中重复的 button/card/tab/badge/panel 样式，逐步收敛到 design-system。
-- [x] 提供 README：Agent quick contract 说明可用 primitives 和 theme token；Human notes 说明视觉原则、可访问性、扩展方式。
-- [x] 增加轻量测试或 smoke：验证核心组件可渲染、theme token 存在、dark/light class 生效。
-- [x] 不阻塞 T073：本任务负责长期模块化结构，T073 可先修当前白天模式视觉；两者最终要合流。
-
-#### 并行实现 Prompt
-```text
-你负责实现 SciForge 的 T077：Design System / Theme Package 模块化。
-
-工作目录：/Applications/workspace/ailab/research/app/SciForge
-
-目标：
-1. 新增 packages/design-system，沉淀 SciForge 的基础 UI primitives 与 theme tokens。
-2. 将现有 src/ui/src/app/uiPrimitives.tsx 迁移/代理到 design-system，保持现有页面不大面积破坏。
-3. 建立 dark/light 通用语义 token，供 T073 白天模式视觉重做复用。
-
-执行要求：
-- 先阅读 src/ui/src/app/uiPrimitives.tsx、src/ui/src/styles/base.css、src/ui/src/styles/app-*.css。
-- 优先创建包结构、types、README、exports，再做最小迁移。
-- 不要在本任务里大规模重写所有页面样式；先保证 design-system 可用、可渐进迁移。
-- 保持现有 import 兼容，必要时让 uiPrimitives.tsx re-export 新包。
-- 主题 token 要用语义命名，避免页面继续依赖硬编码暗色。
-
-验收：
-- npm run typecheck
-- npm run test
-- npm run build
-- package catalog 或新增 smoke 能检查 design-system 基本结构。
-
-交付说明：
-- 列出 packages/design-system 的结构。
-- 说明哪些 primitives 已迁移，哪些仍待迁移。
-- 说明 T073 如何复用这些 token。
-```

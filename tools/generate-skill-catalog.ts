@@ -22,7 +22,8 @@ await writeFile('packages/skills/index.ts', [
 
 await writeFile('packages/tools/types.ts', [
   "export type ToolPackageSource = 'package' | 'workspace' | 'generated';",
-  "export interface ToolPackageManifest { [key: string]: unknown; id: string; packageName: string; kind: 'tool'; version: string; label: string; description: string; source: ToolPackageSource; toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime'; skillDomains: string[]; producesArtifactTypes?: string[]; requiredConfig?: string[]; docs: { readmePath: string; agentSummary: string; }; packageRoot: string; tags: string[]; provider?: string; sourceUrl?: string; mcpCommand?: string; mcpArgs?: string[]; }",
+  "export interface SensePluginManifest { id: string; modality: string; inputContract: { textField: string; modalitiesField: string; acceptedModalities: string[]; }; outputContract: { kind: 'text'; formats: string[]; commandSchema?: Record<string, unknown>; }; executionBoundary: 'text-signal-only' | 'direct-executor' | 'hybrid'; safety: { defaultRiskLevel: 'low' | 'medium' | 'high'; highRiskPolicy: 'reject' | 'require-confirmation' | 'allow'; }; }",
+  "export interface ToolPackageManifest { [key: string]: unknown; id: string; packageName: string; kind: 'tool'; version: string; label: string; description: string; source: ToolPackageSource; toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime' | 'sense-plugin'; skillDomains: string[]; producesArtifactTypes?: string[]; requiredConfig?: string[]; docs: { readmePath: string; agentSummary: string; }; packageRoot: string; tags: string[]; provider?: string; sourceUrl?: string; mcpCommand?: string; mcpArgs?: string[]; sensePlugin?: SensePluginManifest; }",
   '',
 ].join('\n'));
 
@@ -31,7 +32,7 @@ await writeFile('packages/tools/index.ts', [
   '',
   `export const toolPackageManifests = ${JSON.stringify(tools, null, 2)} as const satisfies readonly ToolPackageManifest[];`,
   '',
-  "export type { ToolPackageManifest, ToolPackageSource } from './types';",
+  "export type { SensePluginManifest, ToolPackageManifest, ToolPackageSource } from './types';",
   '',
 ].join('\n'));
 

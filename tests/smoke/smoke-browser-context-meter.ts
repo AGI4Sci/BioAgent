@@ -89,6 +89,7 @@ try {
 
     await page.goto(`http://127.0.0.1:${uiPort}/`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: '场景工作台' }).click();
+    await expandWorkbenchChrome(page);
     await page.getByText('Scenario Builder').waitFor({ timeout: 15_000 });
     await page.locator('.chat-panel .composer textarea').waitFor({ timeout: 15_000 });
 
@@ -122,6 +123,14 @@ try {
 } finally {
   for (const child of children.reverse()) child.kill('SIGTERM');
   await rm(workspace, { recursive: true, force: true });
+}
+
+async function expandWorkbenchChrome(page: Page) {
+  const toggle = page.locator('.workbench-chrome-toggle-main');
+  await toggle.waitFor({ state: 'visible', timeout: 15_000 });
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') {
+    await toggle.click();
+  }
 }
 
 async function newContextMeterPage(browser: Browser) {

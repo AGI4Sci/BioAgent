@@ -698,6 +698,174 @@ describe('sendSciForgeToolMessage routing', () => {
     assert.deepEqual(uiState.selectedToolIds, ['clawhub.playwright-mcp']);
   });
 
+  it('passes the activated vision-sense contract into multi-turn agent context', async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          message: 'vision ready',
+          confidence: 0.8,
+          claimType: 'fact',
+          evidenceLevel: 'runtime',
+          uiManifest: [],
+          executionUnits: [],
+          artifacts: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    await sendSciForgeToolMessage({
+      ...baseInput(),
+      scenarioId: 'biomedical-knowledge-graph',
+      agentName: 'Knowledge',
+      agentDomain: 'knowledge',
+      scenarioOverride: {
+        title: 'Vision Computer Use',
+        description: 'Use visual GUI control when selected.',
+        skillDomain: 'knowledge',
+        scenarioMarkdown: '多轮聊天中需要可审计 Computer Use trace。',
+        defaultComponents: ['report-viewer'],
+        allowedComponents: ['report-viewer', 'unknown-artifact-inspector'],
+        fallbackComponent: 'unknown-artifact-inspector',
+        selectedToolIds: ['local.vision-sense'],
+      },
+      messages: [
+        { id: 'msg-prev', role: 'system', content: '上一轮 vision trace ref 是 artifact:vision-001', createdAt: '2026-05-03T00:00:00.000Z' },
+      ],
+      prompt: '激活 vision 后，点击浏览器里的搜索框并输入 KRAS G12D。',
+    });
+
+    assert.deepEqual(requestBody?.selectedToolIds, ['local.vision-sense']);
+    const uiState = requestBody?.uiState as Record<string, unknown>;
+    const contracts = uiState.selectedToolContracts as Array<Record<string, unknown>>;
+    assert.equal(contracts[0].id, 'local.vision-sense');
+    assert.equal(contracts[0].executionBoundary, 'text-signal-only');
+    assert.equal((contracts[0].outputContract as Record<string, unknown>).kind, 'text');
+    assert.deepEqual((contracts[0].missingRuntimeBridgePolicy as Record<string, unknown>).noFallbackRepoScan, true);
+    const agentContext = uiState.agentContext as Record<string, unknown>;
+    assert.deepEqual(agentContext.selectedToolIds, ['local.vision-sense']);
+    assert.match(JSON.stringify(agentContext.selectedToolContracts), /noDomOrAccessibilityReads/);
+    assert.match(JSON.stringify(agentContext.selectedToolContracts), /diagnose-or-fail-closed/);
+    assert.match(JSON.stringify(agentContext), /screenshot refs/);
+  });
+
+  it('keeps complex vision computer-use image memory as file refs across turns', async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          message: 'continuing from image memory refs',
+          confidence: 0.8,
+          claimType: 'fact',
+          evidenceLevel: 'runtime',
+          uiManifest: [],
+          executionUnits: [],
+          artifacts: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    await sendSciForgeToolMessage({
+      ...baseInput(),
+      scenarioId: 'biomedical-knowledge-graph',
+      agentName: 'Knowledge',
+      agentDomain: 'knowledge',
+      scenarioOverride: {
+        title: 'Vision Computer Use',
+        description: 'Use visual GUI control when selected.',
+        skillDomain: 'knowledge',
+        scenarioMarkdown: '复杂多步 GUI 任务需要复用上一轮截图记忆。',
+        defaultComponents: ['report-viewer'],
+        allowedComponents: ['report-viewer', 'unknown-artifact-inspector'],
+        fallbackComponent: 'unknown-artifact-inspector',
+        selectedToolIds: ['local.vision-sense'],
+      },
+      artifacts: [{
+        id: 'vision-run-001',
+        type: 'vision-trace',
+        producerScenario: 'biomedical-knowledge-graph',
+        schemaVersion: '1',
+        path: '.sciforge/artifacts/vision/run-001/trace.json',
+        dataRef: '.sciforge/artifacts/vision/run-001/trace.json',
+        metadata: {
+          previewKind: 'image',
+          latestScreenshotRef: '.sciforge/artifacts/vision/run-001/step-003-after.png',
+          dataUrl: 'data:image/png;base64,SHOULD_NOT_LEAK_METADATA',
+        },
+        data: {
+          status: 'paused',
+          task: 'Open the browser, search KRAS G12D, switch to results, and refine the query.',
+          finalScreenshotRef: '.sciforge/artifacts/vision/run-001/step-003-after.png',
+          dataUrl: 'data:image/png;base64,SHOULD_NOT_LEAK_DATA',
+          steps: [
+            {
+              index: 1,
+              plannedAction: { kind: 'click', targetDescription: 'browser search box' },
+              beforeScreenshotRef: '.sciforge/artifacts/vision/run-001/step-001-before.png',
+              afterScreenshotRef: '.sciforge/artifacts/vision/run-001/step-001-after.png',
+              crosshairScreenshotRef: '.sciforge/artifacts/vision/run-001/step-001-crosshair.png',
+              pixelDiff: 0.12,
+            },
+            {
+              index: 2,
+              plannedAction: { kind: 'type_text', text: 'KRAS G12D evidence' },
+              beforeScreenshotRef: '.sciforge/artifacts/vision/run-001/step-002-before.png',
+              afterScreenshotRef: '.sciforge/artifacts/vision/run-001/step-002-after.png',
+              pixelDiff: 0.08,
+            },
+          ],
+        },
+      }],
+      executionUnits: [{
+        id: 'EU-vision-001',
+        tool: 'local.vision-sense',
+        status: 'repair-needed',
+        params: 'continue visual search suggestion flow',
+        hash: 'vision-run-001-hash',
+        outputRef: '.sciforge/artifacts/vision/run-001/trace.json',
+        stdoutRef: '.sciforge/logs/vision-run-001.stdout.log',
+        failureReason: 'Needs next step after search suggestions appeared.',
+      }],
+      messages: [
+        { id: 'msg-prev', role: 'system', content: '上一轮停在搜索建议页，trace=artifact:vision-run-001。', createdAt: '2026-05-03T00:00:00.000Z' },
+      ],
+      prompt: '继续上一轮 vision computer use：根据截图记忆点击最相关的搜索建议，然后停住。',
+    });
+
+    const serialized = JSON.stringify(requestBody);
+    assert.doesNotMatch(serialized, /SHOULD_NOT_LEAK/);
+    assert.doesNotMatch(serialized, /data:image\/png;base64/);
+
+    const uiState = requestBody?.uiState as Record<string, unknown>;
+    const artifactAccessPolicy = uiState.artifactAccessPolicy as Record<string, unknown>;
+    const reusableRefs = artifactAccessPolicy.reusableArtifactRefs as string[];
+    assert.ok(reusableRefs.includes('file:.sciforge/artifacts/vision/run-001/step-001-before.png'));
+    assert.ok(reusableRefs.includes('file:.sciforge/artifacts/vision/run-001/step-003-after.png'));
+    assert.match(JSON.stringify(artifactAccessPolicy), /file refs/);
+
+    const agentContext = uiState.agentContext as Record<string, unknown>;
+    const artifacts = agentContext.artifacts as Array<Record<string, unknown>>;
+    assert.deepEqual(artifacts[0].imageMemoryRefs, [
+      '.sciforge/artifacts/vision/run-001/step-003-after.png',
+      '.sciforge/artifacts/vision/run-001/step-001-before.png',
+      '.sciforge/artifacts/vision/run-001/step-001-after.png',
+      '.sciforge/artifacts/vision/run-001/step-001-crosshair.png',
+      '.sciforge/artifacts/vision/run-001/step-002-before.png',
+      '.sciforge/artifacts/vision/run-001/step-002-after.png',
+    ]);
+    assert.match(JSON.stringify(artifacts[0].dataSummary), /file-refs-only/);
+  });
+
   it('does not leak stale local conversation into a clean package first run', async () => {
     let requestBody: Record<string, unknown> | undefined;
     globalThis.fetch = (async (_url, init) => {

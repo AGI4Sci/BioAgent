@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildContextCompactionFailureResult, buildContextCompactionOutcome } from './contextCompaction';
 import { buildContextWindowMeterModel, contextWindowLevel, estimateContextWindowState, latestContextWindowState, shouldAutoCompact, shouldStartContextCompaction } from './contextWindow';
-import type { AgentContextWindowState, BioAgentConfig, BioAgentSession } from './domain';
+import type { AgentContextWindowState, SciForgeConfig, SciForgeSession } from './domain';
 
 const beforeState: AgentContextWindowState = {
   usedTokens: 86_000,
@@ -197,7 +197,7 @@ test('empty estimated context window reports zero usage when the model window is
 
 test('estimated context window is monotonic across long multi-turn sessions', () => {
   const base = emptySession('session-long-context');
-  const thirtyTurns: BioAgentSession = {
+  const thirtyTurns: SciForgeSession = {
     ...base,
     messages: Array.from({ length: 30 }, (_, index) => ({
       id: `msg-${index + 1}`,
@@ -207,7 +207,7 @@ test('estimated context window is monotonic across long multi-turn sessions', ()
       status: 'completed',
     })),
   };
-  const thirtyOneTurns: BioAgentSession = {
+  const thirtyOneTurns: SciForgeSession = {
     ...thirtyTurns,
     messages: [
       ...thirtyTurns.messages,
@@ -334,7 +334,7 @@ test('latest context window meter preserves previous compaction timestamp across
   assert.equal(state?.lastCompactedAt, '2026-05-02T22:07:13.067Z');
 });
 
-function emptySession(sessionId: string): BioAgentSession {
+function emptySession(sessionId: string): SciForgeSession {
   return {
     schemaVersion: 2,
     sessionId,
@@ -353,12 +353,12 @@ function emptySession(sessionId: string): BioAgentSession {
   };
 }
 
-function defaultConfig(): BioAgentConfig {
+function defaultConfig(): SciForgeConfig {
   return {
     schemaVersion: 1,
     agentServerBaseUrl: 'http://localhost:18080',
     workspaceWriterBaseUrl: 'http://localhost:5174',
-    workspacePath: '/tmp/bioagent',
+    workspacePath: '/tmp/sciforge',
     agentBackend: 'codex',
     modelProvider: 'native',
     modelBaseUrl: '',

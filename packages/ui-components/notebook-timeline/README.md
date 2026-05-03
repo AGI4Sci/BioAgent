@@ -1,4 +1,4 @@
-# @bioagent-ui/notebook-timeline
+# @sciforge-ui/notebook-timeline
 
 ## Agent quick contract
 - componentId: `notebook-timeline`

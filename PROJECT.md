@@ -1,11 +1,11 @@
-# BioAgent - PROJECT.md
+# SciForge - PROJECT.md
 
 最后更新：2026-05-03
 
 ## 关键原则
 
-- AgentServer 是项目无关的通用大脑和 fallback backend；BioAgent 不维护写死工具清单，优先通过 skill registry、workspace-local task code 和 AgentServer 动态探索/写代码解决请求。
-- 正常用户请求必须交给 AgentServer/agent backend 真实理解和回答；BioAgent 不设置、不维护、不返回预设回复模板，只允许输出协议校验、执行恢复、安全边界和错误诊断类系统信息。
+- AgentServer 是项目无关的通用大脑和 fallback backend；SciForge 不维护写死工具清单，优先通过 skill registry、workspace-local task code 和 AgentServer 动态探索/写代码解决请求。
+- 正常用户请求必须交给 AgentServer/agent backend 真实理解和回答；SciForge 不设置、不维护、不返回预设回复模板，只允许输出协议校验、执行恢复、安全边界和错误诊断类系统信息。
 - Self-evolving skills 是核心原则：任务代码先在当前 workspace 中生成、修复和验证；稳定成功后，经用户确认再沉淀到 skill library 或 package skill package 候选。
 - 开发者不应为一次任务缺口手工写死专用科研脚本；只能补通用协议、权限、安全边界、runner 能力、context contract、promotion 机制和 UI/artifact contract。
 - TypeScript 主要负责 Web UI、workspace writer、artifact/session 协议、组件 registry 和轻量编排；科学任务执行代码优先作为 workspace-local Python/R/notebook/CLI artifact 生成。
@@ -23,7 +23,7 @@
 #### 背景
 - 需要用浏览器真实跑 20+ 轮复杂对话，确认 context window meter、AgentServer 会话复用、prefix cache / cache read 观测和 context compaction 事件在 UI 中一致。
 - context window 的用户可见显示不能把 provider cumulative token usage 误读成当前窗口占用；provider usage 应作为成本/缓存观测，当前窗口优先使用 native/AgentServer/本地估算。
-- 后续轮次应复用 AgentServer session / Core snapshot / stable conversation ledger，而不是每轮让 BioAgent 重新塞完整背景。
+- 后续轮次应复用 AgentServer session / Core snapshot / stable conversation ledger，而不是每轮让 SciForge 重新塞完整背景。
 
 #### TODO
 - [x] 修正前端 context window 状态选择：忽略 provider-usage 作为 meter 主数据，保留其 token/cache 观测。
@@ -33,7 +33,7 @@
 - [ ] 用真实人工浏览器对话跑满 20+ 轮，并观察至少两次真实 AgentServer/backend compaction tag。
 - [x] 修复 persistent budget exceeded 时 context snapshot 阻断 compact/recovery 的 backend 路径，并复测 UI `last compacted`。
 - [x] 修复运行中 contextWindowState 覆盖 preflight compaction timestamp，避免 `last compacted` 从真实时间回退到 `never`。
-- [x] 放大并打通 AgentServer/BioAgent 的可配置 context window：UI 设置的 `maxContextWindowTokens` 会进入 AgentServer context snapshot / budget，而不是继续被固定 20K 估算覆盖。
+- [x] 放大并打通 AgentServer/SciForge 的可配置 context window：UI 设置的 `maxContextWindowTokens` 会进入 AgentServer context snapshot / budget，而不是继续被固定 20K 估算覆盖。
 - [x] 增加通用 artifact 访问策略：后续轮默认 refs/summary-first，必要时 bounded excerpt，避免每轮把大 artifact 全量回放给 backend。
 - [x] 换新研究话题用浏览器真实复测：GLP-1 receptor agonists 与 AD/认知衰退/神经炎症，不复用 KRAS/PDAC 案例。
 - [x] 增加通用文献核验护栏：PMID/DOI/trial/citation 修正必须证明标题/年份/期刊/identifier 是同一篇 work；不匹配时保留原记录并标记 `needs-verification`。
@@ -43,21 +43,21 @@
 - 前端 meter 主状态只信任 native / AgentServer / 本地估算窗口；provider usage 仍显示在用量 badge 和日志中，用于观察 token/cache 成本，但不再误导为当前 context window 占用。
 - preflight、context-window exceeded recovery、rate-limit retry 的压缩事件统一为 `contextCompaction`，并携带 after state，UI 能稳定显示“上下文压缩”。
 - 24 轮浏览器 smoke 验证 conversationLedger append-only、recentConversation bounded、两次 UI 可见 compaction、压缩边界后 meter 允许下降、非压缩轮继续累计。
-- Computer Use 可视检查打开了本地 BioAgent，真实执行 KRAS G12D / PDAC 文献证据评估 5 轮：R1 生成 paper-list/knowledge-graph/research-plan，R2 生成 research-report，R3 生成 audit-report，R4 生成 corrected-knowledge-graph，R5 因 backend fetch failed / acceptance repair 未完成而失败。
+- Computer Use 可视检查打开了本地 SciForge，真实执行 KRAS G12D / PDAC 文献证据评估 5 轮：R1 生成 paper-list/knowledge-graph/research-plan，R2 生成 research-report，R3 生成 audit-report，R4 生成 corrected-knowledge-graph，R5 因 backend fetch failed / acceptance repair 未完成而失败。
 - 真实 artifact 不是 toy/template：`paper-list.json` 约 10KB/12 篇，`research-report.json` 约 18KB，`audit-report.json` 约 31KB/43 issues，`corrected-knowledge-graph.json` 约 12KB/21 nodes/21 edges。
-- 复现的真实问题：4K max window 下 R4/R5 meter 到 104%-132% exceeded，provider cumulative token usage 到 7.4M+，但 `last compacted` 仍为 never；AgentServer 当前 work 里已有 `full-moow6nxn-f9db85` compaction tag，UI 没有把它接入当前 BioAgent meter。
+- 复现的真实问题：4K max window 下 R4/R5 meter 到 104%-132% exceeded，provider cumulative token usage 到 7.4M+，但 `last compacted` 仍为 never；AgentServer 当前 work 里已有 `full-moow6nxn-f9db85` compaction tag，UI 没有把它接入当前 SciForge meter。
 - 已修复 AgentServer compact 路径：`/context` 仍保持 persistent hard budget gate，但 `/compact` 可在预算超限时读取当前 work；当前 work 已只有 compaction tag 时，`/compact` 返回最近真实 tag，而不是 `null`。
 - AgentServer 实测 `/compact` 返回真实 tag：`full-moow6nxn-f9db85`，`kind=compaction`，`turns=turn_37-turn_40`，`mode=full`，`createdAt=2026-05-02T22:07:13.067Z`，summary 5 条。
-- 通过 Computer Use 第 06 轮复测：发送后 UI 一度把 `last compacted` 从 `never` 更新为 `2026-05-02T22:07:13.067Z`，证明 BioAgent 能接入 backend 真实 compaction tag；随后运行态 contextWindowState 又擦掉该 timestamp，已用前端合并逻辑和单测修复。
+- 通过 Computer Use 第 06 轮复测：发送后 UI 一度把 `last compacted` 从 `never` 更新为 `2026-05-02T22:07:13.067Z`，证明 SciForge 能接入 backend 真实 compaction tag；随后运行态 contextWindowState 又擦掉该 timestamp，已用前端合并逻辑和单测修复。
 - 第 06 轮恢复性审计不是模板：backend 实际读取了 `paper-list`、`research-report`、`audit-report`、`corrected-knowledge-graph` 等已有 artifact 文件；但后续追问成本失控，用户中断前 provider usage 达到 `709879 in / 19888 out / 729767 total`，暴露“压缩后续问仍重复读/回放过多上下文”的真实成本问题。
 - AgentServer 已支持 request/metadata 传入 `maxContextWindowTokens`，并有 preflight 单测覆盖 64K window；浏览器侧当前显示 `6,597 / 200,000 tokens`，provider cumulative usage 同屏达到 `2,190,662 total`，证明 UI meter 没有再把 provider usage 当作当前 context window。
 - AgentServer responses bridge 已覆盖“大 tool output 历史回放前压缩”的通用路径，防止下一轮 replay 直接塞回完整工具输出，降低多轮续问成本。
-- BioAgent 两条 AgentServer handoff 路径都加入 `artifactAccessPolicy`：显式 refs、reusable artifact refs、recent execution refs 去重后进入 `agentContext`，并向用户可见事件说明“refs/summary 优先，核实时 bounded excerpt”。
+- SciForge 两条 AgentServer handoff 路径都加入 `artifactAccessPolicy`：显式 refs、reusable artifact refs、recent execution refs 去重后进入 `agentContext`，并向用户可见事件说明“refs/summary 优先，核实时 bounded excerpt”。
 - Computer Use 新话题真实复测 3 轮 GLP-1/AD：R1 生成 `glp1-ad-paper-list-round1.json`、`glp1-ad-evidence-matrix-round1.json`、`glp1-ad-knowledge-graph-round1.json`、`glp1-ad-research-plan-round1.json`、`glp1-ad-gap-list-round1.json`；R2 在 Workspace Writer 短暂不可用时走 AgentServer fallback，只产出审计摘要；R3 在 Writer 恢复后产出 `glp1-ad-correction-report-round3.json` 和 `glp1-ad-corrected-paper-list-round3.json`。
 - R3 handoff 确实是 bounded/ref-first：页面显示 `handoff 22111/220000 bytes`，`5,528 normalized / 10,568 raw`，`saved 5,040`；后续运行 provider usage 很高，但 context window 仍保持几千 token 级别。
 - GLP-1/AD artifact 不是 toy/template，但真实性核验结果不能接受为完全正确：例如 ELAD/liraglutide 把 protocol PMID `30944040` 当作结果修正来源，population cohort 被替换成 pooled RCT dementia paper，REWIND/dulaglutide 被拿来修正“GLP-1 RA vs other medications”的宽泛 cohort claim；这些都说明 backend 需要强制 title/identifier 同篇匹配，而不是搜索到相近主题就应用修正。
 - 已在 AgentServer generation prompt 层加入通用 bibliographic verification contract，要求 `original_title` / `verified_title` / `title_match` / `identifier_match` / `verification_status` / `verification_notes` 可审计，并禁止把 title/topic mismatch 的检索结果当 correction 应用。
-- Focused BioAgent tests 通过：`npm run test -- src/ui/src/api/bioagentToolsClient.test.ts src/ui/src/api/agentClient.test.ts src/ui/src/contextCompaction.test.ts` 实际执行全套相关 tests，`122 pass / 0 fail`；`npx tsc --noEmit --pretty false` 通过。
+- Focused SciForge tests 通过：`npm run test -- src/ui/src/api/sciforgeToolsClient.test.ts src/ui/src/api/agentClient.test.ts src/ui/src/contextCompaction.test.ts` 实际执行全套相关 tests，`122 pass / 0 fail`；`npx tsc --noEmit --pretty false` 通过。
 - Focused AgentServer tests 通过：`npm run test -- tests/agent-server-preflight-compaction.test.ts tests/codex-chat-responses-adapter.test.ts tests/codex-app-server-adapter.test.ts` 实际执行当前 tests，`93 pass / 0 fail`。
 - 真实浏览器 20+ 人工轮次与至少两次真实 AgentServer/backend compaction tag 仍未完成；当前只有 smoke 证明 24 轮 UI 事件，两次真实 backend compaction 还需要继续压测。
 
@@ -66,7 +66,7 @@
 状态：已完成。
 
 #### 背景
-- 10 轮以上复杂续问时，BioAgent 需要像 Codex 桌面版一样复用同一会话背景：长期事实走 workspace refs 和稳定 ledger，最近消息负责短期意图。
+- 10 轮以上复杂续问时，SciForge 需要像 Codex 桌面版一样复用同一会话背景：长期事实走 workspace refs 和稳定 ledger，最近消息负责短期意图。
 - 当前 context window meter 存在误导风险：本地估算只看最近若干消息，长对话后可能不再单调；provider cumulative usage 又容易被误解成当前窗口占用。
 - 多轮请求上下文要保持通用，不允许针对某个科研案例、artifact id 或组件写特殊补丁。
 
@@ -102,12 +102,12 @@
 
 #### 并行实现 Prompt
 ```text
-你负责实现 BioAgent 的 T077：Design System / Theme Package 模块化。
+你负责实现 SciForge 的 T077：Design System / Theme Package 模块化。
 
-工作目录：/Applications/workspace/ailab/research/app/BioAgent
+工作目录：/Applications/workspace/ailab/research/app/SciForge
 
 目标：
-1. 新增 packages/design-system，沉淀 BioAgent 的基础 UI primitives 与 theme tokens。
+1. 新增 packages/design-system，沉淀 SciForge 的基础 UI primitives 与 theme tokens。
 2. 将现有 src/ui/src/app/uiPrimitives.tsx 迁移/代理到 design-system，保持现有页面不大面积破坏。
 3. 建立 dark/light 通用语义 token，供 T073 白天模式视觉重做复用。
 
@@ -135,33 +135,33 @@
 状态：已完成。
 
 #### 背景
-- 当前 object reference、BioAgentReference、DOM selection、uploaded artifact reference、object chip 展开、run/message/file/artifact 引用互转等逻辑主要散在 `ChatPanel.tsx` 与 `ResultsRenderer.tsx`。
+- 当前 object reference、SciForgeReference、DOM selection、uploaded artifact reference、object chip 展开、run/message/file/artifact 引用互转等逻辑主要散在 `ChatPanel.tsx` 与 `ResultsRenderer.tsx`。
 - 这些逻辑决定多轮对话中“基于这个对象继续”“点击对象预览”“批注转上下文”等能力，应该成为稳定的上下文指针系统。
 - 拆出独立包后，Chat、Results、Feedback、Component Workbench、未来 Notebook/Timeline 都能复用同一套引用语义。
 
 #### TODO
 - [x] 新增 `packages/object-references` 或 `src/ui/src/references` 过渡模块，定义 reference normalization、conversion、trust/status、display label、stable selector/hash。
-- [x] 从 `ChatPanel.tsx` 抽出 BioAgentReference/ObjectReference 互转：message/run/artifact/file/ui-element/selection 引用构造。
+- [x] 从 `ChatPanel.tsx` 抽出 SciForgeReference/ObjectReference 互转：message/run/artifact/file/ui-element/selection 引用构造。
 - [x] 从 `ChatPanel.tsx` 抽出 object chip 数据逻辑：可信对象排序、隐藏对象展开、label/icon/status 计算。
-- [x] 从上传文件链路抽出 uploaded artifact -> BioAgentReference/ObjectReference 的构造逻辑。
+- [x] 从上传文件链路抽出 uploaded artifact -> SciForgeReference/ObjectReference 的构造逻辑。
 - [x] 从 DOM selection/feedback 链路抽出 stable selector、selected text reference、element path/hash。
 - [x] 为 ResultsRenderer 提供统一 `referenceToPreviewTarget` 或 `referenceToArtifactLookup` helper，减少两边重复猜 ref。
 - [x] 增加单测覆盖：artifact ref 标准化、file ref/path ref、UI element ref、selection ref、重复 reference merge、可信对象排序。
-- [x] 更新 README：说明该包是 BioAgent 的对象记忆和上下文指针系统，不负责渲染 UI 或执行任务。
+- [x] 更新 README：说明该包是 SciForge 的对象记忆和上下文指针系统，不负责渲染 UI 或执行任务。
 
 #### 并行实现 Prompt
 ```text
-你负责实现 BioAgent 的 T076：Object Reference / Chat Context Package 模块化。
+你负责实现 SciForge 的 T076：Object Reference / Chat Context Package 模块化。
 
-工作目录：/Applications/workspace/ailab/research/app/BioAgent
+工作目录：/Applications/workspace/ailab/research/app/SciForge
 
 目标：
 1. 把 ChatPanel.tsx / ResultsRenderer.tsx 中的对象引用、上下文引用、DOM selection reference、uploaded artifact reference 逻辑抽成可复用模块。
-2. 建立稳定的 ObjectReference/BioAgentReference normalization 和 conversion API。
+2. 建立稳定的 ObjectReference/SciForgeReference normalization 和 conversion API。
 3. 不改变用户可见行为：object chips、点击聚焦、上传文件引用、多轮上下文都不能回退。
 
 执行要求：
-- 先阅读 ChatPanel.tsx 中 referenceForUploadedArtifact、objectReferenceForUploadedArtifact、ObjectReferenceChips、BioAgentReferenceChips、DOM selection reference 相关函数。
+- 先阅读 ChatPanel.tsx 中 referenceForUploadedArtifact、objectReferenceForUploadedArtifact、ObjectReferenceChips、SciForgeReferenceChips、DOM selection reference 相关函数。
 - 再阅读 ResultsRenderer.tsx 中 artifactForObjectReference、pathForObjectReference、WorkspaceObjectPreview 相关引用解析。
 - 优先抽纯函数，避免一开始移动大型 React 组件。
 - 新增 focused tests，保证 artifact:*、file:、folder:、url:、ui-element、selection 等 ref 都能稳定转换。
@@ -184,7 +184,7 @@
 
 #### 背景
 - `src/runtime/generation-gateway.ts` 当前超过 5000 行，混合 AgentServer 请求、workspace runner、context window、repair/rerun、payload normalization、artifact materialization、rate-limit diagnostics 等职责。
-- 该文件是 BioAgent 运行时最关键的中枢，但过长会导致 bug 定位困难、backend 扩展困难、用户意图被 prompt/context 改写时难以追踪。
+- 该文件是 SciForge 运行时最关键的中枢，但过长会导致 bug 定位困难、backend 扩展困难、用户意图被 prompt/context 改写时难以追踪。
 - 需要先在 `src/runtime/gateway/*` 内部模块化，稳定后再考虑提升为 `packages/runtime-gateway`。
 
 #### TODO
@@ -201,9 +201,9 @@
 
 #### 并行实现 Prompt
 ```text
-你负责实现 BioAgent 的 T075：Runtime Gateway Adapter 化与 Repair/Context/Artifact 模块拆分。
+你负责实现 SciForge 的 T075：Runtime Gateway Adapter 化与 Repair/Context/Artifact 模块拆分。
 
-工作目录：/Applications/workspace/ailab/research/app/BioAgent
+工作目录：/Applications/workspace/ailab/research/app/SciForge
 
 目标：
 1. 将 src/runtime/generation-gateway.ts 拆成 src/runtime/gateway/* 模块。
@@ -251,9 +251,9 @@
 
 #### 并行实现 Prompt
 ```text
-你负责实现 BioAgent 的 T074：Scenario Compiler Package 独立化。
+你负责实现 SciForge 的 T074：Scenario Compiler Package 独立化。
 
-工作目录：/Applications/workspace/ailab/research/app/BioAgent
+工作目录：/Applications/workspace/ailab/research/app/SciForge
 
 目标：
 1. 新增 packages/scenario-core，将 src/ui/src/scenarioCompiler 中的纯编译逻辑独立成可复用 package。
@@ -300,9 +300,9 @@
 
 #### 并行实现 Prompt
 ```text
-你负责实现 BioAgent 的 T073：白天模式视觉系统重做与全局 Style 覆盖。
+你负责实现 SciForge 的 T073：白天模式视觉系统重做与全局 Style 覆盖。
 
-工作目录：/Applications/workspace/ailab/research/app/BioAgent
+工作目录：/Applications/workspace/ailab/research/app/SciForge
 
 目标：
 1. 让 app 的 light theme 真正可用、好看、统一，而不是只替换少量 CSS 变量。
@@ -353,9 +353,9 @@
 
 #### 并行实现 Prompt
 ```text
-你负责实现 BioAgent 的 T072：Package-native UI Components 与 Artifact Preview Runtime 模块化。
+你负责实现 SciForge 的 T072：Package-native UI Components 与 Artifact Preview Runtime 模块化。
 
-工作目录：/Applications/workspace/ailab/research/app/BioAgent
+工作目录：/Applications/workspace/ailab/research/app/SciForge
 
 目标：
 1. 让 packages/ui-components 下的组件包从“只有 manifest”升级为“包含 renderer/fixtures/tests 的可独立发布模块”。
@@ -428,13 +428,13 @@
 - 若新包化架构与旧逻辑冲突，优先删除旧代码并重写运行时入口，保持干净的唯一来源。
 
 #### TODO
-- [x] 运行时 skill registry 改为从 `packages/skills` 聚合内置 skill package，并只额外读取当前 workspace 的 `.bioagent/evolved-skills`。
+- [x] 运行时 skill registry 改为从 `packages/skills` 聚合内置 skill package，并只额外读取当前 workspace 的 `.sciforge/evolved-skills`。
 - [x] 删除 `skills/seed` 旧目录，不再把 seed skill 当作独立运行时根。
 - [x] 删除前端 `scpSkillCatalog` 旧 catalog，扩展/技能侧栏改为直接读取 `packages/skills` 与 `packages/tools`。
-- [x] Workspace server 的稳定技能根声明改为 `packages/skills` 与 `.bioagent/evolved-skills`。
+- [x] Workspace server 的稳定技能根声明改为 `packages/skills` 与 `.sciforge/evolved-skills`。
 - [x] Package 校验器增加 legacy path guard，禁止 `packages/**` 引用 `skills/seed`、`skills/installed`、`workspace/skills` 或旧 catalog。
 - [x] Smoke 测试改为验证 package skill/tool 架构，不再假设 `skills/installed/scp` 或 `skills/seed` 存在。
-- [x] 保持 self-evolving skills 隔离：新技能只进入 workspace `.bioagent/evolved-skills`，不会写回内置 packages。
+- [x] 保持 self-evolving skills 隔离：新技能只进入 workspace `.sciforge/evolved-skills`，不会写回内置 packages。
 
 ### T068 Packages 化能力目录、README 双层文档与完整元素 Registry
 
@@ -486,7 +486,7 @@
 #### 背景
 - 批注指出 T065 虽已标完成，但上传 PDF object chip 点击后右侧仍没有稳定预览：前端拿到 artifact 自带的轻量 `previewDescriptor` 后没有继续向 Workspace Writer 补全 `rawUrl`，导致 streaming preview 没真正接上。
 - 回答中的 object reference strip 会显示 `+N objects`，但该控件只是静态 badge，无法展开检查被隐藏对象。
-- 多轮对话中 BioAgent 仍把 Scenario 默认 UI 组件转换成 `expectedArtifactTypes`，让 AgentServer 生成 paper-list、evidence-matrix、notebook-timeline 等当前用户未要求的对象，污染原始意图。
+- 多轮对话中 SciForge 仍把 Scenario 默认 UI 组件转换成 `expectedArtifactTypes`，让 AgentServer 生成 paper-list、evidence-matrix、notebook-timeline 等当前用户未要求的对象，污染原始意图。
 
 #### TODO
 - [x] 上传 artifact 的 object ref 改为标准 `artifact:*`，并带上 path/provenance 与系统打开、打开文件夹、复制路径动作。
@@ -505,7 +505,7 @@
 - 批注指出大 PDF（例如 31MB）仍然无法稳定内联预览：当前链路依赖 Workspace Writer 将整个二进制文件读成 base64，超过预览上限后前端只能显示错误。
 - 用户指出 PDF artifact 不应一开始就携带全文、缩略图、页索引、图表区域等所有派生内容；这会增加 artifact 负担、污染上下文，也不利于任何场景泛化。
 - 更合理的通用模型是：初始 artifact 只保存原始文件和轻量 metadata；当用户打开预览、搜索、引用页码/区域、请求总结时，再通过统一 preview API 按需生成/缓存派生物。
-- 该任务必须覆盖所有 BioAgent 支持的预览类型，形成 backend 可稳定使用的 artifact/preview contract，而不是为当前 PDF、当前论文或当前文献场景打专门补丁。
+- 该任务必须覆盖所有 SciForge 支持的预览类型，形成 backend 可稳定使用的 artifact/preview contract，而不是为当前 PDF、当前论文或当前文献场景打专门补丁。
 
 #### 设计原则
 - Artifact 轻量化：原始 artifact 只包含 `id/type/path/dataRef/mimeType/size/hash/title` 等必要 metadata，不默认内联大文件、全文、base64 或完整 JSON。
@@ -529,14 +529,14 @@
 - [x] 定义 `PreviewDescriptor` / `PreviewDerivative` / `ArtifactPreviewAction` domain types，并写入 artifact contract 文档。
 - [x] 统一 artifact normalization：从 `path/dataRef/objectReference/artifact.metadata` 生成 descriptor，不再让各组件各自猜字段。
 - [x] Workspace Writer 增加 raw file streaming API：支持 workspace-relative path、absolute path 安全校验、`Content-Type`、`Content-Length`、`ETag/hash`、`Range`。
-- [x] Workspace Writer 增加 preview descriptor API：`GET /api/bioagent/preview/descriptor?ref=...`，返回稳定 descriptor 和可用 action。
+- [x] Workspace Writer 增加 preview descriptor API：`GET /api/sciforge/preview/descriptor?ref=...`，返回稳定 descriptor 和可用 action。
 - [x] Workspace Writer 增加 derivative cache API：按需生成并缓存 text/thumb/pages/schema/html/structure bundle，缓存 key 使用 path/hash/action/options。
 - [x] PDF：默认只保存原 PDF；预览走 raw streaming/PDF.js；按需生成 `textRef`、`pagesRef`、首页/指定页 thumbnail；支持页码和 normalized region 引用。
 - [x] Image/SVG：默认 raw streaming；按需生成 thumbnail；支持 normalized ROI 引用；大图不走 base64 JSON。
 - [x] Markdown/Text：小文件可直接读取；大文件分块读取、搜索和 excerpt；主视图显示标题、前若干段和目录。
 - [x] JSON：默认展示 schema/key summary；按需表格化 rows/items/records；大 JSON 支持路径选择和 excerpt，不默认全量渲染。
 - [x] CSV/TSV/XLSX：按需读取表头、行数、列类型和前 N 行；支持 row/column range 引用；大表格分页。
-- [x] HTML：优先 sandboxed preview；不安全或过大时展示截图/文本摘要/system-open；禁止任意脚本影响 BioAgent 页面。
+- [x] HTML：优先 sandboxed preview；不安全或过大时展示截图/文本摘要/system-open；禁止任意脚本影响 SciForge 页面。
 - [x] PDB/CIF/mmCIF：按需生成 3D viewer bundle 或轻量结构 metadata；支持 chain/residue/ligand selection 引用。
 - [x] Office/PPTX/DOCX：默认 metadata + system-open；按需转文本/缩略图（可选依赖），失败时展示明确能力缺口。
 - [x] Folder：展示目录摘要、文件类型统计和可筛选列表；支持文件选择引用，不递归读取大目录。
@@ -555,13 +555,13 @@
 状态：已完成。
 
 #### 背景
-- 批注指出上传 PDF 仍然无法预览：结果区读取 `.bioagent/uploads/...` 时，Workspace Writer 把相对路径解析到了 BioAgent repo 根目录，而上传文件实际写在当前 `workspacePath/.bioagent/uploads/...`。
+- 批注指出上传 PDF 仍然无法预览：结果区读取 `.sciforge/uploads/...` 时，Workspace Writer 把相对路径解析到了 SciForge repo 根目录，而上传文件实际写在当前 `workspacePath/.sciforge/uploads/...`。
 - 当前任务失败信息显示 AgentServer backend stage failure / invalid tool call id，修复前端预览路径后，需要让用户能够点击已上传对象重新聚焦、预览和引用，再发起同一任务重试。
 - 实测重试时还暴露了两个环境/遥测问题：AgentServer 未在 `18080` 运行会导致 `fetch failed`；provider 累计 token usage 不能再被 UI 估算成 context window 占用。
 
 #### TODO
 - [x] Workspace Writer GET `/workspace/file` 支持 `workspacePath + relative path`，并拒绝越界路径。
-- [x] 前端 `readWorkspaceFile` 请求携带当前 `config.workspacePath`，确保 `.bioagent/uploads/...`、`.bioagent/artifacts/...` 等相对 ref 从工作区根解析。
+- [x] 前端 `readWorkspaceFile` 请求携带当前 `config.workspacePath`，确保 `.sciforge/uploads/...`、`.sciforge/artifacts/...` 等相对 ref 从工作区根解析。
 - [x] 保留 absolute path 兼容，避免破坏已有文件 API。
 - [x] 扩展可引用文件类型：PDF/图片/SVG 走内联预览，Office 文档/表格/演示文稿作为可引用对象安全展示。
 - [x] 修正 context window 估算：运行日志里的 provider usage 不再推高上下文窗口 meter。
@@ -599,14 +599,14 @@
 状态：已完成。
 
 #### 背景
-- 用户提供了桌面截图 `codex1.png` 和 `codex2.png`，希望 BioAgent 继续向 Codex 桌面端的用户体验靠拢。
+- 用户提供了桌面截图 `codex1.png` 和 `codex2.png`，希望 SciForge 继续向 Codex 桌面端的用户体验靠拢。
 - 截图中的核心体验不是改颜色或增加装饰，而是让正文对话更安静：用户消息右置、Agent 回答直接阅读、工具/浏览器/Node/命令过程折叠成一行审计记录、底部输入区像独立 composer 托盘。
 - 该改动必须通用适配所有 workspace/scenario/backend，不为当前科研案例写死 UI 或逻辑。
 
 #### UX 对齐原则
 - 对话优先：主要回答和用户输入保持阅读区中心，减少运行日志、边框和深色卡片对注意力的争夺。
 - 工作过程可审计但默认收起：Runs、stream events、token/backend 指标以低对比行呈现，展开后仍保留 raw copy。
-- 输入区像 Codex composer：底部常驻、圆角托盘，保留点选引用、上传、context meter、中断和发送，同时沿用 BioAgent 原有配色。
+- 输入区像 Codex composer：底部常驻、圆角托盘，保留点选引用、上传、context meter、中断和发送，同时沿用 SciForge 原有配色。
 - 不改变全局配色：侧栏、topbar、背景和结果区保持原有视觉基调，只调整对话节奏与信息层级。
 - 结果区保持稳定：科研 artifact、PDF/图片预览、Evidence Matrix 和 ExecutionUnit 不因外观调整丢失可用性。
 
@@ -617,7 +617,7 @@
 - [x] 将聊天消息改成 Codex-like 节奏：用户输入右置，Agent/系统消息更像正文而不是厚重卡片。
 - [x] 将工作过程、run strip 和 stream events 降低为默认折叠的审计行。
 - [x] 将 composer 改为底部输入托盘，保留引用、上传、context window 和发送控制。
-- [x] 回退浅色 app shell/sidebar/topbar 覆盖，保持 BioAgent 原有暗色视觉基调。
+- [x] 回退浅色 app shell/sidebar/topbar 覆盖，保持 SciForge 原有暗色视觉基调。
 - [x] 运行 typecheck/build 验证。
 
 ### T061 Codex-like Canvas Shell 与 Context Hover 细节
@@ -625,7 +625,7 @@
 状态：已完成。
 
 #### 背景
-- 用户希望 BioAgent 的聊天工作区更接近 Codex 桌面版的“画布”体验：内容流、运行过程和结果区在同一工作面上自然伸缩，而不是强烈的固定卡片拼接。
+- 用户希望 SciForge 的聊天工作区更接近 Codex 桌面版的“画布”体验：内容流、运行过程和结果区在同一工作面上自然伸缩，而不是强烈的固定卡片拼接。
 - context window 进度条需要在鼠标悬浮或键盘聚焦时展示具体使用情况，不能只依赖浏览器原生 title。
 - 该改动必须通用适配所有 scenario/backend，不绑定当前 KRAS、论文或任何单一案例。
 
@@ -633,14 +633,14 @@
 - [x] 给 Workbench 增加 canvas shell 语义 class，弱化固定卡片感，保留聊天/结果区的可伸缩与折叠能力。
 - [x] 将 context window meter 扩展为 hover/focus popover，展示 used/window/remaining、source/status、backend/model、阈值、压缩与 budget。
 - [x] 增加模型层单测，保证 hover 明细中的精确 token/window/remaining 信息可用。
-- [x] 用 in-app browser 截图验证 BioAgent 页面视觉效果；Codex 宿主窗口截图受平台安全限制，不绕过。
+- [x] 用 in-app browser 截图验证 SciForge 页面视觉效果；Codex 宿主窗口截图受平台安全限制，不绕过。
 
 ### T060 Codex-style Agent 工作过程呈现
 
 状态：已完成。
 
 #### 背景
-- 用户希望 BioAgent 的多轮对话体验更接近 Codex 桌面版：关键状态、结果和失败原因直接可见，探索、工具调用、stdout/stderr、usage 等过程信息默认折叠为灰色工作日志，可按需展开。
+- 用户希望 SciForge 的多轮对话体验更接近 Codex 桌面版：关键状态、结果和失败原因直接可见，探索、工具调用、stdout/stderr、usage 等过程信息默认折叠为灰色工作日志，可按需展开。
 - 现状更像“运行日志面板”：后台事件、token usage、context window、tool delta 混在一个常开区域，容易抢走真正回答和关键状态的注意力。
 - 该改动必须 backend-neutral，不能为某个论文、某个场景或某个 agent backend 打补丁。
 
@@ -663,7 +663,7 @@
 状态：进行中。
 
 #### 背景
-- 用户希望 BioAgent 像 Codex 桌面端一样，在任意页面位置留下评论、选择目标对象，并把评论、截图/定位和运行时上下文统一保存。
+- 用户希望 SciForge 像 Codex 桌面端一样，在任意页面位置留下评论、选择目标对象，并把评论、截图/定位和运行时上下文统一保存。
 - 多个用户后续会一起使用产品，反馈需要汇总成结构化 comment bundle，Codex 再按批量评论统一修改代码、发布稳定版本。
 - GitHub Issue 可作为团队协作出口，但不应成为原始反馈事实层；原始反馈必须保存在 workspace-local、机器可读的 bundle 中。
 
@@ -688,13 +688,13 @@
 
 
 
-### T058 BioAgent Context Window 圆形进度条与自动压缩体验
+### T058 SciForge Context Window 圆形进度条与自动压缩体验
 
 状态：已规划。
 
 #### 背景
 - 当前聊天里已有 token usage 文本，但缺少 context window 总量、占比、阈值和压缩状态；用户无法判断“是不是快满了”。
-- 用户希望 BioAgent 侧有圆形进度条，并在 context window 快满时自动触发压缩。
+- 用户希望 SciForge 侧有圆形进度条，并在 context window 快满时自动触发压缩。
 - 这个 UI 必须 backend-neutral：不同 backend 的 native/fallback 压缩差异只显示成统一状态，例如“上下文健康 / 接近上限 / 正在压缩 / 已压缩 / 需要等待 provider”。
 
 #### UX 原则
@@ -705,7 +705,7 @@
 - 用户不需要选择 backend-specific 操作；只看到统一按钮/状态：“压缩上下文”“已自动压缩”“需要稍后重试”。
 
 #### TODO
-- [x] 扩展 BioAgent stream event/domain type：支持 `contextWindowState`、`contextCompaction`、`contextWindowRatio`、`contextWindowSource`。
+- [x] 扩展 SciForge stream event/domain type：支持 `contextWindowState`、`contextCompaction`、`contextWindowRatio`、`contextWindowSource`。
 - [x] 在 ChatPanel / Runtime Health 附近增加圆形 context meter：显示比例、状态色、模型/窗口大小、最近一次压缩时间。
 - [x] meter hover 展示说明：used/window、usage source、backend、compact capability、auto threshold、最近 compact result。
 - [x] 当 `ratio >= autoCompactThreshold` 且没有 active turn 时，发送下一轮前自动调用 AgentServer compact/preflight；运行中只显示 pending compact。

@@ -13,7 +13,7 @@ export const runtimeCapabilityProfiles: RuntimeCapabilityProfile[] = [
   {
     id: 'package-skill',
     label: 'Core capability package',
-    description: 'Schema-checked BioAgent capability contracts that guide AgentServer workspace task generation.',
+    description: 'Schema-checked SciForge capability contracts that guide AgentServer workspace task generation.',
     capabilities: {
       'agentserver-generation': 'self-healing',
       'artifact-emission': 'schema-checked',

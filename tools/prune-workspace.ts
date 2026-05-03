@@ -23,7 +23,7 @@ const maxBytes = numberArg(args['max-bytes']);
 const runFilter = stringArg(args.run);
 const sessionFilter = stringArg(args.session);
 
-const candidates = (await Promise.all(targets.map((target) => collectFiles(join(workspace, '.bioagent', target), `.bioagent/${target}`)))).flat();
+const candidates = (await Promise.all(targets.map((target) => collectFiles(join(workspace, '.sciforge', target), `.sciforge/${target}`)))).flat();
 const matched = candidates.filter((file) => matchesScope(file, runFilter, sessionFilter));
 const byAge = keepDays === undefined
   ? []
@@ -125,8 +125,8 @@ function parseArgs(argv: string[]) {
 async function readConfiguredWorkspacePath() {
   try {
     const parsed = JSON.parse(await readFile(join(process.cwd(), 'config.local.json'), 'utf8'));
-    if (isRecord(parsed) && isRecord(parsed.bioagent) && typeof parsed.bioagent.workspacePath === 'string') {
-      return parsed.bioagent.workspacePath;
+    if (isRecord(parsed) && isRecord(parsed.sciforge) && typeof parsed.sciforge.workspacePath === 'string') {
+      return parsed.sciforge.workspacePath;
     }
   } catch {
     return undefined;

@@ -40,7 +40,7 @@ const html = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BioAgent Test Artifacts</title>
+  <title>SciForge Test Artifacts</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #070b12; color: #dbe7f5; }
     body { margin: 0; padding: 28px; }
@@ -62,7 +62,7 @@ const html = `<!doctype html>
 <body>
   <header>
     <div>
-      <h1>BioAgent Test Artifacts</h1>
+      <h1>SciForge Test Artifacts</h1>
       <p>Generated screenshot index for browser smoke and visual QA.</p>
     </div>
     <time datetime="${generatedAt}">${generatedAt}</time>

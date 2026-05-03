@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-acceptance-repair-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-acceptance-repair-'));
 
 const generatedTask = [
   'import json, sys',
@@ -47,8 +47,8 @@ const server = createServer(async (req, res) => {
           status: 'completed',
           output: {
             result: {
-              taskFiles: [{ path: '.bioagent/tasks/literature-generated.py', language: 'python', content: generatedTask }],
-              entrypoint: { language: 'python', path: '.bioagent/tasks/literature-generated.py' },
+              taskFiles: [{ path: '.sciforge/tasks/literature-generated.py', language: 'python', content: generatedTask }],
+              entrypoint: { language: 'python', path: '.sciforge/tasks/literature-generated.py' },
               environmentRequirements: { language: 'python' },
               expectedArtifacts: ['research-report'],
               patchSummary: 'Generated a report task that intentionally omits explicit requested fields.',
@@ -89,9 +89,9 @@ try {
   assert.equal(result.message, 'report written');
   assert.doesNotMatch(String(result.message), /did not satisfy explicit user-requested report terms\/fields/);
 
-  const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
+  const attemptFiles = await readdir(join(workspace, '.sciforge', 'task-attempts'));
   assert.equal(attemptFiles.length, 1);
-  const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', attemptFiles[0]), 'utf8'));
+  const attemptHistory = JSON.parse(await readFile(join(workspace, '.sciforge', 'task-attempts', attemptFiles[0]), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 1);
   assert.equal(attemptHistory.attempts[0].status, 'done');
 

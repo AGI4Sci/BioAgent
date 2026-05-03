@@ -257,7 +257,7 @@ function Recalibration({
               </div>
               <ActionButton variant="ghost" onClick={() => onRestore(contract)}>恢复</ActionButton>
             </div>
-          )) : <EmptyArtifactState title="等待保存契约" detail="保存后会生成 alignment-contract artifact，并同步到 workspace .bioagent/artifacts。" />}
+          )) : <EmptyArtifactState title="等待保存契约" detail="保存后会生成 alignment-contract artifact，并同步到 workspace .sciforge/artifacts。" />}
         </div>
       </Card>
     </div>
@@ -323,7 +323,7 @@ export function TimelinePage({
   });
   const actions = ['all', ...Array.from(new Set(items.map((item) => item.action)))];
   function exportFilteredBranch() {
-    exportJsonFile(`bioagent-timeline-${actionFilter}-${new Date().toISOString().slice(0, 10)}.json`, {
+    exportJsonFile(`sciforge-timeline-${actionFilter}-${new Date().toISOString().slice(0, 10)}.json`, {
       schemaVersion: '1',
       exportedAt: nowIso(),
       query,

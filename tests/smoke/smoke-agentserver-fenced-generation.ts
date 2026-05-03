@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-fenced-generation-'));
-await mkdir(join(workspace, '.bioagent', 'tasks'), { recursive: true });
-await writeFile(join(workspace, '.bioagent', 'tasks', 'fenced_generation.py'), [
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-fenced-generation-'));
+await mkdir(join(workspace, '.sciforge', 'tasks'), { recursive: true });
+await writeFile(join(workspace, '.sciforge', 'tasks', 'fenced_generation.py'), [
   'import json, sys',
   'json.dump({"message":"ok","confidence":0.8,"claimType":"evidence-summary","evidenceLevel":"mock","reasoningTrace":"generated task ran","claims":[],"uiManifest":[],"executionUnits":[{"id":"eu-fenced","tool":"generated.python","status":"done"}],"artifacts":[]}, open(sys.argv[2], "w"))',
 ].join('\n'));
@@ -45,8 +45,8 @@ const server = createServer(async (req, res) => {
           result: [
             '```json',
             JSON.stringify({
-              taskFiles: ['.bioagent/tasks/fenced_generation.py'],
-              entrypoint: '.bioagent/tasks/fenced_generation.py',
+              taskFiles: ['.sciforge/tasks/fenced_generation.py'],
+              entrypoint: '.sciforge/tasks/fenced_generation.py',
               expectedArtifacts: [],
             }),
             '```',

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-artifact-data-shapes-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-data-shapes-'));
 
 const taskCode = String.raw`
 import json
@@ -51,11 +51,11 @@ const server = createServer(async (req, res) => {
         output: {
           result: {
             taskFiles: [{
-              path: '.bioagent/tasks/artifact_shape_task.py',
+              path: '.sciforge/tasks/artifact_shape_task.py',
               language: 'python',
               content: taskCode,
             }],
-            entrypoint: { language: 'python', path: '.bioagent/tasks/artifact_shape_task.py' },
+            entrypoint: { language: 'python', path: '.sciforge/tasks/artifact_shape_task.py' },
             expectedArtifacts: ['paper-list', 'research-report'],
             patchSummary: 'Generated artifact shape smoke task.',
           },

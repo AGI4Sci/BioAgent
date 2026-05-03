@@ -2,7 +2,7 @@
 
 This is the minimum desktop-level evidence step for every T060 run when a full backend regression is blocked.
 
-1. Open BioAgent in the in-app browser at `http://localhost:5173/`.
+1. Open SciForge in the in-app browser at `http://localhost:5173/`.
 2. Navigate to a scenario workbench with a visible prior message, result card, table, or artifact preview.
 3. Use Computer Use to capture the browser state and confirm the app window is focused.
 4. Drag-select a visible phrase inside a message or result.

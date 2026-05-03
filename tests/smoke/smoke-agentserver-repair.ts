@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-repair-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-repair-'));
 await writeFile(join(workspace, 'matrix.csv'), [
   'gene,c1,c2,t1,t2',
   'IL6,8,9,42,46',
@@ -64,10 +64,10 @@ const server = createServer(async (req, res) => {
           status: 'completed',
           output: {
             result: {
-              taskFiles: [{ path: '.bioagent/tasks/omics-generated.py', language: 'python', content: brokenGeneratedTask }],
-              entrypoint: { language: 'python', path: '.bioagent/tasks/omics-generated.py' },
+              taskFiles: [{ path: '.sciforge/tasks/omics-generated.py', language: 'python', content: brokenGeneratedTask }],
+              entrypoint: { language: 'python', path: '.sciforge/tasks/omics-generated.py' },
               environmentRequirements: { language: 'python' },
-              validationCommand: 'python .bioagent/tasks/omics-generated.py <input> <output>',
+              validationCommand: 'python .sciforge/tasks/omics-generated.py <input> <output>',
               expectedArtifacts: ['omics-differential-expression'],
               patchSummary: 'Generated an omics task that intentionally needs repair.',
             },
@@ -78,7 +78,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   const codeRef = typeof metadata.codeRef === 'string' ? metadata.codeRef : '';
-  assert.ok(codeRef.startsWith('.bioagent/tasks/'));
+  assert.ok(codeRef.startsWith('.sciforge/tasks/'));
   const taskPath = join(workspace, codeRef);
   const source = await readFile(taskPath, 'utf8');
   const patched = source
@@ -118,12 +118,12 @@ try {
   assert.equal(result.executionUnits[0].status, 'self-healed');
   assert.equal(result.executionUnits[0].attempt, 2);
   assert.equal(result.executionUnits[0].parentAttempt, 1);
-  assert.match(String(result.executionUnits[0].diffRef || ''), /^\.bioagent\/task-diffs\/(?:generated-)?omics-/);
+  assert.match(String(result.executionUnits[0].diffRef || ''), /^\.sciforge\/task-diffs\/(?:generated-)?omics-/);
   assert.match(String(result.reasoningTrace), /AgentServer repair run/);
 
-  const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
+  const attemptFiles = await readdir(join(workspace, '.sciforge', 'task-attempts'));
   assert.equal(attemptFiles.length, 1);
-  const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', attemptFiles[0]), 'utf8'));
+  const attemptHistory = JSON.parse(await readFile(join(workspace, '.sciforge', 'task-attempts', attemptFiles[0]), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 2);
   assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
   assert.equal(attemptHistory.attempts[1].status, 'done');

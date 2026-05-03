@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/paper-card-list',
+  packageName: '@sciforge-ui/paper-card-list',
   moduleId: 'literature-paper-cards',
   version: '1.0.0',
   title: 'Evidence paper cards',

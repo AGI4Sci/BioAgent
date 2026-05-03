@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 
 import { loadSkillRegistry } from '../../src/runtime/skill-registry.js';
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain } from '../../src/runtime/runtime-types.js';
+import type { SciForgeSkillDomain } from '../../src/runtime/runtime-types.js';
 
 if (!process.env.SCP_HUB_API_KEY && !process.env.SCPhub_api_key && !process.env.SCPHUB_API_KEY) {
   throw new Error('Set SCP_HUB_API_KEY or SCPhub_api_key to run live SCP capability smoke tests.');
 }
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-scp-capability-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-scp-capability-'));
 const skills = (await loadSkillRegistry({ workspacePath: workspace }))
   .filter((skill) => skill.id.startsWith('scp.') && skill.available)
   .sort((left, right) => left.id.localeCompare(right.id));
@@ -22,7 +22,7 @@ const rows: Array<{ id: string; status: string; artifactType: string; message: s
 
 for (const skill of selected) {
   const result = await runWorkspaceRuntimeGateway({
-    skillDomain: (skill.manifest.skillDomains[0] || 'knowledge') as BioAgentSkillDomain,
+    skillDomain: (skill.manifest.skillDomains[0] || 'knowledge') as SciForgeSkillDomain,
     workspacePath: workspace,
     availableSkills: [skill.id],
     artifacts: [],

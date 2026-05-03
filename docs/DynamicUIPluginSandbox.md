@@ -1,6 +1,6 @@
 # Dynamic UI Plugin Sandbox
 
-BioAgent should prefer standard components, View Composition, and UnknownArtifactInspector before generating or loading any UI plugin.
+SciForge should prefer standard components, View Composition, and UnknownArtifactInspector before generating or loading any UI plugin.
 
 Minimum rules before enabling a dynamic plugin:
 

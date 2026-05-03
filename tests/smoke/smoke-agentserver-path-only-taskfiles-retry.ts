@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-path-only-retry-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-path-only-retry-'));
 let requestCount = 0;
 const bodies: Array<Record<string, unknown>> = [];
 
@@ -46,11 +46,11 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           taskFiles: [{
-            path: '.bioagent/tasks/missing_path_only_retry.py',
+            path: '.sciforge/tasks/missing_path_only_retry.py',
             language: 'python',
             ...(includeContent ? { content: taskCode } : {}),
           }],
-          entrypoint: { language: 'python', path: '.bioagent/tasks/missing_path_only_retry.py' },
+          entrypoint: { language: 'python', path: '.sciforge/tasks/missing_path_only_retry.py' },
           expectedArtifacts: ['research-report'],
           patchSummary: includeContent
             ? 'Strict retry returned inline task content.'

@@ -3,14 +3,14 @@
   "taskId": "T060",
   "scenarioId": "longform-literature-evidence-report",
   "title": "Literature Evidence Evaluation To Reproducible Report",
-  "goal": "Evaluate a biomedical or BioAgent automation claim across multiple turns, preserve explicit references, and deliver a Markdown report plus CSV evidence matrix.",
+  "goal": "Evaluate a biomedical or SciForge automation claim across multiple turns, preserve explicit references, and deliver a Markdown report plus CSV evidence matrix.",
   "scenarioPackageId": "literature-evidence-review",
   "minRounds": 6,
   "backendRequirement": "real-backend-preferred",
   "rounds": [
     {
       "round": 1,
-      "prompt": "评估 claim：Playwright MCP 是否适合 BioAgent 浏览器自动化技能安装与安全验证。先给出检索计划、证据类型和可复现产物计划。",
+      "prompt": "评估 claim：Playwright MCP 是否适合 SciForge 浏览器自动化技能安装与安全验证。先给出检索计划、证据类型和可复现产物计划。",
       "referenceOps": [],
       "expectedArtifacts": ["run-plan", "source-query-list"],
       "acceptanceChecks": ["backend gives a plan instead of a canned answer", "run/session refs are visible"]

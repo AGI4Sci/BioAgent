@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-stage-taskfiles-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-stage-taskfiles-'));
 const taskCode = [
   'import json, sys',
   'with open(sys.argv[1], "r", encoding="utf-8") as handle:',
@@ -36,11 +36,11 @@ const server = createServer(async (req, res) => {
     '```json',
     JSON.stringify({
       taskFiles: [{
-        path: '.bioagent/tasks/stage-generated/run.py',
+        path: '.sciforge/tasks/stage-generated/run.py',
         language: 'python',
         content: taskCode,
       }],
-      entrypoint: { language: 'python', path: '.bioagent/tasks/stage-generated/run.py' },
+      entrypoint: { language: 'python', path: '.sciforge/tasks/stage-generated/run.py' },
       expectedArtifacts: ['research-report'],
       patchSummary: 'Generated task file content in stage finalText.',
     }, null, 2),
@@ -69,7 +69,7 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 try {
   const result = await runWorkspaceRuntimeGateway({
     skillDomain: 'literature',
-    prompt: 'Generate task code in AgentServer stage finalText, then BioAgent must execute it.',
+    prompt: 'Generate task code in AgentServer stage finalText, then SciForge must execute it.',
     workspacePath: workspace,
     agentServerBaseUrl: baseUrl,
     expectedArtifactTypes: ['research-report'],
@@ -78,7 +78,7 @@ try {
   });
   assert.equal(result.message, 'stage taskFiles content executed');
   assert.ok(result.executionUnits.some((unit) => isRecord(unit) && unit.tool === 'agentserver.stage-taskfiles'));
-  const materialized = await readFile(join(workspace, '.bioagent', 'tasks', 'stage-generated', 'run.py'), 'utf8');
+  const materialized = await readFile(join(workspace, '.sciforge', 'tasks', 'stage-generated', 'run.py'), 'utf8');
   assert.match(materialized, /stage taskFiles content executed/);
   console.log('[ok] AgentServer stage finalText taskFiles content is materialized and executed');
 } finally {

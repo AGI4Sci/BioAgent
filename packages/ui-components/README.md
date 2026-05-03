@@ -1,7 +1,7 @@
-# @bioagent-ui/components
+# @sciforge-ui/components
 
 ## Agent quick contract
-- This package aggregates published BioAgent UI component manifests.
+- This package aggregates published SciForge UI component manifests.
 - Agents should read each selected component package's `README.md` `Agent quick contract` section first.
 - `availableComponentIds` is an allowlist, not a command to generate every matching artifact.
 - If no selected component accepts an object, use `unknown-artifact-inspector` or the preview/system-open fallback path.
@@ -11,7 +11,7 @@ Each child directory is intentionally shaped like a publishable UI component pac
 
 ### Component package structure
 - `package.json`: publishable package metadata. Keep `private` unset or `false`.
-- `manifest.ts`: machine-readable module contract consumed by the BioAgent view planner.
+- `manifest.ts`: machine-readable module contract consumed by the SciForge view planner.
 - `render.tsx`: package-native renderer entry. It receives `UIComponentRendererProps` and may use explicit shell helpers for app-owned chrome such as downloads, source bars, empty states, markdown, and workspace file reads.
 - `fixtures/`: minimal empty and populated payload examples for local debugging and regression tests.
 - `render.test.tsx`: lightweight renderer contract tests using fixtures.

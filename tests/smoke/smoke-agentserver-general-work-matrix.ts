@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain } from '../../src/runtime/runtime-types.js';
+import type { SciForgeSkillDomain } from '../../src/runtime/runtime-types.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-general-work-matrix-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-general-work-matrix-'));
 const seenDomains = new Set<string>();
 
 const generatedTask = String.raw`
@@ -31,7 +31,7 @@ def artifact_for(kind):
             "schemaVersion": "1",
             "metadata": {"source": "mock-agentserver-general-work-matrix"},
             "data": {
-                "markdown": "# Agent report\n\nGenerated from a multi-turn BioAgent request.",
+                "markdown": "# Agent report\n\nGenerated from a multi-turn SciForge request.",
                 "sections": [{"title": "Summary", "content": "The generated task completed the requested report."}]
             }
         }
@@ -147,10 +147,10 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: `.bioagent/tasks/${skillDomain}-general-work.py`, language: 'python', content: generatedTask }],
-            entrypoint: { language: 'python', path: `.bioagent/tasks/${skillDomain}-general-work.py` },
+            taskFiles: [{ path: `.sciforge/tasks/${skillDomain}-general-work.py`, language: 'python', content: generatedTask }],
+            entrypoint: { language: 'python', path: `.sciforge/tasks/${skillDomain}-general-work.py` },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/<domain>-general-work.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/<domain>-general-work.py <input> <output>',
             expectedArtifacts: ['research-report'],
             patchSummary: `Generated ${skillDomain} multi-turn work task.`,
           },
@@ -173,7 +173,7 @@ assert.ok(address && typeof address === 'object');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 
 const cases: Array<{
-  domain: BioAgentSkillDomain;
+  domain: SciForgeSkillDomain;
   prompt: string;
   expected: string[];
   components: string[];

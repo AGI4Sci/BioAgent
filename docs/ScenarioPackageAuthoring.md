@@ -1,6 +1,6 @@
 # Scenario Package Authoring
 
-BioAgent scenarios are now compiled services, not one-off chat templates. A published scenario package is the stable contract used by the workbench, runtime router, UI renderer, validation gate, and export bundle.
+SciForge scenarios are now compiled services, not one-off chat templates. A published scenario package is the stable contract used by the workbench, runtime router, UI renderer, validation gate, and export bundle.
 
 ## Package Layout
 

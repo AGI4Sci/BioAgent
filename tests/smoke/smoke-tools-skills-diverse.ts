@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 
 import { loadSkillRegistry, matchSkill } from '../../src/runtime/skill-registry.js';
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain, ToolPayload } from '../../src/runtime/runtime-types.js';
+import type { SciForgeSkillDomain, ToolPayload } from '../../src/runtime/runtime-types.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-tools-skills-diverse-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-tools-skills-diverse-'));
 await writeFile(join(workspace, 'matrix.csv'), [
   'gene,c1,c2,c3,t1,t2,t3',
   'EGFR,12,11,13,48,51,50',
@@ -30,7 +30,7 @@ await writeFile(join(workspace, 'metadata.csv'), [
 const registry = await loadSkillRegistry({ workspacePath: workspace });
 assert.equal(registry.filter((skill) => skill.id.startsWith('scp.') && skill.available).length, 121);
 
-const routeCases: Array<{ name: string; skillDomain: BioAgentSkillDomain; prompt: string; expectedSkill: string }> = [
+const routeCases: Array<{ name: string; skillDomain: SciForgeSkillDomain; prompt: string; expectedSkill: string }> = [
   {
     name: 'literature PubMed seed',
     skillDomain: 'literature',
@@ -106,7 +106,7 @@ for (const item of routeCases) {
 
 const runtimeCases: Array<{
   name: string;
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   prompt: string;
   artifactType: string;
   skillId: string;

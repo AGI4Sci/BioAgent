@@ -9,7 +9,7 @@ import { acceptSkillPromotionProposal, archiveSkillPromotionProposal, listSkillP
 import { loadSkillRegistry } from '../../src/runtime/skill-registry.js';
 import type { GatewayRequest, SkillAvailability, ToolPayload } from '../../src/runtime/runtime-types.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-self-evolving-skill-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-self-evolving-skill-'));
 let sawGenerationRequest = false;
 
 const generatedTask = String.raw`
@@ -75,10 +75,10 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: '.bioagent/tasks/self-evolving-task.py', language: 'python', content: generatedTask }],
-            entrypoint: { language: 'python', path: '.bioagent/tasks/self-evolving-task.py' },
+            taskFiles: [{ path: '.sciforge/tasks/self-evolving-task.py', language: 'python', content: generatedTask }],
+            entrypoint: { language: 'python', path: '.sciforge/tasks/self-evolving-task.py' },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/self-evolving-task.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/self-evolving-task.py <input> <output>',
             expectedArtifacts: ['paper-list'],
             patchSummary: 'Generated task intended to become an evolved skill proposal.',
           },
@@ -113,30 +113,30 @@ try {
   assert.equal(proposals.length, 1);
   assert.equal(proposals[0].status, 'needs-user-confirmation');
   assert.equal(proposals[0].reviewChecklist.userConfirmedPromotion, false);
-  assert.match(proposals[0].source.taskCodeRef, /^\.bioagent\/tasks\/generated-literature-[a-f0-9]+\/self-evolving-task\.py$/);
+  assert.match(proposals[0].source.taskCodeRef, /^\.sciforge\/tasks\/generated-literature-[a-f0-9]+\/self-evolving-task\.py$/);
 
-  const stableWorkspaceSkills = await readdir(join(workspace, '.bioagent', 'skills')).catch(() => []);
+  const stableWorkspaceSkills = await readdir(join(workspace, '.sciforge', 'skills')).catch(() => []);
   assert.equal(stableWorkspaceSkills.some((entry) => entry.includes(proposals[0].proposedManifest.id)), false);
 
   const accepted = await acceptSkillPromotionProposal(workspace, proposals[0].id);
   assert.equal(accepted.id, proposals[0].proposedManifest.id);
   assert.equal(accepted.entrypoint.path?.endsWith('.py'), true);
 
-  const evolvedSkillDirs = await readdir(join(workspace, '.bioagent', 'evolved-skills'));
+  const evolvedSkillDirs = await readdir(join(workspace, '.sciforge', 'evolved-skills'));
   assert.equal(evolvedSkillDirs.length, 1);
 
   const registry = await loadSkillRegistry({ workspacePath: workspace });
   const evolved = registry.find((skill) => skill.id === accepted.id);
   assert.equal(evolved?.available, true);
-  assert.match(String(evolved?.manifestPath), /\.bioagent\/evolved-skills\//);
-  assert.equal(registry.some((skill) => skill.manifestPath.includes('.bioagent/skills') && skill.id === accepted.id), false);
+  assert.match(String(evolved?.manifestPath), /\.sciforge\/evolved-skills\//);
+  assert.equal(registry.some((skill) => skill.manifestPath.includes('.sciforge/skills') && skill.id === accepted.id), false);
 
   const validation = await runAcceptedSkillValidationSmoke(workspace, accepted.id);
   assert.equal(validation.passed, true);
   assert.deepEqual(validation.missingArtifactTypes, []);
-  const acceptedProposalPath = join(workspace, '.bioagent', 'skill-proposals', proposals[0].id, 'proposal.json');
+  const acceptedProposalPath = join(workspace, '.sciforge', 'skill-proposals', proposals[0].id, 'proposal.json');
   const acceptedProposalBefore = JSON.parse(await readFile(acceptedProposalPath, 'utf8'));
-  const evolvedTaskPath = join(workspace, '.bioagent', 'evolved-skills', accepted.id, basename(accepted.entrypoint.path || 'task.py'));
+  const evolvedTaskPath = join(workspace, '.sciforge', 'evolved-skills', accepted.id, basename(accepted.entrypoint.path || 'task.py'));
   await writeFile(evolvedTaskPath, 'import sys\nraise RuntimeError("forced evolved skill failure")\n', 'utf8');
   const routedEvolvedRun = await runWorkspaceRuntimeGateway({
     skillDomain: 'literature',
@@ -162,7 +162,7 @@ try {
 }
 
 async function writeComplexSingleCellProposalsSmoke() {
-  const complexWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-complex-cell-proposals-'));
+  const complexWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-complex-cell-proposals-'));
   const stablePackagesBefore = await stableSkillRootSnapshot('packages/skills');
   const generatedSkill = agentGeneratedOmicsSkill();
   const cases = [
@@ -184,8 +184,8 @@ async function writeComplexSingleCellProposalsSmoke() {
   ];
 
   for (const item of cases) {
-    const taskRel = `.bioagent/tasks/${item.id}/task.py`;
-    await mkdir(join(complexWorkspace, '.bioagent', 'tasks', item.id), { recursive: true });
+    const taskRel = `.sciforge/tasks/${item.id}/task.py`;
+    await mkdir(join(complexWorkspace, '.sciforge', 'tasks', item.id), { recursive: true });
     await writeFile(join(complexWorkspace, taskRel), reusableSingleCellTask(item.artifactType), 'utf8');
     const proposal = await maybeWriteSkillPromotionProposal({
       workspacePath: complexWorkspace,
@@ -193,10 +193,10 @@ async function writeComplexSingleCellProposalsSmoke() {
       skill: generatedSkill,
       taskId: `task-${item.id}`,
       taskRel,
-      inputRef: `.bioagent/task-inputs/task-${item.id}.json`,
-      outputRef: `.bioagent/task-outputs/task-${item.id}.json`,
-      stdoutRef: `.bioagent/task-logs/task-${item.id}.stdout.txt`,
-      stderrRef: `.bioagent/task-logs/task-${item.id}.stderr.txt`,
+      inputRef: `.sciforge/task-inputs/task-${item.id}.json`,
+      outputRef: `.sciforge/task-outputs/task-${item.id}.json`,
+      stdoutRef: `.sciforge/task-logs/task-${item.id}.stdout.txt`,
+      stderrRef: `.sciforge/task-logs/task-${item.id}.stderr.txt`,
       payload: successfulPayload(item.artifactType, item.prompt),
       patchSummary: `Generated reusable ${item.id} workflow.`,
     });
@@ -207,18 +207,18 @@ async function writeComplexSingleCellProposalsSmoke() {
     assert.equal(proposal?.reviewChecklist.noPrivateFileReferences, true);
     assert.equal(proposal?.reviewChecklist.reproducibleDependencies, true);
 
-    const proposalJson = JSON.parse(await readFile(join(complexWorkspace, '.bioagent', 'skill-proposals', item.id, 'proposal.json'), 'utf8'));
+    const proposalJson = JSON.parse(await readFile(join(complexWorkspace, '.sciforge', 'skill-proposals', item.id, 'proposal.json'), 'utf8'));
     assert.equal(proposalJson.source.taskCodeRef, taskRel);
-    assert.equal(proposalJson.source.inputRef, `.bioagent/task-inputs/task-${item.id}.json`);
-    assert.equal(proposalJson.source.outputRef, `.bioagent/task-outputs/task-${item.id}.json`);
-    assert.equal(proposalJson.source.stdoutRef, `.bioagent/task-logs/task-${item.id}.stdout.txt`);
-    assert.equal(proposalJson.source.stderrRef, `.bioagent/task-logs/task-${item.id}.stderr.txt`);
+    assert.equal(proposalJson.source.inputRef, `.sciforge/task-inputs/task-${item.id}.json`);
+    assert.equal(proposalJson.source.outputRef, `.sciforge/task-outputs/task-${item.id}.json`);
+    assert.equal(proposalJson.source.stdoutRef, `.sciforge/task-logs/task-${item.id}.stdout.txt`);
+    assert.equal(proposalJson.source.stderrRef, `.sciforge/task-logs/task-${item.id}.stderr.txt`);
     assert.equal(proposalJson.validationPlan.rerunAfterAccept.mode, 'registry-discovered-workspace-task');
     assert.equal(proposalJson.reviewChecklist.userConfirmedPromotion, false);
   }
 
-  const unsafeTaskRel = '.bioagent/tasks/unsafe/task.py';
-  await mkdir(join(complexWorkspace, '.bioagent', 'tasks', 'unsafe'), { recursive: true });
+  const unsafeTaskRel = '.sciforge/tasks/unsafe/task.py';
+  await mkdir(join(complexWorkspace, '.sciforge', 'tasks', 'unsafe'), { recursive: true });
   await writeFile(join(complexWorkspace, unsafeTaskRel), [
     'API_KEY = "credential-placeholder-value"',
     'PRIVATE_PATH = "/Users/alice/Documents/private.h5ad"',
@@ -239,8 +239,8 @@ async function writeComplexSingleCellProposalsSmoke() {
     /safety gate failed/,
   );
 
-  const rejectTaskRel = '.bioagent/tasks/rejectable/task.py';
-  await mkdir(join(complexWorkspace, '.bioagent', 'tasks', 'rejectable'), { recursive: true });
+  const rejectTaskRel = '.sciforge/tasks/rejectable/task.py';
+  await mkdir(join(complexWorkspace, '.sciforge', 'tasks', 'rejectable'), { recursive: true });
   await writeFile(join(complexWorkspace, rejectTaskRel), reusableSingleCellTask('rejectable-cell-proposal'), 'utf8');
   const rejectable = await maybeWriteSkillPromotionProposal({
     workspacePath: complexWorkspace,
@@ -259,8 +259,8 @@ async function writeComplexSingleCellProposalsSmoke() {
     /rejected/,
   );
 
-  const archiveTaskRel = '.bioagent/tasks/archivable/task.py';
-  await mkdir(join(complexWorkspace, '.bioagent', 'tasks', 'archivable'), { recursive: true });
+  const archiveTaskRel = '.sciforge/tasks/archivable/task.py';
+  await mkdir(join(complexWorkspace, '.sciforge', 'tasks', 'archivable'), { recursive: true });
   await writeFile(join(complexWorkspace, archiveTaskRel), reusableSingleCellTask('archivable-cell-proposal'), 'utf8');
   const archivable = await maybeWriteSkillPromotionProposal({
     workspacePath: complexWorkspace,
@@ -283,15 +283,15 @@ async function writeComplexSingleCellProposalsSmoke() {
     const registry = await loadSkillRegistry({ workspacePath: complexWorkspace });
     const discovered = registry.find((skill) => skill.id === accepted.id);
     assert.equal(discovered?.available, true);
-    assert.match(String(discovered?.manifestPath), /\.bioagent\/evolved-skills\//);
+    assert.match(String(discovered?.manifestPath), /\.sciforge\/evolved-skills\//);
     const validation = await runAcceptedSkillValidationSmoke(complexWorkspace, accepted.id);
     assert.equal(validation.passed, true);
     assert.deepEqual(validation.missingArtifactTypes, []);
   }
 
-  const evolvedSkillDirs = await readdir(join(complexWorkspace, '.bioagent', 'evolved-skills'));
+  const evolvedSkillDirs = await readdir(join(complexWorkspace, '.sciforge', 'evolved-skills'));
   assert.equal(evolvedSkillDirs.length, 3);
-  const stableWorkspaceSkills = await readdir(join(complexWorkspace, '.bioagent', 'skills')).catch(() => []);
+  const stableWorkspaceSkills = await readdir(join(complexWorkspace, '.sciforge', 'skills')).catch(() => []);
   assert.equal(stableWorkspaceSkills.some((entry) => entry !== 'status.json'), false);
   assert.deepEqual(await stableSkillRootSnapshot('packages/skills'), stablePackagesBefore);
 }

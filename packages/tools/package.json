@@ -1,5 +1,5 @@
 {
-  "name": "@bioagent-tool/packages",
+  "name": "@sciforge-tool/packages",
   "version": "1.0.0",
   "type": "module",
   "private": true,

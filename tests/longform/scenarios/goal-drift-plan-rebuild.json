@@ -3,14 +3,14 @@
   "taskId": "T060",
   "scenarioId": "longform-goal-drift-plan-rebuild",
   "title": "Goal Drift And Reference Constrained Research Plan Rebuild",
-  "goal": "Test whether BioAgent preserves selected constraints, discards obsolete assumptions, and rebuilds an executable plan under changing user goals.",
+  "goal": "Test whether SciForge preserves selected constraints, discards obsolete assumptions, and rebuilds an executable plan under changing user goals.",
   "scenarioPackageId": "literature-evidence-review",
   "minRounds": 7,
   "backendRequirement": "real-backend-preferred",
   "rounds": [
     {
       "round": 1,
-      "prompt": "提出一个宽泛研究目标：设计 BioAgent 引用交互如何影响复杂科研任务连续性的研究计划。",
+      "prompt": "提出一个宽泛研究目标：设计 SciForge 引用交互如何影响复杂科研任务连续性的研究计划。",
       "referenceOps": [],
       "expectedArtifacts": ["initial-plan", "hypothesis-list"],
       "acceptanceChecks": ["initial plan separates hypotheses from tasks"]
@@ -52,7 +52,7 @@
     },
     {
       "round": 5,
-      "prompt": "加入新约束：预算只允许两周内完成，不能采购新数据，必须使用现有 workspace refs 和已有 BioAgent skills。",
+      "prompt": "加入新约束：预算只允许两周内完成，不能采购新数据，必须使用现有 workspace refs 和已有 SciForge skills。",
       "referenceOps": [],
       "expectedArtifacts": ["constraint-update"],
       "acceptanceChecks": ["plan acknowledges budget/time/data constraints"]

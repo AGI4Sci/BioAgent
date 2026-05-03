@@ -26,7 +26,7 @@ for (const scenarioId of scenarioIds) {
             reasoningTrace: `fixture path for ${scenarioId}`,
             claims: [{
               id: `claim-${scenarioId}`,
-              text: `${scenarioId} artifact follows BioAgent contract`,
+              text: `${scenarioId} artifact follows SciForge contract`,
               type: 'fact',
               confidence: 0.91,
               evidenceLevel: evidenceForAgent(scenarioId),
@@ -80,7 +80,7 @@ function dataForArtifact(type: string) {
       query: 'KRAS G12C resistance',
       papers: [{
         title: 'Fixture KRAS paper',
-        authors: ['BioAgent'],
+        authors: ['SciForge'],
         journal: 'Fixture Journal',
         year: '2026',
         url: 'https://example.org/paper',

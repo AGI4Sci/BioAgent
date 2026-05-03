@@ -1,7 +1,7 @@
 {
   "name": "@agi4sci/design-system",
   "version": "0.1.0",
-  "description": "BioAgent design tokens and reusable UI primitives.",
+  "description": "SciForge design tokens and reusable UI primitives.",
   "private": true,
   "type": "module",
   "main": "./src/index.tsx",

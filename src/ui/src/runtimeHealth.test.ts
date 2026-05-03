@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { defaultBioAgentConfig, updateConfig } from './config';
+import { defaultSciForgeConfig, updateConfig } from './config';
 import { modelHealth } from './runtimeHealth';
 
 describe('runtime health model status', () => {
   it('marks empty native model configuration as setup instead of online', () => {
-    const health = modelHealth(updateConfig(defaultBioAgentConfig, {
+    const health = modelHealth(updateConfig(defaultSciForgeConfig, {
       modelProvider: 'native',
       modelBaseUrl: '',
       modelName: '',
@@ -19,20 +19,20 @@ describe('runtime health model status', () => {
   });
 
   it('treats native user model endpoints as an explicit online configuration', () => {
-    const health = modelHealth(updateConfig(defaultBioAgentConfig, {
+    const health = modelHealth(updateConfig(defaultSciForgeConfig, {
       modelProvider: 'native',
       modelBaseUrl: 'https://models.example.test/v1',
-      modelName: 'bioagent-model',
+      modelName: 'sciforge-model',
       apiKey: 'test-key',
     }));
 
     assert.equal(health.status, 'online');
-    assert.match(health.detail, /bioagent-model/);
+    assert.match(health.detail, /sciforge-model/);
     assert.match(health.detail, /models\.example\.test/);
   });
 
   it('keeps OpenAI-compatible providers not-configured until API key is present', () => {
-    const health = modelHealth(updateConfig(defaultBioAgentConfig, {
+    const health = modelHealth(updateConfig(defaultSciForgeConfig, {
       modelProvider: 'openrouter',
       modelBaseUrl: 'https://openrouter.ai/api/v1',
       modelName: 'qwen/qwen3.6-plus:free',

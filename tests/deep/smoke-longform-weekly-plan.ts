@@ -63,14 +63,14 @@ function passedManifest(scenarioId: string, runId: string, completedAt: string):
     artifacts: [{
       id: 'final-report',
       type: 'research-report',
-      path: '.bioagent/final.md',
+      path: '.sciforge/final.md',
       status: 'produced',
       summary: 'Reference impact: ※1 changed the conclusion.',
     }],
     executionUnits: [{
       id: 'EU-fixture',
       status: 'done',
-      logRef: '.bioagent/logs/fixture.log',
+      logRef: '.sciforge/logs/fixture.log',
     }],
     failurePoints: [],
     screenshots: [{
@@ -87,7 +87,7 @@ function passedManifest(scenarioId: string, runId: string, completedAt: string):
       reportQuality: 4,
       rationale: 'Reference impact recorded.',
     },
-    notes: 'Browser evidence. Computer Use right-click selected limitation evidence. Workspace .bioagent refs. Reference impact: ※1 changed conclusion.',
+    notes: 'Browser evidence. Computer Use right-click selected limitation evidence. Workspace .sciforge refs. Reference impact: ※1 changed conclusion.',
   };
 }
 

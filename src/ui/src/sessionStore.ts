@@ -5,23 +5,23 @@ import {
   type AlignmentContractRecord,
   makeId,
   nowIso,
-  type BioAgentMessage,
-  type BioAgentSession,
-  type BioAgentWorkspaceState,
+  type SciForgeMessage,
+  type SciForgeSession,
+  type SciForgeWorkspaceState,
   type ScenarioInstanceId,
   type SessionVersionRecord,
 } from './domain';
 import { isTimelineEventRecord } from './timelineSchema';
 import { normalizeWorkspaceRootPath } from './config';
 
-const STORAGE_KEY = 'bioagent.workspace.v2';
+const STORAGE_KEY = 'sciforge.workspace.v2';
 const scenarioIds: ScenarioId[] = scenarios.map((scenario) => scenario.id);
 
 function isScenarioId(value: unknown): value is ScenarioId {
   return scenarioIds.includes(value as ScenarioId);
 }
 
-function seedMessages(scenarioId: ScenarioId): BioAgentMessage[] {
+function seedMessages(scenarioId: ScenarioId): SciForgeMessage[] {
   return messagesByScenario[scenarioId].map((message) => ({
     id: makeId('seed'),
     role: message.role,
@@ -35,7 +35,7 @@ function seedMessages(scenarioId: ScenarioId): BioAgentMessage[] {
   }));
 }
 
-export function createSession(scenarioId: ScenarioInstanceId, title = '新聊天', options: { seed?: boolean } = {}): BioAgentSession {
+export function createSession(scenarioId: ScenarioInstanceId, title = '新聊天', options: { seed?: boolean } = {}): SciForgeSession {
   const now = nowIso();
   return {
     schemaVersion: 2,
@@ -55,10 +55,10 @@ export function createSession(scenarioId: ScenarioInstanceId, title = '新聊天
   };
 }
 
-function migrateSession(value: unknown, scenarioId: ScenarioInstanceId): BioAgentSession {
+function migrateSession(value: unknown, scenarioId: ScenarioInstanceId): SciForgeSession {
   if (isSessionV2(value, scenarioId)) return value;
   if (typeof value === 'object' && value !== null && (value as { scenarioId?: unknown }).scenarioId === scenarioId) {
-    const raw = value as Partial<BioAgentSession> & { schemaVersion?: number };
+    const raw = value as Partial<SciForgeSession> & { schemaVersion?: number };
     const now = nowIso();
     return {
       schemaVersion: 2,
@@ -80,16 +80,16 @@ function migrateSession(value: unknown, scenarioId: ScenarioInstanceId): BioAgen
   return createSession(scenarioId);
 }
 
-function isSessionV2(value: unknown, scenarioId: ScenarioInstanceId): value is BioAgentSession {
+function isSessionV2(value: unknown, scenarioId: ScenarioInstanceId): value is SciForgeSession {
   return typeof value === 'object'
     && value !== null
-    && (value as BioAgentSession).schemaVersion === 2
-    && (value as BioAgentSession).scenarioId === scenarioId
-    && Array.isArray((value as BioAgentSession).messages)
-    && Array.isArray((value as BioAgentSession).versions);
+    && (value as SciForgeSession).schemaVersion === 2
+    && (value as SciForgeSession).scenarioId === scenarioId
+    && Array.isArray((value as SciForgeSession).messages)
+    && Array.isArray((value as SciForgeSession).versions);
 }
 
-export function createInitialWorkspaceState(): BioAgentWorkspaceState {
+export function createInitialWorkspaceState(): SciForgeWorkspaceState {
   const now = nowIso();
   return {
     schemaVersion: 2,
@@ -97,7 +97,7 @@ export function createInitialWorkspaceState(): BioAgentWorkspaceState {
     sessionsByScenario: scenarioIds.reduce((acc, scenarioId) => {
       acc[scenarioId] = createSession(scenarioId, `${scenarioLabel(scenarioId)} 默认聊天`, { seed: true });
       return acc;
-    }, {} as Record<ScenarioInstanceId, BioAgentSession>),
+    }, {} as Record<ScenarioInstanceId, SciForgeSession>),
     archivedSessions: [],
     alignmentContracts: [],
     feedbackComments: [],
@@ -106,7 +106,7 @@ export function createInitialWorkspaceState(): BioAgentWorkspaceState {
   };
 }
 
-export function loadWorkspaceState(): BioAgentWorkspaceState {
+export function loadWorkspaceState(): SciForgeWorkspaceState {
   if (typeof window === 'undefined') return createInitialWorkspaceState();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -117,17 +117,17 @@ export function loadWorkspaceState(): BioAgentWorkspaceState {
   return createInitialWorkspaceState();
 }
 
-export function parseWorkspaceState(value: unknown): BioAgentWorkspaceState {
+export function parseWorkspaceState(value: unknown): SciForgeWorkspaceState {
   const now = nowIso();
   if (typeof value !== 'object' || value === null) return createInitialWorkspaceState();
-  const raw = value as Partial<BioAgentWorkspaceState>;
+  const raw = value as Partial<SciForgeWorkspaceState>;
   return {
     schemaVersion: 2,
     workspacePath: typeof raw.workspacePath === 'string' ? normalizeWorkspaceRootPath(raw.workspacePath) : '',
     sessionsByScenario: preserveWorkspaceSessions(raw.sessionsByScenario, scenarioIds.reduce((acc, scenarioId) => {
       acc[scenarioId] = migrateSession(raw.sessionsByScenario?.[scenarioId], scenarioId);
       return acc;
-    }, {} as Record<ScenarioInstanceId, BioAgentSession>)),
+    }, {} as Record<ScenarioInstanceId, SciForgeSession>)),
     archivedSessions: Array.isArray(raw.archivedSessions)
       ? raw.archivedSessions.flatMap((session) => {
         const scenarioId = typeof session === 'object' && session !== null ? (session as { scenarioId?: unknown }).scenarioId : undefined;
@@ -215,7 +215,7 @@ function isFeedbackRequest(value: unknown) {
     && typeof record.updatedAt === 'string';
 }
 
-export function saveWorkspaceState(state: BioAgentWorkspaceState) {
+export function saveWorkspaceState(state: SciForgeWorkspaceState) {
   if (typeof window === 'undefined') return;
   const compact = compactWorkspaceStateForStorage(state);
   try {
@@ -237,9 +237,9 @@ export function saveWorkspaceState(state: BioAgentWorkspaceState) {
 }
 
 export function compactWorkspaceStateForStorage(
-  state: BioAgentWorkspaceState,
+  state: SciForgeWorkspaceState,
   mode: 'normal' | 'minimal' = 'normal',
-): BioAgentWorkspaceState {
+): SciForgeWorkspaceState {
   const limits = mode === 'minimal'
     ? { messages: 4, runs: 3, records: 3, versions: 1, archived: 2, timeline: 10, reusable: 5 }
     : { messages: 16, runs: 8, records: 8, versions: 3, archived: 6, timeline: 40, reusable: 20 };
@@ -248,7 +248,7 @@ export function compactWorkspaceStateForStorage(
     sessionsByScenario: Object.fromEntries(Object.entries(state.sessionsByScenario).map(([id, session]) => [
       id,
       compactSessionForStorage(session, limits),
-    ])) as Record<ScenarioInstanceId, BioAgentSession>,
+    ])) as Record<ScenarioInstanceId, SciForgeSession>,
     archivedSessions: (state.archivedSessions ?? []).slice(0, limits.archived).map((session) => compactSessionForStorage(session, limits)),
     feedbackComments: state.feedbackComments?.slice(0, mode === 'minimal' ? 20 : 120),
     feedbackRequests: state.feedbackRequests?.slice(0, mode === 'minimal' ? 8 : 40),
@@ -258,9 +258,9 @@ export function compactWorkspaceStateForStorage(
 }
 
 function compactSessionForStorage(
-  session: BioAgentSession,
+  session: SciForgeSession,
   limits: { messages: number; runs: number; records: number; versions: number },
-): BioAgentSession {
+): SciForgeSession {
   return {
     ...session,
     messages: session.messages.slice(-limits.messages).map((message) => ({
@@ -309,9 +309,9 @@ function compactArtifactData(data: unknown) {
 }
 
 function compactSessionSnapshotForStorage(
-  session: Omit<BioAgentSession, 'versions'>,
+  session: Omit<SciForgeSession, 'versions'>,
   limits: { messages: number; runs: number; records: number; versions: number },
-): Omit<BioAgentSession, 'versions'> {
+): Omit<SciForgeSession, 'versions'> {
   return {
     ...session,
     messages: session.messages.slice(-limits.messages).map((message) => ({
@@ -356,8 +356,8 @@ function compactBinaryMarker(value: string) {
 }
 
 export function shouldUsePersistedWorkspaceState(
-  current: BioAgentWorkspaceState,
-  persisted: BioAgentWorkspaceState,
+  current: SciForgeWorkspaceState,
+  persisted: SciForgeWorkspaceState,
   options: { explicitWorkspacePath?: boolean } = {},
 ) {
   if (options.explicitWorkspacePath && persisted.workspacePath.trim()) return true;
@@ -372,11 +372,11 @@ export function shouldUsePersistedWorkspaceState(
   return Number.isFinite(persistedTime) && (!Number.isFinite(currentTime) || persistedTime >= currentTime);
 }
 
-export function resetSession(scenarioId: ScenarioInstanceId): BioAgentSession {
+export function resetSession(scenarioId: ScenarioInstanceId): SciForgeSession {
   return createSession(scenarioId, `${scenarioLabel(scenarioId)} 新聊天`);
 }
 
-export function versionSession(session: BioAgentSession, reason: string): BioAgentSession {
+export function versionSession(session: SciForgeSession, reason: string): SciForgeSession {
   const snapshot = compactSessionSnapshotForStorage(stripVersions({ ...session, updatedAt: nowIso() }), {
     messages: 16,
     runs: 8,
@@ -400,7 +400,7 @@ export function versionSession(session: BioAgentSession, reason: string): BioAge
   };
 }
 
-function stripVersions(session: BioAgentSession): Omit<BioAgentSession, 'versions'> {
+function stripVersions(session: SciForgeSession): Omit<SciForgeSession, 'versions'> {
   const { versions: _versions, ...rest } = session;
   return rest;
 }
@@ -414,8 +414,8 @@ function checksum(text: string) {
 }
 
 function preserveWorkspaceSessions(
-  rawSessions: BioAgentWorkspaceState['sessionsByScenario'] | undefined,
-  base: Record<ScenarioInstanceId, BioAgentSession>,
+  rawSessions: SciForgeWorkspaceState['sessionsByScenario'] | undefined,
+  base: Record<ScenarioInstanceId, SciForgeSession>,
 ) {
   if (!rawSessions || typeof rawSessions !== 'object') return base;
   for (const [scenarioId, session] of Object.entries(rawSessions)) {
@@ -429,13 +429,13 @@ function scenarioLabel(scenarioId: ScenarioInstanceId) {
   return scenarios.find((scenario) => scenario.id === scenarioId)?.name ?? scenarioId;
 }
 
-function workspaceActivityScore(state: BioAgentWorkspaceState) {
+function workspaceActivityScore(state: SciForgeWorkspaceState) {
   return Object.values(state.sessionsByScenario).reduce((total, session) => {
     return total + sessionActivityScore(session);
   }, state.archivedSessions.length + (state.alignmentContracts?.length ?? 0) + (state.timelineEvents?.length ?? 0));
 }
 
-export function sessionActivityScore(session: BioAgentSession) {
+export function sessionActivityScore(session: SciForgeSession) {
   const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
   return userMessages
     + session.runs.length

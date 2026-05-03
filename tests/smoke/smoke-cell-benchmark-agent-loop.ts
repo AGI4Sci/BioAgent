@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 import { recommendScenarioElements } from '../../src/ui/src/scenarioCompiler/scenarioElementCompiler.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-cell-benchmark-agent-loop-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-cell-benchmark-agent-loop-'));
 const seenPrompts: Array<{ purpose: string; text: string }> = [];
 
 const expectedArtifacts = ['omics-differential-expression', 'research-report'];
@@ -190,7 +190,7 @@ const server = createServer(async (req, res) => {
   if (purpose === 'workspace-task-repair') {
     const workspacePath = typeof agent.workspace === 'string' ? agent.workspace : workspace;
     const codeRef = typeof metadata.codeRef === 'string' ? metadata.codeRef : '';
-    assert.ok(codeRef.startsWith('.bioagent/tasks/'), `repair codeRef should point at generated task, got ${codeRef}`);
+    assert.ok(codeRef.startsWith('.sciforge/tasks/'), `repair codeRef should point at generated task, got ${codeRef}`);
     assert.match(text, /schema-bad|schema validation|missing claims|priorAttempts|failureReason/i);
     await writeFile(join(workspacePath, codeRef), goodTask);
     sendAgentServerRun(res, req.url, {
@@ -214,7 +214,7 @@ const server = createServer(async (req, res) => {
           id: 'mock-cell-benchmark-direct-text',
           status: 'completed',
           output: {
-            result: 'Research report: AgentServer returned direct text for a CITE-seq totalVI direct text bridge smoke. BioAgent should preserve this as a report artifact and keep omics plus execution UI slots visible.',
+            result: 'Research report: AgentServer returned direct text for a CITE-seq totalVI direct text bridge smoke. SciForge should preserve this as a report artifact and keep omics plus execution UI slots visible.',
           },
         },
       },
@@ -233,10 +233,10 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: `.bioagent/tasks/cell-benchmark-${taskIndex}.py`, language: 'python', content: taskContent }],
-            entrypoint: { language: 'python', path: `.bioagent/tasks/cell-benchmark-${taskIndex}.py` },
+            taskFiles: [{ path: `.sciforge/tasks/cell-benchmark-${taskIndex}.py`, language: 'python', content: taskContent }],
+            entrypoint: { language: 'python', path: `.sciforge/tasks/cell-benchmark-${taskIndex}.py` },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/cell-benchmark.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/cell-benchmark.py <input> <output>',
             expectedArtifacts,
             patchSummary: shouldReturnBadTask
               ? 'Generated intentionally schema-bad task for repair smoke.'
@@ -378,10 +378,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function runTabulaSapiensThreeRoundContinuationSmoke() {
-  const threeRoundWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-tabula-three-round-'));
+  const threeRoundWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-tabula-three-round-'));
   const prompts: string[] = [];
-  const originalRepairFlag = process.env.BIOAGENT_ENABLE_AGENTSERVER_REPAIR;
-  process.env.BIOAGENT_ENABLE_AGENTSERVER_REPAIR = '0';
+  const originalRepairFlag = process.env.SCIFORGE_ENABLE_AGENTSERVER_REPAIR;
+  process.env.SCIFORGE_ENABLE_AGENTSERVER_REPAIR = '0';
 
   const round1Task = String.raw`
 import json
@@ -403,10 +403,10 @@ payload = {
     "id": "tabula-round-1",
     "status": "done",
     "tool": "agentserver.generated.python",
-    "codeRef": ".bioagent/tasks/tabula-round-1.py",
-    "stdoutRef": ".bioagent/logs/tabula-round-1.stdout.log",
-    "stderrRef": ".bioagent/logs/tabula-round-1.stderr.log",
-    "outputRef": ".bioagent/task-results/tabula-round-1.json",
+    "codeRef": ".sciforge/tasks/tabula-round-1.py",
+    "stdoutRef": ".sciforge/logs/tabula-round-1.stdout.log",
+    "stderrRef": ".sciforge/logs/tabula-round-1.stderr.log",
+    "outputRef": ".sciforge/task-results/tabula-round-1.json",
     "params": "{}"
   }],
   "artifacts": [{
@@ -414,13 +414,13 @@ payload = {
     "type": "runtime-artifact",
     "producerScenario": "omics",
     "schemaVersion": "1",
-    "dataRef": ".bioagent/task-results/tabula-round-1.json",
+    "dataRef": ".sciforge/task-results/tabula-round-1.json",
     "metadata": {
       "runId": "tabula-round-1",
       "producer": "agentserver.generated.python",
-      "codeRef": ".bioagent/tasks/tabula-round-1.py",
-      "stdoutRef": ".bioagent/logs/tabula-round-1.stdout.log",
-      "stderrRef": ".bioagent/logs/tabula-round-1.stderr.log"
+      "codeRef": ".sciforge/tasks/tabula-round-1.py",
+      "stdoutRef": ".sciforge/logs/tabula-round-1.stdout.log",
+      "stderrRef": ".sciforge/logs/tabula-round-1.stderr.log"
     },
     "data": {"rows": [{"step": "QC", "status": "planned"}, {"step": "marker genes", "status": "pending"}, {"step": "cross-organ composition", "status": "pending"}]}
   }, {
@@ -502,11 +502,11 @@ raise SystemExit(2)
                 id: 'tabula-round-3-repair-diagnosis',
                 status: 'repair-needed',
                 tool: 'agentserver.repair-diagnosis',
-                params: JSON.stringify({ readRefs: ['.bioagent/logs/tabula-round-2.stderr.log'] }),
+                params: JSON.stringify({ readRefs: ['.sciforge/logs/tabula-round-2.stderr.log'] }),
                 failureReason: 'first pass marker table crashed: missing organ_celltype_matrix.tsv',
-                codeRef: '.bioagent/tasks/tabula-round-2.py',
-                stderrRef: '.bioagent/logs/tabula-round-2.stderr.log',
-                outputRef: '.bioagent/task-results/tabula-round-2.json',
+                codeRef: '.sciforge/tasks/tabula-round-2.py',
+                stderrRef: '.sciforge/logs/tabula-round-2.stderr.log',
+                outputRef: '.sciforge/task-results/tabula-round-2.json',
                 recoverActions: ['provide-organ-celltype-matrix', 'rerun-marker-composition-task'],
                 nextStep: 'Read the referenced stderr log, then regenerate the marker/composition task once input data exists.'
               }],
@@ -518,7 +518,7 @@ raise SystemExit(2)
                 metadata: {
                   status: 'repair-needed',
                   failureReason: 'first pass marker table crashed: missing organ_celltype_matrix.tsv',
-                  stderrRef: '.bioagent/logs/tabula-round-2.stderr.log'
+                  stderrRef: '.sciforge/logs/tabula-round-2.stderr.log'
                 },
                 data: { markdown: 'Repair needed: previous marker/composition task failed because organ_celltype_matrix.tsv is missing.' }
               }]
@@ -603,8 +603,8 @@ raise SystemExit(2)
     assert.equal(prompts.length, 3);
     console.log('[ok] Tabula Sapiens three-round continuation preserves artifacts, failureReason, and code/log refs');
   } finally {
-    if (originalRepairFlag === undefined) delete process.env.BIOAGENT_ENABLE_AGENTSERVER_REPAIR;
-    else process.env.BIOAGENT_ENABLE_AGENTSERVER_REPAIR = originalRepairFlag;
+    if (originalRepairFlag === undefined) delete process.env.SCIFORGE_ENABLE_AGENTSERVER_REPAIR;
+    else process.env.SCIFORGE_ENABLE_AGENTSERVER_REPAIR = originalRepairFlag;
     await new Promise<void>((resolve) => threeRoundServer.close(() => resolve()));
   }
 }
@@ -623,10 +623,10 @@ function sendGeneration(
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: `.bioagent/tasks/${id}.py`, language: 'python', content }],
-            entrypoint: { language: 'python', path: `.bioagent/tasks/${id}.py` },
+            taskFiles: [{ path: `.sciforge/tasks/${id}.py`, language: 'python', content }],
+            entrypoint: { language: 'python', path: `.sciforge/tasks/${id}.py` },
             environmentRequirements: { language: 'python' },
-            validationCommand: `python .bioagent/tasks/${id}.py <input> <output>`,
+            validationCommand: `python .sciforge/tasks/${id}.py <input> <output>`,
             expectedArtifacts,
             patchSummary: `Generated ${id}.`
           }

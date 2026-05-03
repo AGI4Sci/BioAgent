@@ -1,4 +1,4 @@
-import type { AgentContextCompaction, AgentContextWindowState, AgentStreamEvent, BioAgentMessage, BioAgentReference } from './domain';
+import type { AgentContextCompaction, AgentContextWindowState, AgentStreamEvent, SciForgeMessage, SciForgeReference } from './domain';
 
 export function buildContextCompactionOutcome({
   eventId,
@@ -20,7 +20,7 @@ export function buildContextCompactionOutcome({
   fallbackBackend: string;
 }): {
   event: AgentStreamEvent;
-  message: BioAgentMessage;
+  message: SciForgeMessage;
   nextState: AgentContextWindowState;
 } {
   const succeeded = result.status === 'completed';
@@ -109,7 +109,7 @@ export function buildContextCompactionFailureResult({
   };
 }
 
-function contextCompactionReference(compaction: AgentContextCompaction, messageId: string, detail: string): BioAgentReference {
+function contextCompactionReference(compaction: AgentContextCompaction, messageId: string, detail: string): SciForgeReference {
   const ref = compaction.auditRefs?.[0] ?? `context-compaction:${messageId}`;
   return {
     id: `ref-${messageId}`,

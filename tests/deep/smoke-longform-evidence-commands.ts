@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildLongformEvidenceCommandPlan, prepareLongformRegression, recordLongformRoundObservation } from '../../tools/longform-regression';
 
-const outRoot = await mkdtemp(join(tmpdir(), 'bioagent-longform-evidence-commands-'));
+const outRoot = await mkdtemp(join(tmpdir(), 'sciforge-longform-evidence-commands-'));
 const [prepared] = await prepareLongformRegression({
   scenario: 'longform-literature-evidence-report',
   outRoot,

@@ -605,7 +605,7 @@ async function prepareScenario(script: LongformScenarioScript, options: PrepareL
     prompt: {
       initial: script.rounds[0]?.prompt ?? script.goal,
       compiledScenarioPrompt: script.goal,
-      expectedOutcome: `Complete ${script.minRounds}+ BioAgent turns with mixed reference operations and reproducible artifacts for ${script.scenarioPackageId}.`,
+      expectedOutcome: `Complete ${script.minRounds}+ SciForge turns with mixed reference operations and reproducible artifacts for ${script.scenarioPackageId}.`,
     },
     rounds: script.rounds.map((round) => ({
       round: round.round,
@@ -615,7 +615,7 @@ async function prepareScenario(script: LongformScenarioScript, options: PrepareL
         round.referenceOps.length ? `Reference ops: ${round.referenceOps.map(formatReferenceOperation).join('; ')}` : '',
         round.expectedArtifacts.length ? `Expected artifacts: ${round.expectedArtifacts.join(', ')}` : '',
       ].filter(Boolean).join('\n'),
-      observedBehavior: 'Pending real BioAgent browser run. Fill this during execution.',
+      observedBehavior: 'Pending real SciForge browser run. Fill this during execution.',
       status: 'not-run',
       artifactRefs: [],
       executionUnitRefs: [],
@@ -845,14 +845,14 @@ function evidenceClassesForManifest(manifest: DeepRunManifest) {
   ].join('\n').toLowerCase();
   if (manifest.screenshots.length > 0 || /browser|dom|in-app/.test(screenshotHaystack)) classes.add('browser');
   if (/computer use|computer-use|right-click|coordinate|desktop|鼠标|右键/.test(screenshotHaystack)) classes.add('computer-use');
-  if (/workspace|\.bioagent|artifact|session|run ref|log|\.md|\.csv|\.tsv|notebook/.test(workspaceHaystack)) classes.add('workspace');
+  if (/workspace|\.sciforge|artifact|session|run ref|log|\.md|\.csv|\.tsv|notebook/.test(workspaceHaystack)) classes.add('workspace');
   return classes;
 }
 
 function mentionsReferenceImpact(manifest: DeepRunManifest) {
   const text = [
     ...manifest.rounds
-      .filter((round) => round.status !== 'not-run' && !/Pending real BioAgent browser run/i.test(round.observedBehavior))
+      .filter((round) => round.status !== 'not-run' && !/Pending real SciForge browser run/i.test(round.observedBehavior))
       .map((round) => `${round.observedBehavior}\n${round.expectedBehavior ?? ''}`),
     ...manifest.artifacts.map((artifact) => artifact.summary ?? ''),
     manifest.qualityScores.rationale && !/^Pending manual scoring\./.test(manifest.qualityScores.rationale) ? manifest.qualityScores.rationale : '',
@@ -1056,15 +1056,15 @@ function primaryExecutionForManifest(manifest: DeepRunManifest) {
   if (existing) {
     return {
       id: existing.id,
-      tool: existing.tool ?? manifest.runtimeProfile.agentBackend ?? 'bioagent-runtime',
-      logRef: existing.logRef ?? `.bioagent/logs/${stableEvidenceId(existing.id)}.log`,
+      tool: existing.tool ?? manifest.runtimeProfile.agentBackend ?? 'sciforge-runtime',
+      logRef: existing.logRef ?? `.sciforge/logs/${stableEvidenceId(existing.id)}.log`,
     };
   }
   const id = `${stableEvidenceId(manifest.scenarioId)}-execution`;
   return {
     id,
-    tool: manifest.runtimeProfile.agentBackend ?? manifest.runtimeProfile.runtimeProfileId ?? 'bioagent-runtime',
-    logRef: `.bioagent/logs/${id}.log`,
+    tool: manifest.runtimeProfile.agentBackend ?? manifest.runtimeProfile.runtimeProfileId ?? 'sciforge-runtime',
+    logRef: `.sciforge/logs/${id}.log`,
   };
 }
 
@@ -1097,11 +1097,11 @@ function inferArtifactType(id: string) {
 
 function artifactPathForId(id: string) {
   const normalized = stableEvidenceId(id);
-  if (/\.[a-z0-9]+$/i.test(id)) return `.bioagent/artifacts/${id}`;
-  if (/report|memo|plan/i.test(id)) return `.bioagent/artifacts/${normalized}.md`;
-  if (/table|matrix/i.test(id)) return `.bioagent/artifacts/${normalized}.csv`;
-  if (/audit|manifest/i.test(id)) return `.bioagent/artifacts/${normalized}.json`;
-  return `.bioagent/artifacts/${normalized}`;
+  if (/\.[a-z0-9]+$/i.test(id)) return `.sciforge/artifacts/${id}`;
+  if (/report|memo|plan/i.test(id)) return `.sciforge/artifacts/${normalized}.md`;
+  if (/table|matrix/i.test(id)) return `.sciforge/artifacts/${normalized}.csv`;
+  if (/audit|manifest/i.test(id)) return `.sciforge/artifacts/${normalized}.json`;
+  return `.sciforge/artifacts/${normalized}`;
 }
 
 function shellQuote(value: string) {

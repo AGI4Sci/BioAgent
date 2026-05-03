@@ -1,6 +1,6 @@
 # AgentServer Task Generation Protocol
 
-BioAgent calls AgentServer only as a generic task-generation or repair brain. The request must not require AgentServer to know BioAgent-specific hard-coded tools.
+SciForge calls AgentServer only as a generic task-generation or repair brain. The request must not require AgentServer to know SciForge-specific hard-coded tools.
 
 Generation request:
 
@@ -21,10 +21,10 @@ Generation response:
 
 ```json
 {
-  "taskFiles": [{ "path": ".bioagent/tasks/generated.py", "content": "print('ok')", "language": "python" }],
-  "entrypoint": { "language": "python", "path": ".bioagent/tasks/generated.py" },
+  "taskFiles": [{ "path": ".sciforge/tasks/generated.py", "content": "print('ok')", "language": "python" }],
+  "entrypoint": { "language": "python", "path": ".sciforge/tasks/generated.py" },
   "environmentRequirements": {},
-  "validationCommand": "python .bioagent/tasks/generated.py ...",
+  "validationCommand": "python .sciforge/tasks/generated.py ...",
   "expectedArtifacts": ["structure-summary"],
   "patchSummary": "Created a new workspace task."
 }
@@ -36,11 +36,11 @@ Repair request:
 {
   "prompt": "User request",
   "skillDomain": "structure",
-  "codeRef": ".bioagent/tasks/structure.py",
-  "inputRef": ".bioagent/task-inputs/structure.json",
-  "outputRef": ".bioagent/task-results/structure.json",
-  "stdoutRef": ".bioagent/logs/structure.stdout.log",
-  "stderrRef": ".bioagent/logs/structure.stderr.log",
+  "codeRef": ".sciforge/tasks/structure.py",
+  "inputRef": ".sciforge/task-inputs/structure.json",
+  "outputRef": ".sciforge/task-results/structure.json",
+  "stdoutRef": ".sciforge/logs/structure.stdout.log",
+  "stderrRef": ".sciforge/logs/structure.stderr.log",
   "schemaErrors": ["missing artifacts"],
   "userFeedback": "The result is not the requested protein.",
   "uiStateSummary": {},
@@ -60,6 +60,6 @@ Repair response extends generation response with:
 
 Attempt history:
 
-- Every run or repair attempt writes a `TaskAttemptRecord` under `.bioagent/task-attempts/`.
+- Every run or repair attempt writes a `TaskAttemptRecord` under `.sciforge/task-attempts/`.
 - A repair attempt must preserve `parentAttempt`, `selfHealReason`, `patchSummary`, and optional `diffRef`.
-- If AgentServer cannot generate or repair the task, BioAgent returns `repair-needed` or `failed` with code/log refs and a concrete missing condition.
+- If AgentServer cannot generate or repair the task, SciForge returns `repair-needed` or `failed` with code/log refs and a concrete missing condition.

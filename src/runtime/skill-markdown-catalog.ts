@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
-import type { BioAgentSkillDomain, SkillManifest } from './runtime-types.js';
+import type { SciForgeSkillDomain, SkillManifest } from './runtime-types.js';
 import { fileExists } from './workspace-task-runner.js';
 
 export interface MarkdownSkillPackage {
@@ -11,7 +11,7 @@ export interface MarkdownSkillPackage {
   label: string;
   description: string;
   source: 'package';
-  skillDomains: BioAgentSkillDomain[];
+  skillDomains: SciForgeSkillDomain[];
   inputContract: Record<string, unknown>;
   outputArtifactTypes: string[];
   entrypointType: 'markdown-skill';
@@ -34,7 +34,7 @@ export interface MarkdownToolPackage {
   description: string;
   source: 'package';
   toolType: 'database' | 'runner' | 'connector' | 'llm-backend' | 'visual-runtime';
-  skillDomains: BioAgentSkillDomain[];
+  skillDomains: SciForgeSkillDomain[];
   producesArtifactTypes?: string[];
   requiredConfig?: string[];
   docs: { readmePath: string; agentSummary: string };
@@ -124,7 +124,7 @@ async function readMarkdownSkillPackage(root: string, path: string): Promise<Mar
   const outputArtifactTypes = inferOutputArtifactTypes(`${id} ${description} ${text.slice(0, 8000)}`);
   return {
     id,
-    packageName: `@bioagent-skill/${safeName}`,
+    packageName: `@sciforge-skill/${safeName}`,
     kind: 'skill',
     version: '1.0.0',
     label: rawName,
@@ -169,7 +169,7 @@ async function readMarkdownToolPackage(root: string, path: string): Promise<Mark
   const mcpArgs = frontmatterList(frontmatter.mcpArgs);
   return {
     id,
-    packageName: `@bioagent-tool/${safeName}`,
+    packageName: `@sciforge-tool/${safeName}`,
     kind: 'tool',
     version: '1.0.0',
     label: rawName,
@@ -259,9 +259,9 @@ function safeSkillId(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'markdown-skill';
 }
 
-function inferSkillDomains(text: string): BioAgentSkillDomain[] {
+function inferSkillDomains(text: string): SciForgeSkillDomain[] {
   const lower = text.toLowerCase();
-  const domains = new Set<BioAgentSkillDomain>();
+  const domains = new Set<SciForgeSkillDomain>();
   if (/\b(pubmed|literature|paper|web-search|mesh|clinical resource|pdf|document)\b/.test(lower)) domains.add('literature');
   if (/\b(structure|pdb|alphafold|docking|binding site|pocket|esmfold|molecular visualization)\b/.test(lower)) domains.add('structure');
   if (/\b(omics|rna|expression|tcga|biomarker|transcriptomic|metabolomics|epigenetic|gwas|single-cell)\b/.test(lower)) domains.add('omics');
@@ -303,7 +303,7 @@ function examplePromptsForMarkdownSkill(id: string, description: string) {
     .filter((token) => token.length > 5)
     .slice(0, 8)
     .join(' ');
-  return unique([title, specificTerms, `Use ${title} and return structured BioAgent artifacts`].filter(Boolean));
+  return unique([title, specificTerms, `Use ${title} and return structured SciForge artifacts`].filter(Boolean));
 }
 
 function escapeRegExp(value: string) {

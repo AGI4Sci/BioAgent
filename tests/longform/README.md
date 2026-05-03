@@ -1,10 +1,10 @@
-# BioAgent Longform Evaluation Scripts
+# SciForge Longform Evaluation Scripts
 
-These scripts are the T060 manual regression suite for long multi-turn BioAgent runs. They are intentionally separate from unit tests: a passing script means Codex operated the real UI, used browser evidence and Computer Use evidence, and recorded workspace/session refs.
+These scripts are the T060 manual regression suite for long multi-turn SciForge runs. They are intentionally separate from unit tests: a passing script means Codex operated the real UI, used browser evidence and Computer Use evidence, and recorded workspace/session refs.
 
 ## Running A Script
 
-1. Start BioAgent with `npm run dev` and open `http://localhost:5173/` in the in-app browser.
+1. Start SciForge with `npm run dev` and open `http://localhost:5173/` in the in-app browser.
 2. Pick one JSON file from `tests/longform/scenarios/`.
 3. Prepare a run directory and pending manifest:
 

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { acceptAndRepairAgentResponse, buildBackendAcceptanceRepairPrompt, buildUserGoalSnapshot, extractObjectReferencesFromText, shouldRunBackendAcceptanceRepair } from './turnAcceptance';
-import type { BioAgentSession, NormalizedAgentResponse, SemanticTurnAcceptance, TurnAcceptance } from './domain';
+import type { SciForgeSession, NormalizedAgentResponse, SemanticTurnAcceptance, TurnAcceptance } from './domain';
 
-const baseSession: BioAgentSession = {
+const baseSession: SciForgeSession = {
   schemaVersion: 2,
   sessionId: 'session-test',
   scenarioId: 'literature-evidence-review',
@@ -67,15 +67,15 @@ const semanticFail: SemanticTurnAcceptance = {
 
 test('extractObjectReferencesFromText turns final reply paths into clickable file refs', () => {
   const refs = extractObjectReferencesFromText(
-    '报告已经生成在 `.bioagent/tasks/run-1/report/arxiv-agent-reading-report.md`，表格在 file:.bioagent/tasks/run-1/results.csv。',
+    '报告已经生成在 `.sciforge/tasks/run-1/report/arxiv-agent-reading-report.md`，表格在 file:.sciforge/tasks/run-1/results.csv。',
     baseSession,
   );
 
   assert.equal(refs.length, 2);
   assert.equal(refs[0].kind, 'file');
-  assert.equal(refs[0].ref, 'file:.bioagent/tasks/run-1/report/arxiv-agent-reading-report.md');
+  assert.equal(refs[0].ref, 'file:.sciforge/tasks/run-1/report/arxiv-agent-reading-report.md');
   assert.equal(refs[0].preferredView, 'report-viewer');
-  assert.equal(refs[1].ref, 'file:.bioagent/tasks/run-1/results.csv');
+  assert.equal(refs[1].ref, 'file:.sciforge/tasks/run-1/results.csv');
 });
 
 test('acceptAndRepairAgentResponse records goal acceptance and object refs for report paths', () => {
@@ -89,7 +89,7 @@ test('acceptAndRepairAgentResponse records goal acceptance and object refs for r
     message: {
       id: 'msg-agent',
       role: 'scenario',
-      content: 'Markdown 报告路径：.bioagent/tasks/run-1/report.md',
+      content: 'Markdown 报告路径：.sciforge/tasks/run-1/report.md',
       createdAt: '2026-05-01T00:00:00.000Z',
       status: 'completed',
     },
@@ -98,7 +98,7 @@ test('acceptAndRepairAgentResponse records goal acceptance and object refs for r
       scenarioId: 'literature-evidence-review',
       status: 'completed',
       prompt: snapshot.rawPrompt,
-      response: 'Markdown 报告路径：.bioagent/tasks/run-1/report.md',
+      response: 'Markdown 报告路径：.sciforge/tasks/run-1/report.md',
       createdAt: '2026-05-01T00:00:00.000Z',
       completedAt: '2026-05-01T00:00:00.000Z',
     },
@@ -111,7 +111,7 @@ test('acceptAndRepairAgentResponse records goal acceptance and object refs for r
 
   const accepted = acceptAndRepairAgentResponse({ snapshot, response, session: baseSession });
 
-  assert.equal(accepted.message.objectReferences?.[0].ref, 'file:.bioagent/tasks/run-1/report.md');
+  assert.equal(accepted.message.objectReferences?.[0].ref, 'file:.sciforge/tasks/run-1/report.md');
   assert.equal(accepted.message.acceptance?.pass, true);
   assert.equal(accepted.run.goalSnapshot?.goalType, 'report');
   assert.equal(accepted.run.raw && typeof accepted.run.raw === 'object' && 'turnAcceptance' in accepted.run.raw, true);
@@ -161,7 +161,7 @@ test('deterministic pass plus semantic pass accepts the turn', () => {
   });
   const accepted = acceptAndRepairAgentResponse({
     snapshot,
-    response: responseWithContent('Markdown 报告路径：.bioagent/tasks/run-1/report.md'),
+    response: responseWithContent('Markdown 报告路径：.sciforge/tasks/run-1/report.md'),
     session: baseSession,
     semanticAcceptance: semanticPass,
   });
@@ -197,7 +197,7 @@ test('deterministic pass plus semantic failure records repair prompt', () => {
   });
   const accepted = acceptAndRepairAgentResponse({
     snapshot,
-    response: responseWithContent('Markdown 报告路径：.bioagent/tasks/run-1/report.md'),
+    response: responseWithContent('Markdown 报告路径：.sciforge/tasks/run-1/report.md'),
     session: baseSession,
     semanticAcceptance: semanticFail,
   });
@@ -216,7 +216,7 @@ test('AgentServer semantic validation unavailable falls back to deterministic-on
   });
   const accepted = acceptAndRepairAgentResponse({
     snapshot,
-    response: responseWithContent('Markdown 报告路径：.bioagent/tasks/run-1/report.md'),
+    response: responseWithContent('Markdown 报告路径：.sciforge/tasks/run-1/report.md'),
     session: baseSession,
   });
 
@@ -273,9 +273,9 @@ test('execution failure repair prompt carries stderr and code refs', () => {
       status: 'failed-with-reason',
       hash: 'bad',
       failureReason: 'Download API returned 500',
-      stderrRef: '.bioagent/logs/EU-download.stderr.log',
-      stdoutRef: '.bioagent/logs/EU-download.stdout.log',
-      codeRef: '.bioagent/tasks/download.py',
+      stderrRef: '.sciforge/logs/EU-download.stderr.log',
+      stdoutRef: '.sciforge/logs/EU-download.stdout.log',
+      codeRef: '.sciforge/tasks/download.py',
     }],
   });
 
@@ -285,8 +285,8 @@ test('execution failure repair prompt carries stderr and code refs', () => {
   assert.equal(accepted.message.acceptance?.failures.some((failure) => failure.code === 'execution-failed' && failure.repairAction === 'execution-repair'), true);
   assert.equal(shouldRunBackendAcceptanceRepair(accepted.message.acceptance), true);
   assert.match(prompt, /Download API returned 500/);
-  assert.match(prompt, /\.bioagent\/logs\/EU-download.stderr.log/);
-  assert.match(prompt, /\.bioagent\/tasks\/download.py/);
+  assert.match(prompt, /\.sciforge\/logs\/EU-download.stderr.log/);
+  assert.match(prompt, /\.sciforge\/tasks\/download.py/);
 });
 
 test('backend repair budget exhaustion prevents another rerun', () => {

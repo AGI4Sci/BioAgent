@@ -1,4 +1,4 @@
-# @bioagent-ui/paper-card-list
+# @sciforge-ui/paper-card-list
 
 ## Agent quick contract
 - componentId: `paper-card-list`

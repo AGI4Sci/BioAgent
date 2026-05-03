@@ -22,17 +22,17 @@ export async function pruneTaskInputRetention(
   options: TaskInputRetentionOptions = {},
 ): Promise<RetentionPruneResult> {
   const workspace = resolve(workspacePath || process.cwd());
-  const dir = join(workspace, '.bioagent', 'task-inputs');
+  const dir = join(workspace, '.sciforge', 'task-inputs');
   const localConfig = await readTaskInputRetentionConfig();
   const maxFiles = retentionLimit(
     options.maxFiles,
-    'BIOAGENT_TASK_INPUT_MAX_FILES',
+    'SCIFORGE_TASK_INPUT_MAX_FILES',
     localConfig.maxFiles,
     DEFAULT_TASK_INPUT_MAX_FILES,
   );
   const maxBytes = retentionLimit(
     options.maxBytes,
-    'BIOAGENT_TASK_INPUT_MAX_BYTES',
+    'SCIFORGE_TASK_INPUT_MAX_BYTES',
     localConfig.maxBytes,
     DEFAULT_TASK_INPUT_MAX_BYTES,
   );
@@ -114,9 +114,9 @@ async function readTaskInputRetentionConfig() {
   try {
     const parsed = JSON.parse(await readFile(join(process.cwd(), 'config.local.json'), 'utf8'));
     if (!isRecord(parsed)) return {};
-    const bioagent = isRecord(parsed.bioagent) ? parsed.bioagent : {};
-    const direct = isRecord(bioagent.taskInputRetention) ? bioagent.taskInputRetention : {};
-    const runtime = isRecord(bioagent.runtimeRetention) ? bioagent.runtimeRetention : {};
+    const sciforge = isRecord(parsed.sciforge) ? parsed.sciforge : {};
+    const direct = isRecord(sciforge.taskInputRetention) ? sciforge.taskInputRetention : {};
+    const runtime = isRecord(sciforge.runtimeRetention) ? sciforge.runtimeRetention : {};
     return {
       maxFiles: numberField(direct.maxFiles) ?? numberField(runtime.taskInputMaxFiles),
       maxBytes: numberField(direct.maxBytes) ?? numberField(runtime.taskInputMaxBytes),

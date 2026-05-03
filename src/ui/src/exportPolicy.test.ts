@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import type { BioAgentSession, RuntimeArtifact } from './domain';
+import type { SciForgeSession, RuntimeArtifact } from './domain';
 import { buildExecutionBundle, evaluateExecutionBundleExport } from './exportPolicy';
 
 describe('execution bundle export policy', () => {
@@ -43,7 +43,7 @@ describe('execution bundle export policy', () => {
   });
 });
 
-function fixtureSession(artifact: Pick<RuntimeArtifact, 'id'> & Partial<RuntimeArtifact>): BioAgentSession {
+function fixtureSession(artifact: Pick<RuntimeArtifact, 'id'> & Partial<RuntimeArtifact>): SciForgeSession {
   return {
     schemaVersion: 2,
     sessionId: 'session-export-policy',

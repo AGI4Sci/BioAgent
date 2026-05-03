@@ -20,7 +20,7 @@ export function repairNeededPayload(
 ): ToolPayload {
   const id = `EU-${request.skillDomain}-${sha1(`${request.prompt}:${reason}`).slice(0, 8)}`;
   return {
-    message: `BioAgent runtime gateway needs repair or AgentServer task generation: ${reason}`,
+    message: `SciForge runtime gateway needs repair or AgentServer task generation: ${reason}`,
     confidence: 0.2,
     claimType: 'fact',
     evidenceLevel: 'runtime',
@@ -43,12 +43,12 @@ export function repairNeededPayload(
     ],
     executionUnits: [{
       id,
-      tool: 'bioagent.workspace-runtime-gateway',
+      tool: 'sciforge.workspace-runtime-gateway',
       params: JSON.stringify({ prompt: request.prompt, skillDomain: request.skillDomain, skillId: skill.id, reason }),
       status: 'repair-needed',
       hash: sha1(`${id}:${reason}`).slice(0, 12),
       time: new Date().toISOString(),
-      environment: 'BioAgent workspace runtime gateway',
+      environment: 'SciForge workspace runtime gateway',
       inputData: [request.prompt],
       outputArtifacts: [],
       artifacts: [],
@@ -89,8 +89,8 @@ export function recoverActionsForRepair(reason: string) {
   }
   if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) {
     return [
-      'Open BioAgent settings and fill Model Provider, Model Base URL, Model Name, and API Key.',
-      'Save config.local.json, then retry the same prompt so BioAgent forwards the request-selected llmEndpoint.',
+      'Open SciForge settings and fill Model Provider, Model Base URL, Model Name, and API Key.',
+      'Save config.local.json, then retry the same prompt so SciForge forwards the request-selected llmEndpoint.',
       'Do not rely on AgentServer openteam.json defaults for generated workspace tasks.',
     ];
   }
@@ -113,8 +113,8 @@ export function recoverActionsForRepair(reason: string) {
 }
 
 export function nextStepForRepair(reason: string) {
-  if (/429|rate-limit|rate limit|retry budget|too many failed attempts|responseTooManyFailedAttempts|retry-after/i.test(reason)) return 'Wait for provider quota/reset, then rerun with compact workspace refs; BioAgent has already used its single automatic compact retry.';
-  if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) return 'Configure the user-side model endpoint in BioAgent settings, then retry the same prompt.';
+  if (/429|rate-limit|rate limit|retry budget|too many failed attempts|responseTooManyFailedAttempts|retry-after/i.test(reason)) return 'Wait for provider quota/reset, then rerun with compact workspace refs; SciForge has already used its single automatic compact retry.';
+  if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) return 'Configure the user-side model endpoint in SciForge settings, then retry the same prompt.';
   if (/AgentServer|base URL|fetch|ECONNREFUSED/i.test(reason)) return 'Start AgentServer or choose a local skill/runtime, then retry.';
   if (/schema|payload|parsed|validation/i.test(reason)) return 'Repair the task output contract and rerun validation.';
   return 'Review diagnostics, provide missing inputs, and rerun.';

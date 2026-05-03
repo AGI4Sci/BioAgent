@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadLongformScenarioScripts, prepareLongformRegression, writeLongformOperatorRunbook } from '../../tools/longform-regression';
 
-const outRoot = await mkdtemp(join(tmpdir(), 'bioagent-longform-runbook-'));
+const outRoot = await mkdtemp(join(tmpdir(), 'sciforge-longform-runbook-'));
 const [prepared] = await prepareLongformRegression({
   scenario: 'longform-context-pressure-compact',
   outRoot,

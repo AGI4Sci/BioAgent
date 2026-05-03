@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { appendTaskAttempt, readTaskAttempts } from '../../src/runtime/task-attempt-history';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-versioned-runs-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-versioned-runs-'));
 const id = 'scenario-version-ref-smoke';
 
 await appendTaskAttempt(workspace, {

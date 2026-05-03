@@ -9,9 +9,9 @@ import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-
 const AGENT_BACKENDS = ['codex', 'openteam_agent', 'claude-code', 'hermes-agent', 'openclaw', 'gemini'] as const;
 type AgentBackend = typeof AGENT_BACKENDS[number];
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-backend-failure-'));
-await mkdir(join(workspace, '.bioagent', 'tasks'), { recursive: true });
-await writeFile(join(workspace, '.bioagent', 'tasks', 'stale.py'), [
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-backend-failure-'));
+await mkdir(join(workspace, '.sciforge', 'tasks'), { recursive: true });
+await writeFile(join(workspace, '.sciforge', 'tasks', 'stale.py'), [
   'import json, sys',
   'json.dump({"message":"stale task should not run","confidence":0.1,"claimType":"debug","evidenceLevel":"stale","reasoningTrace":"stale","claims":[],"uiManifest":[],"executionUnits":[],"artifacts":[]}, open(sys.argv[2], "w"))',
 ].join('\n'));
@@ -81,7 +81,7 @@ console.log('[ok] AgentServer backend failures surface as actionable diagnostics
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
-const rateLimitWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-rate-limit-'));
+const rateLimitWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-rate-limit-'));
 let rateLimitRuns = 0;
 const hermesRateLimitResetAt = '2026-05-02T03:00:00.000Z';
 const rateLimitServer = createServer(async (req, res) => {
@@ -148,9 +148,9 @@ try {
       sessionId: 'rate-limit-session',
       forceAgentServerGeneration: true,
       recentConversation: ['user: prior context '.repeat(2000), 'assistant: prior answer '.repeat(2000)],
-      recentExecutionRefs: [{ id: 'old-run', outputRef: '.bioagent/task-results/old.json', stderrRef: '.bioagent/logs/old.err' }],
+      recentExecutionRefs: [{ id: 'old-run', outputRef: '.sciforge/task-results/old.json', stderrRef: '.sciforge/logs/old.err' }],
     },
-    artifacts: [{ id: 'big-artifact', type: 'knowledge-graph', dataRef: '.bioagent/artifacts/big.json', data: { rows: Array.from({ length: 1000 }, (_, index) => ({ index, value: 'x'.repeat(200) })) } }],
+    artifacts: [{ id: 'big-artifact', type: 'knowledge-graph', dataRef: '.sciforge/artifacts/big.json', data: { rows: Array.from({ length: 1000 }, (_, index) => ({ index, value: 'x'.repeat(200) })) } }],
   });
 
   assert.equal(rateLimitRuns, 2, '429 recovery must make at most one compact retry');
@@ -163,7 +163,7 @@ try {
   await new Promise<void>((resolve) => rateLimitServer.close(() => resolve()));
 }
 
-const slimWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-rate-limit-slim-'));
+const slimWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-rate-limit-slim-'));
 const slimBodies: unknown[] = [];
 const slimServer = createServer(async (req, res) => {
   if (req.method === 'GET' && String(req.url).includes('/context')) {
@@ -222,12 +222,12 @@ try {
       currentPrompt: '基于上一轮结果继续生成知识图谱',
       recentConversation: ['user: 请分析 '.repeat(5000), 'assistant: 已生成中间结果 '.repeat(5000)],
       recentRuns: Array.from({ length: 20 }, (_, index) => ({ id: `run-${index}`, output: 'large-output '.repeat(1000) })),
-      recentExecutionRefs: [{ id: 'previous-run', outputRef: '.bioagent/task-results/previous.json', stderrRef: '.bioagent/logs/previous.err' }],
+      recentExecutionRefs: [{ id: 'previous-run', outputRef: '.sciforge/task-results/previous.json', stderrRef: '.sciforge/logs/previous.err' }],
     },
     artifacts: Array.from({ length: 8 }, (_, index) => ({
       id: `artifact-${index}`,
       type: 'knowledge-graph',
-      dataRef: `.bioagent/artifacts/artifact-${index}.json`,
+      dataRef: `.sciforge/artifacts/artifact-${index}.json`,
       data: { rows: Array.from({ length: 300 }, (_, row) => ({ row, text: 'large-cell '.repeat(100) })) },
     })),
   });
@@ -243,7 +243,7 @@ try {
     : '';
   assert.ok(secondInputText.length < firstInputText.length, `retry prompt/context should be slimmer: first=${firstInputText.length} second=${secondInputText.length}`);
   assert.equal(secondContextMode, 'delta', 'retry handoff should force delta/slim context mode');
-  assert.match(secondBody, /bioagent\.agentserver-generation-retry\.v1/);
+  assert.match(secondBody, /sciforge\.agentserver-generation-retry\.v1/);
   assert.match(secondBody, /backendRetryAudit|retryAudit/);
 } finally {
   await new Promise<void>((resolve) => slimServer.close(() => resolve()));
@@ -329,7 +329,7 @@ assert.ok(rateLimitMatrixAddress && typeof rateLimitMatrixAddress === 'object');
 try {
   for (const backend of AGENT_BACKENDS) {
     activeRateLimitMatrixBackend = backend;
-    const matrixWorkspace = await mkdtemp(join(tmpdir(), `bioagent-agentserver-${backend}-rate-limit-matrix-`));
+    const matrixWorkspace = await mkdtemp(join(tmpdir(), `sciforge-agentserver-${backend}-rate-limit-matrix-`));
     const result = await runWorkspaceRuntimeGateway({
       skillDomain: 'knowledge',
       agentBackend: backend,
@@ -341,9 +341,9 @@ try {
         sessionId: `rate-limit-matrix-${backend}`,
         forceAgentServerGeneration: true,
         recentConversation: ['user: prior matrix context '.repeat(800), 'assistant: prior matrix answer '.repeat(800)],
-        recentExecutionRefs: [{ id: 'previous-run', outputRef: '.bioagent/task-results/previous.json' }],
+        recentExecutionRefs: [{ id: 'previous-run', outputRef: '.sciforge/task-results/previous.json' }],
       },
-      artifacts: [{ id: 'previous-graph', type: 'knowledge-graph', dataRef: '.bioagent/artifacts/previous-graph.json' }],
+      artifacts: [{ id: 'previous-graph', type: 'knowledge-graph', dataRef: '.sciforge/artifacts/previous-graph.json' }],
     });
 
     assert.equal(rateLimitMatrixRunsByBackend.get(backend), 2, `${backend} 429 recovery must stop after one compact retry`);
@@ -355,7 +355,7 @@ try {
     const refs = isRecord(unit.refs) ? unit.refs : {};
     assert.equal(refs.backend, backend);
     assert.ok(typeof refs.provider === 'string' && refs.provider.length > 0, `${backend} final 429 failure should include provider ref`);
-    assert.match(String(refs.sessionRef || ''), /\/api\/agent-server\/agents\/bioagent-knowledge-/);
+    assert.match(String(refs.sessionRef || ''), /\/api\/agent-server\/agents\/sciforge-knowledge-/);
     assert.equal(refs.retryAttempted, true);
     assert.equal(refs.retrySucceeded, false);
     if (backend === 'hermes-agent') {

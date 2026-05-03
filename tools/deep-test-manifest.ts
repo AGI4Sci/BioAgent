@@ -313,7 +313,7 @@ async function findScenarioDirectoriesMissingManifest(rootDir: string, manifests
 
 function renderMarkdownReport(entries: LoadedDeepManifest[], missingManifestDirectories: string[], generatedAt: string, rootDir: string, scenario?: string) {
   const lines = [
-    '# BioAgent Deep Test Report',
+    '# SciForge Deep Test Report',
     '',
     `Generated: ${generatedAt}`,
     scenario ? `Scenario filter: \`${scenario}\`` : 'Scenario filter: all',
@@ -406,7 +406,7 @@ function renderHtmlIndex(entries: LoadedDeepManifest[], missingManifestDirectori
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BioAgent Deep Test Artifacts</title>
+  <title>SciForge Deep Test Artifacts</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #070b12; color: #dbe7f5; }
     body { margin: 0; padding: 28px; }
@@ -427,7 +427,7 @@ function renderHtmlIndex(entries: LoadedDeepManifest[], missingManifestDirectori
 <body>
   <header>
     <div>
-      <h1>BioAgent Deep Test Artifacts</h1>
+      <h1>SciForge Deep Test Artifacts</h1>
       <p>${scenario ? `Filtered scenario: ${escapeHtml(scenario)}` : 'Deep scenario manifests, screenshots, quality scores, and failure records.'}</p>
       <p><a href="./deep-test-report.md">Markdown summary report</a></p>
     </div>

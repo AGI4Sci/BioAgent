@@ -9,7 +9,7 @@ export type ExecutionUnitStatus = 'planned' | 'running' | 'done' | 'failed' | 'r
 export type ObjectReferenceKind = 'artifact' | 'file' | 'folder' | 'run' | 'execution-unit' | 'url' | 'scenario-package';
 export type ObjectReferenceStatus = 'available' | 'missing' | 'expired' | 'blocked' | 'external';
 export type ObjectAction = 'focus-right-pane' | 'inspect' | 'open-external' | 'reveal-in-folder' | 'copy-path' | 'pin' | 'compare';
-export type BioAgentReferenceKind = 'file' | 'file-region' | 'message' | 'task-result' | 'chart' | 'table' | 'table-range' | 'structure-selection' | 'ui';
+export type SciForgeReferenceKind = 'file' | 'file-region' | 'message' | 'task-result' | 'chart' | 'table' | 'table-range' | 'structure-selection' | 'ui';
 export type PreviewDescriptorKind = 'pdf' | 'image' | 'markdown' | 'text' | 'json' | 'table' | 'html' | 'structure' | 'office' | 'folder' | 'binary';
 export type PreviewDescriptorSource = 'path' | 'dataRef' | 'artifact' | 'url';
 export type PreviewInlinePolicy = 'inline' | 'stream' | 'thumbnail' | 'extract' | 'external' | 'unsupported';
@@ -43,9 +43,9 @@ export interface PreviewDescriptor {
   locatorHints?: Array<'page' | 'region' | 'row-range' | 'column-range' | 'structure-selection' | 'text-range'>;
 }
 
-export interface BioAgentReference {
+export interface SciForgeReference {
   id: string;
-  kind: BioAgentReferenceKind;
+  kind: SciForgeReferenceKind;
   title: string;
   ref: string;
   summary?: string;
@@ -149,7 +149,7 @@ export interface TurnAcceptance {
   }>;
 }
 
-export interface BioAgentMessage {
+export interface SciForgeMessage {
   id: string;
   role: MessageRole;
   content: string;
@@ -161,7 +161,7 @@ export interface BioAgentMessage {
   updatedAt?: string;
   status?: RunStatus;
   tokenUsage?: AgentTokenUsage;
-  references?: BioAgentReference[];
+  references?: SciForgeReference[];
   objectReferences?: ObjectReference[];
   goalSnapshot?: UserGoalSnapshot;
   acceptance?: TurnAcceptance;
@@ -175,7 +175,7 @@ export interface SessionVersionRecord {
   runCount: number;
   artifactCount: number;
   checksum: string;
-  snapshot: Omit<BioAgentSession, 'versions'>;
+  snapshot: Omit<SciForgeSession, 'versions'>;
 }
 
 export interface EvidenceClaim {
@@ -471,7 +471,7 @@ export interface NotebookRecord {
   updateReason?: string;
 }
 
-export interface BioAgentRun {
+export interface SciForgeRun {
   id: string;
   scenarioId: ScenarioInstanceId;
   scenarioPackageRef?: ScenarioPackageRef;
@@ -483,20 +483,20 @@ export interface BioAgentRun {
   createdAt: string;
   completedAt?: string;
   raw?: unknown;
-  references?: BioAgentReference[];
+  references?: SciForgeReference[];
   objectReferences?: ObjectReference[];
   goalSnapshot?: UserGoalSnapshot;
   acceptance?: TurnAcceptance;
 }
 
-export interface BioAgentSession {
+export interface SciForgeSession {
   schemaVersion: 2;
   sessionId: string;
   scenarioId: ScenarioInstanceId;
   title: string;
   createdAt: string;
-  messages: BioAgentMessage[];
-  runs: BioAgentRun[];
+  messages: SciForgeMessage[];
+  runs: SciForgeRun[];
   uiManifest: UIManifestSlot[];
   claims: EvidenceClaim[];
   executionUnits: RuntimeExecutionUnit[];
@@ -506,11 +506,11 @@ export interface BioAgentSession {
   updatedAt: string;
 }
 
-export interface BioAgentWorkspaceState {
+export interface SciForgeWorkspaceState {
   schemaVersion: 2;
   workspacePath: string;
-  sessionsByScenario: Record<ScenarioInstanceId, BioAgentSession>;
-  archivedSessions: BioAgentSession[];
+  sessionsByScenario: Record<ScenarioInstanceId, SciForgeSession>;
+  archivedSessions: SciForgeSession[];
   alignmentContracts: AlignmentContractRecord[];
   feedbackComments?: FeedbackCommentRecord[];
   feedbackRequests?: FeedbackRequestRecord[];
@@ -630,7 +630,7 @@ export interface AlignmentContractRecord {
   };
 }
 
-export interface BioAgentConfig {
+export interface SciForgeConfig {
   schemaVersion: 1;
   agentServerBaseUrl: string;
   workspaceWriterBaseUrl: string;
@@ -652,13 +652,13 @@ export interface SendAgentMessageInput {
   agentName: string;
   agentDomain: string;
   prompt: string;
-  references?: BioAgentReference[];
+  references?: SciForgeReference[];
   roleView: string;
-  messages: BioAgentMessage[];
+  messages: SciForgeMessage[];
   artifacts?: RuntimeArtifact[];
   executionUnits?: RuntimeExecutionUnit[];
-  runs?: BioAgentRun[];
-  config: BioAgentConfig;
+  runs?: SciForgeRun[];
+  config: SciForgeConfig;
   scenarioOverride?: ScenarioRuntimeOverride;
   availableComponentIds?: string[];
   scenarioPackageRef?: ScenarioPackageRef;
@@ -686,8 +686,8 @@ export interface ScenarioRuntimeOverride {
 }
 
 export interface NormalizedAgentResponse {
-  message: BioAgentMessage;
-  run: BioAgentRun;
+  message: SciForgeMessage;
+  run: SciForgeRun;
   uiManifest: UIManifestSlot[];
   claims: EvidenceClaim[];
   executionUnits: RuntimeExecutionUnit[];

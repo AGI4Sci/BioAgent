@@ -5,11 +5,11 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { runBioAgentTool } from './bioagent-tools.js';
+import { runSciForgeTool } from './sciforge-tools.js';
 import { readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
 import { acceptSkillPromotionProposal, archiveSkillPromotionProposal, listSkillPromotionProposals, rejectSkillPromotionProposal, runAcceptedSkillValidationSmoke } from './skill-promotion.js';
 
-const PORT = Number(process.env.BIOAGENT_WORKSPACE_PORT || 5174);
+const PORT = Number(process.env.SCIFORGE_WORKSPACE_PORT || 5174);
 
 createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,30 +21,30 @@ createServer(async (req, res) => {
     return;
   }
   if (req.url === '/health') {
-    writeJson(res, 200, { ok: true, service: 'bioagent-workspace-writer' });
+    writeJson(res, 200, { ok: true, service: 'sciforge-workspace-writer' });
     return;
   }
   const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
-  if (url.pathname === '/api/bioagent/config' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/config' && req.method === 'GET') {
     try {
-      writeJson(res, 200, { ok: true, config: await readLocalBioAgentConfig() });
+      writeJson(res, 200, { ok: true, config: await readLocalSciForgeConfig() });
     } catch (err) {
       writeJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/config' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/config' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const config = isRecord(body.config) ? body.config : {};
-      await writeLocalBioAgentConfig(config);
-      writeJson(res, 200, { ok: true, config: await readLocalBioAgentConfig() });
+      await writeLocalSciForgeConfig(config);
+      writeJson(res, 200, { ok: true, config: await readLocalSciForgeConfig() });
     } catch (err) {
       writeJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/list' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/workspace/list' && req.method === 'GET') {
     try {
       const root = resolve(url.searchParams.get('path') || process.cwd());
       const entries = await readdir(root, { withFileTypes: true });
@@ -71,7 +71,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/file' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/workspace/file' && req.method === 'GET') {
     try {
       const filePath = resolveWorkspaceFilePreviewPath(
         url.searchParams.get('path') || '',
@@ -106,7 +106,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/preview/raw' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/preview/raw' && req.method === 'GET') {
     try {
       const filePath = resolveWorkspacePreviewRef(
         url.searchParams.get('ref') || url.searchParams.get('path') || '',
@@ -120,7 +120,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/preview/descriptor' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/preview/descriptor' && req.method === 'GET') {
     try {
       const ref = url.searchParams.get('ref') || url.searchParams.get('path') || '';
       const workspacePath = url.searchParams.get('workspacePath') || '';
@@ -131,7 +131,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/preview/derivative' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/preview/derivative' && req.method === 'GET') {
     try {
       const ref = url.searchParams.get('ref') || '';
       const workspacePath = url.searchParams.get('workspacePath') || '';
@@ -143,7 +143,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/file' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/workspace/file' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const filePath = typeof body.path === 'string' ? resolve(body.path) : '';
@@ -175,11 +175,11 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/snapshot' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/workspace/snapshot' && req.method === 'GET') {
     try {
       const requestedPath = url.searchParams.get('path')?.trim() || '';
       const root = requestedPath ? resolve(requestedPath) : await readLastWorkspacePath();
-      const state = JSON.parse(await readFile(join(root, '.bioagent', 'workspace-state.json'), 'utf8'));
+      const state = JSON.parse(await readFile(join(root, '.sciforge', 'workspace-state.json'), 'utf8'));
       writeJson(res, 200, { ok: true, workspacePath: root, state });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -188,7 +188,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/file-action' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/workspace/file-action' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const action = typeof body.action === 'string' ? body.action : '';
@@ -214,7 +214,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/open' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/workspace/open' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const workspacePath = normalizeWorkspaceRootPath(typeof body.workspacePath === 'string' ? resolve(body.workspacePath) : await readLastWorkspacePath());
@@ -225,7 +225,7 @@ createServer(async (req, res) => {
         throw new Error(`Unsupported workspace open action: ${action}`);
       }
       if (action === 'open-external') assertCanOpenExternal(targetPath, info.isDirectory());
-      const dryRun = process.env.BIOAGENT_WORKSPACE_OPEN_DRY_RUN === '1';
+      const dryRun = process.env.SCIFORGE_WORKSPACE_OPEN_DRY_RUN === '1';
       if (!dryRun && action !== 'copy-path') {
         const args = action === 'reveal-in-folder'
           ? info.isDirectory() ? [targetPath] : ['-R', targetPath]
@@ -245,10 +245,10 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/list' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/scenarios/list' && req.method === 'GET') {
     try {
       const root = scenarioWorkspaceRoot(url);
-      const scenariosDir = join(root, '.bioagent', 'scenarios');
+      const scenariosDir = join(root, '.sciforge', 'scenarios');
       const entries = await readdir(scenariosDir, { withFileTypes: true }).catch(() => []);
       const scenarios = [];
       for (const entry of entries.filter((item) => item.isDirectory())) {
@@ -265,10 +265,10 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/library' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/scenarios/library' && req.method === 'GET') {
     try {
       const root = scenarioWorkspaceRoot(url);
-      const scenariosDir = join(root, '.bioagent', 'scenarios');
+      const scenariosDir = join(root, '.sciforge', 'scenarios');
       const entries = await readdir(scenariosDir, { withFileTypes: true }).catch(() => []);
       const packages = [];
       for (const entry of entries.filter((item) => item.isDirectory())) {
@@ -288,12 +288,12 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/get' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/scenarios/get' && req.method === 'GET') {
     try {
       const root = scenarioWorkspaceRoot(url);
       const id = url.searchParams.get('id')?.trim() || '';
       if (!id) throw new Error('id is required');
-      const pkg = await readScenarioPackageFromDir(join(root, '.bioagent', 'scenarios', safeName(id)));
+      const pkg = await readScenarioPackageFromDir(join(root, '.sciforge', 'scenarios', safeName(id)));
       writeJson(res, 200, { ok: true, workspacePath: root, package: pkg });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -301,7 +301,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/save' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/scenarios/save' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
@@ -314,13 +314,13 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/publish' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/scenarios/publish' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
       const pkg = isRecord(body.package)
         ? body.package
-        : await readScenarioPackageFromDir(join(root, '.bioagent', 'scenarios', safeName(String(body.id || ''))));
+        : await readScenarioPackageFromDir(join(root, '.sciforge', 'scenarios', safeName(String(body.id || ''))));
       const blockingReason = scenarioPublishBlockingReason(pkg);
       if (blockingReason) throw new Error(blockingReason);
       await writeScenarioPackage(root, pkg, 'published');
@@ -330,13 +330,13 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/archive' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/scenarios/archive' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
       const id = typeof body.id === 'string' ? body.id.trim() : '';
       if (!id) throw new Error('id is required');
-      const pkg = await readScenarioPackageFromDir(join(root, '.bioagent', 'scenarios', safeName(id)));
+      const pkg = await readScenarioPackageFromDir(join(root, '.sciforge', 'scenarios', safeName(id)));
       await writeScenarioPackage(root, pkg, 'archived');
       writeJson(res, 200, { ok: true, workspacePath: root, scenario: scenarioListItem({ ...pkg, status: 'archived' }) });
     } catch (err) {
@@ -344,14 +344,14 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/restore' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/scenarios/restore' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
       const id = typeof body.id === 'string' ? body.id.trim() : '';
       const status = typeof body.status === 'string' && ['draft', 'validated', 'published'].includes(body.status) ? body.status : 'draft';
       if (!id) throw new Error('id is required');
-      const pkg = await readScenarioPackageFromDir(join(root, '.bioagent', 'scenarios', safeName(id)));
+      const pkg = await readScenarioPackageFromDir(join(root, '.sciforge', 'scenarios', safeName(id)));
       await writeScenarioPackage(root, pkg, status);
       writeJson(res, 200, { ok: true, workspacePath: root, scenario: scenarioListItem({ ...pkg, status }) });
     } catch (err) {
@@ -359,20 +359,20 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/scenarios/delete' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/scenarios/delete' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
       const id = typeof body.id === 'string' ? body.id.trim() : '';
       if (!id) throw new Error('id is required');
-      await rm(join(root, '.bioagent', 'scenarios', safeName(id)), { recursive: true, force: true });
+      await rm(join(root, '.sciforge', 'scenarios', safeName(id)), { recursive: true, force: true });
       writeJson(res, 200, { ok: true, workspacePath: root, id });
     } catch (err) {
       writeJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/task-attempts/list' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/task-attempts/list' && req.method === 'GET') {
     try {
       const root = scenarioWorkspaceRoot(url);
       const skillDomain = url.searchParams.get('skillDomain')?.trim() || undefined;
@@ -391,7 +391,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/task-attempts/get' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/task-attempts/get' && req.method === 'GET') {
     try {
       const root = scenarioWorkspaceRoot(url);
       const id = url.searchParams.get('id')?.trim() || '';
@@ -407,7 +407,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/skill-proposals/list' && req.method === 'GET') {
+  if (url.pathname === '/api/sciforge/skill-proposals/list' && req.method === 'GET') {
     try {
       const root = scenarioWorkspaceRoot(url);
       writeJson(res, 200, {
@@ -415,9 +415,9 @@ createServer(async (req, res) => {
         workspacePath: root,
         proposals: await listSkillPromotionProposals(root),
         isolation: {
-          proposals: '.bioagent/skill-proposals',
-          acceptedEvolvedSkills: '.bioagent/evolved-skills',
-          stableSkillRoots: ['packages/skills', '.bioagent/evolved-skills'],
+          proposals: '.sciforge/skill-proposals',
+          acceptedEvolvedSkills: '.sciforge/evolved-skills',
+          stableSkillRoots: ['packages/skills', '.sciforge/evolved-skills'],
         },
       });
     } catch (err) {
@@ -425,7 +425,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/skill-proposals/accept' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/skill-proposals/accept' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
@@ -436,14 +436,14 @@ createServer(async (req, res) => {
         ok: true,
         workspacePath: root,
         manifest,
-        installedRoot: '.bioagent/evolved-skills',
+        installedRoot: '.sciforge/evolved-skills',
       });
     } catch (err) {
       writeJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/skill-proposals/validate' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/skill-proposals/validate' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
@@ -460,7 +460,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/skill-proposals/reject' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/skill-proposals/reject' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
@@ -477,7 +477,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/skill-proposals/archive' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/skill-proposals/archive' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const root = scenarioWorkspaceRootFromBody(body);
@@ -494,7 +494,7 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/workspace/snapshot' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/workspace/snapshot' && req.method === 'POST') {
     try {
       const body = await readJson(req);
       const workspacePath = typeof body.workspacePath === 'string' ? body.workspacePath.trim() : '';
@@ -502,12 +502,12 @@ createServer(async (req, res) => {
       const state = isRecord(body.state) ? body.state : {};
       const config = isRecord(body.config) ? body.config : {};
       const root = normalizeWorkspaceRootPath(resolve(workspacePath));
-      const bioagentDir = join(root, '.bioagent');
-      await mkdir(join(bioagentDir, 'sessions'), { recursive: true });
-      await mkdir(join(bioagentDir, 'artifacts'), { recursive: true });
-      await mkdir(join(bioagentDir, 'versions'), { recursive: true });
-      await writeFile(join(bioagentDir, 'workspace-state.json'), JSON.stringify(state, null, 2));
-      await writeFile(join(bioagentDir, 'config.json'), JSON.stringify(redactConfigForFile(config), null, 2));
+      const sciforgeDir = join(root, '.sciforge');
+      await mkdir(join(sciforgeDir, 'sessions'), { recursive: true });
+      await mkdir(join(sciforgeDir, 'artifacts'), { recursive: true });
+      await mkdir(join(sciforgeDir, 'versions'), { recursive: true });
+      await writeFile(join(sciforgeDir, 'workspace-state.json'), JSON.stringify(state, null, 2));
+      await writeFile(join(sciforgeDir, 'config.json'), JSON.stringify(redactConfigForFile(config), null, 2));
       await rememberWorkspace(root, state);
 
       const sessions = isRecord(state.sessionsByScenario)
@@ -515,23 +515,23 @@ createServer(async (req, res) => {
         : [];
       for (const session of sessions as Array<Record<string, unknown>>) {
         const sessionId = safeName(String(session.sessionId || 'session'));
-        await writeFile(join(bioagentDir, 'sessions', `${sessionId}.json`), JSON.stringify(session, null, 2));
+        await writeFile(join(sciforgeDir, 'sessions', `${sessionId}.json`), JSON.stringify(session, null, 2));
         const artifacts = Array.isArray(session.artifacts) ? session.artifacts : [];
         for (const artifact of artifacts as Array<Record<string, unknown>>) {
           const artifactId = safeName(String(artifact.id || artifact.type || 'artifact'));
-          await writeFile(join(bioagentDir, 'artifacts', `${sessionId}-${artifactId}.json`), JSON.stringify(artifact, null, 2));
+          await writeFile(join(sciforgeDir, 'artifacts', `${sessionId}-${artifactId}.json`), JSON.stringify(artifact, null, 2));
         }
         const versions = Array.isArray(session.versions) ? session.versions : [];
         for (const version of versions as Array<Record<string, unknown>>) {
           const versionId = safeName(String(version.id || 'version'));
-          await writeFile(join(bioagentDir, 'versions', `${sessionId}-${versionId}.json`), JSON.stringify(version, null, 2));
+          await writeFile(join(sciforgeDir, 'versions', `${sessionId}-${versionId}.json`), JSON.stringify(version, null, 2));
         }
       }
       const alignmentContracts = Array.isArray(state.alignmentContracts) ? state.alignmentContracts : [];
       for (const contract of alignmentContracts as Array<Record<string, unknown>>) {
         const contractId = safeName(String(contract.id || 'alignment-contract'));
-        await writeFile(join(bioagentDir, 'artifacts', `${contractId}.json`), JSON.stringify(contract, null, 2));
-        await writeFile(join(bioagentDir, 'versions', `${contractId}.json`), JSON.stringify({
+        await writeFile(join(sciforgeDir, 'artifacts', `${contractId}.json`), JSON.stringify(contract, null, 2));
+        await writeFile(join(sciforgeDir, 'versions', `${contractId}.json`), JSON.stringify({
           id: contractId,
           type: 'alignment-contract-version',
           createdAt: contract.updatedAt,
@@ -546,17 +546,17 @@ createServer(async (req, res) => {
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/tools/run' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/tools/run' && req.method === 'POST') {
     try {
       const body = await readJson(req);
-      const result = await runBioAgentTool(body);
+      const result = await runSciForgeTool(body);
       writeJson(res, 200, { ok: true, result });
     } catch (err) {
       writeJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
-  if (url.pathname === '/api/bioagent/tools/run/stream' && req.method === 'POST') {
+  if (url.pathname === '/api/sciforge/tools/run/stream' && req.method === 'POST') {
     const controller = new AbortController();
     let completed = false;
     res.on('close', () => {
@@ -569,7 +569,7 @@ createServer(async (req, res) => {
     });
     try {
       const body = await readJson(req);
-      const result = await runBioAgentTool(body, {
+      const result = await runSciForgeTool(body, {
         signal: controller.signal,
         onEvent(event) {
           writeStreamEnvelope(res, { event });
@@ -586,7 +586,7 @@ createServer(async (req, res) => {
   }
   writeJson(res, 404, { ok: false, error: 'not found' });
 }).listen(PORT, '127.0.0.1', () => {
-  console.log(`BioAgent workspace writer: http://127.0.0.1:${PORT}`);
+  console.log(`SciForge workspace writer: http://127.0.0.1:${PORT}`);
 });
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -661,7 +661,7 @@ async function previewDescriptorForRef(rawRef: string, workspacePath: string, ba
   const kind = previewKindForPath(filePath, info.isDirectory());
   const mimeType = info.isDirectory() ? 'inode/directory' : mimeTypeForPath(filePath);
   const hash = info.isFile() ? await fileHash(filePath, info.size) : undefined;
-  const rawUrl = new URL(`${baseUrl}/api/bioagent/preview/raw`);
+  const rawUrl = new URL(`${baseUrl}/api/sciforge/preview/raw`);
   rawUrl.searchParams.set('ref', filePath);
   if (workspacePath.trim()) rawUrl.searchParams.set('workspacePath', workspacePath.trim());
   return {
@@ -687,7 +687,7 @@ async function previewDerivativeForRef(rawRef: string, workspacePath: string, ki
   const filePath = resolveWorkspacePreviewRef(rawRef, workspacePath);
   const info = await stat(filePath);
   const previewKind = previewKindForPath(filePath, info.isDirectory());
-  const cacheDir = join(workspacePath.trim() ? normalizeWorkspaceRootPath(resolve(workspacePath)) : dirname(filePath), '.bioagent', 'preview-cache');
+  const cacheDir = join(workspacePath.trim() ? normalizeWorkspaceRootPath(resolve(workspacePath)) : dirname(filePath), '.sciforge', 'preview-cache');
   await mkdir(cacheDir, { recursive: true });
   const cacheKey = createHash('sha256').update(JSON.stringify({ filePath, mtime: info.mtimeMs, size: info.size, kind })).digest('hex').slice(0, 24);
   const outPath = join(cacheDir, `${cacheKey}.${derivativeExtension(kind, previewKind, filePath)}`);
@@ -962,7 +962,7 @@ async function writeScenarioPackage(root: string, pkg: Record<string, unknown>, 
   const id = typeof pkg.id === 'string' && pkg.id.trim() ? pkg.id : isRecord(pkg.scenario) && typeof pkg.scenario.id === 'string' ? pkg.scenario.id : '';
   if (!id) throw new Error('package.id is required');
   const version = typeof pkg.version === 'string' && pkg.version.trim() ? pkg.version : '1.0.0';
-  const scenarioDir = join(root, '.bioagent', 'scenarios', safeName(id));
+  const scenarioDir = join(root, '.sciforge', 'scenarios', safeName(id));
   await mkdir(scenarioDir, { recursive: true });
   const nextPackage: Record<string, unknown> = { ...pkg, id, version, status };
   const scenario = isRecord(nextPackage.scenario) ? { ...nextPackage.scenario } : {};
@@ -1131,7 +1131,7 @@ async function readLastWorkspacePath() {
 
 async function rememberWorkspace(workspacePath: string, state: Record<string, unknown>) {
   workspacePath = normalizeWorkspaceRootPath(workspacePath);
-  const appBioagentDir = join(process.cwd(), '.bioagent');
+  const appBioagentDir = join(process.cwd(), '.sciforge');
   await mkdir(appBioagentDir, { recursive: true });
   const score = workspaceActivityScore(state);
   const updatedAt = new Date().toISOString();
@@ -1207,11 +1207,11 @@ function workspaceActivityScore(state: Record<string, unknown>): number {
 }
 
 function lastWorkspaceFile() {
-  return join(process.cwd(), '.bioagent', 'last-workspace.json');
+  return join(process.cwd(), '.sciforge', 'last-workspace.json');
 }
 
 function workspaceHistoryFile() {
-  return join(process.cwd(), '.bioagent', 'workspace-history.json');
+  return join(process.cwd(), '.sciforge', 'workspace-history.json');
 }
 
 function resolveWorkspaceOpenPath(workspacePath: string, rawPath: string) {
@@ -1285,29 +1285,29 @@ function redactConfigForFile(config: Record<string, unknown>) {
   };
 }
 
-async function readLocalBioAgentConfig() {
+async function readLocalSciForgeConfig() {
   const parsed = await readConfigLocalJson();
   const llm = isRecord(parsed.llm) ? parsed.llm : {};
-  const bioagent = isRecord(parsed.bioagent) ? parsed.bioagent : {};
+  const sciforge = isRecord(parsed.sciforge) ? parsed.sciforge : {};
   return {
     schemaVersion: 1,
-    agentServerBaseUrl: typeof bioagent.agentServerBaseUrl === 'string' ? bioagent.agentServerBaseUrl : 'http://127.0.0.1:18080',
-    workspaceWriterBaseUrl: typeof bioagent.workspaceWriterBaseUrl === 'string' ? bioagent.workspaceWriterBaseUrl : `http://127.0.0.1:${PORT}`,
-    workspacePath: normalizeWorkspaceRootPath(typeof bioagent.workspacePath === 'string' ? bioagent.workspacePath : join(process.cwd(), 'workspace')),
+    agentServerBaseUrl: typeof sciforge.agentServerBaseUrl === 'string' ? sciforge.agentServerBaseUrl : 'http://127.0.0.1:18080',
+    workspaceWriterBaseUrl: typeof sciforge.workspaceWriterBaseUrl === 'string' ? sciforge.workspaceWriterBaseUrl : `http://127.0.0.1:${PORT}`,
+    workspacePath: normalizeWorkspaceRootPath(typeof sciforge.workspacePath === 'string' ? sciforge.workspacePath : join(process.cwd(), 'workspace')),
     modelProvider: typeof llm.provider === 'string' ? llm.provider : 'native',
     modelBaseUrl: typeof llm.baseUrl === 'string' ? llm.baseUrl.replace(/\/+$/, '') : '',
     modelName: typeof llm.model === 'string' ? llm.model : typeof llm.modelName === 'string' ? llm.modelName : '',
     apiKey: typeof llm.apiKey === 'string' ? llm.apiKey : '',
-    requestTimeoutMs: typeof bioagent.requestTimeoutMs === 'number' ? bioagent.requestTimeoutMs : 900000,
-    updatedAt: typeof bioagent.updatedAt === 'string' ? bioagent.updatedAt : new Date().toISOString(),
+    requestTimeoutMs: typeof sciforge.requestTimeoutMs === 'number' ? sciforge.requestTimeoutMs : 900000,
+    updatedAt: typeof sciforge.updatedAt === 'string' ? sciforge.updatedAt : new Date().toISOString(),
     source: 'config.local.json',
   };
 }
 
-async function writeLocalBioAgentConfig(config: Record<string, unknown>) {
+async function writeLocalSciForgeConfig(config: Record<string, unknown>) {
   const parsed = await readConfigLocalJson();
   const llm = isRecord(parsed.llm) ? parsed.llm : {};
-  const bioagent = isRecord(parsed.bioagent) ? parsed.bioagent : {};
+  const sciforge = isRecord(parsed.sciforge) ? parsed.sciforge : {};
   const next = {
     ...parsed,
     llm: {
@@ -1317,12 +1317,12 @@ async function writeLocalBioAgentConfig(config: Record<string, unknown>) {
       apiKey: preserveConfiguredSecretString(config.apiKey, llm.apiKey),
       model: preserveConfiguredSecretString(config.modelName, llm.model),
     },
-    bioagent: {
-      ...bioagent,
-      agentServerBaseUrl: typeof config.agentServerBaseUrl === 'string' ? config.agentServerBaseUrl : bioagent.agentServerBaseUrl,
-      workspaceWriterBaseUrl: typeof config.workspaceWriterBaseUrl === 'string' ? config.workspaceWriterBaseUrl : bioagent.workspaceWriterBaseUrl,
-      workspacePath: normalizeWorkspaceRootPath(typeof config.workspacePath === 'string' ? config.workspacePath : typeof bioagent.workspacePath === 'string' ? bioagent.workspacePath : ''),
-      requestTimeoutMs: typeof config.requestTimeoutMs === 'number' ? config.requestTimeoutMs : bioagent.requestTimeoutMs,
+    sciforge: {
+      ...sciforge,
+      agentServerBaseUrl: typeof config.agentServerBaseUrl === 'string' ? config.agentServerBaseUrl : sciforge.agentServerBaseUrl,
+      workspaceWriterBaseUrl: typeof config.workspaceWriterBaseUrl === 'string' ? config.workspaceWriterBaseUrl : sciforge.workspaceWriterBaseUrl,
+      workspacePath: normalizeWorkspaceRootPath(typeof config.workspacePath === 'string' ? config.workspacePath : typeof sciforge.workspacePath === 'string' ? sciforge.workspacePath : ''),
+      requestTimeoutMs: typeof config.requestTimeoutMs === 'number' ? config.requestTimeoutMs : sciforge.requestTimeoutMs,
       updatedAt: new Date().toISOString(),
     },
   };
@@ -1353,9 +1353,9 @@ function configLocalPath() {
 function normalizeWorkspaceRootPath(value: string) {
   const trimmed = value.trim().replace(/\/+$/, '');
   if (!trimmed) return '';
-  const marker = '/.bioagent/';
+  const marker = '/.sciforge/';
   const nestedIndex = trimmed.indexOf(marker);
   if (nestedIndex >= 0) return trimmed.slice(0, nestedIndex);
-  if (trimmed.endsWith('/.bioagent')) return trimmed.slice(0, -'/.bioagent'.length);
+  if (trimmed.endsWith('/.sciforge')) return trimmed.slice(0, -'/.sciforge'.length);
   return trimmed;
 }

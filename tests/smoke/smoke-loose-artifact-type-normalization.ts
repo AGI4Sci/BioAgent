@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-loose-artifact-type-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-loose-artifact-type-'));
 
 const taskCode = String.raw`
 import json
@@ -47,8 +47,8 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: '.bioagent/tasks/loose_artifact_type.py', language: 'python', content: taskCode }],
-            entrypoint: { language: 'python', path: '.bioagent/tasks/loose_artifact_type.py' },
+            taskFiles: [{ path: '.sciforge/tasks/loose_artifact_type.py', language: 'python', content: taskCode }],
+            entrypoint: { language: 'python', path: '.sciforge/tasks/loose_artifact_type.py' },
             expectedArtifacts: ['paper-list', 'research-report'],
             patchSummary: 'Generated loose artifactType normalization smoke task.',
           },

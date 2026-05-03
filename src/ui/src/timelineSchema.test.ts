@@ -12,7 +12,7 @@ test('timeline event schema covers package, run, artifact, handoff, failure, and
 test('timeline event validator rejects loose records without supported action prefix', () => {
   const valid = {
     id: 'timeline-test',
-    actor: 'BioAgent Test',
+    actor: 'SciForge Test',
     action: 'package.publish',
     subject: 'test-package@1.0.0',
     artifactRefs: [],

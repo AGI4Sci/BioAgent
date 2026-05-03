@@ -10,7 +10,7 @@
   "rounds": [
     {
       "round": 1,
-      "prompt": "生成候选分析 A：围绕 BioAgent 引用交互可靠性做证据表和短报告。",
+      "prompt": "生成候选分析 A：围绕 SciForge 引用交互可靠性做证据表和短报告。",
       "referenceOps": [],
       "expectedArtifacts": ["candidate-report-a", "candidate-table-a"],
       "acceptanceChecks": ["report/table refs are produced"]

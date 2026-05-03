@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/unknown-artifact-inspector',
+  packageName: '@sciforge-ui/unknown-artifact-inspector',
   moduleId: 'generic-artifact-inspector',
   version: '1.0.0',
   title: 'Artifact inspector',

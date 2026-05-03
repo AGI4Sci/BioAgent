@@ -14,7 +14,7 @@ import {
   type ScenarioPackage,
 } from '../../../../packages/scenario-core';
 import { saveWorkspaceScenario, publishWorkspaceScenario } from '../api/workspaceClient';
-import type { BioAgentConfig, ScenarioRuntimeOverride } from '../domain';
+import type { SciForgeConfig, ScenarioRuntimeOverride } from '../domain';
 import type { RuntimeHealthItem } from '../runtimeHealth';
 import { exportJsonFile } from './exportUtils';
 import { ActionButton, Badge, cx } from './uiPrimitives';
@@ -30,7 +30,7 @@ export function ScenarioBuilderPanel({
 }: {
   scenarioId: ScenarioId;
   scenario: ScenarioRuntimeOverride;
-  config: BioAgentConfig;
+  config: SciForgeConfig;
   runtimeHealth: RuntimeHealthItem[];
   expanded: boolean;
   onToggle: () => void;

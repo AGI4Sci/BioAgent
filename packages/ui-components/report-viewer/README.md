@@ -1,4 +1,4 @@
-# @bioagent-ui/report-viewer
+# @sciforge-ui/report-viewer
 
 ## Agent quick contract
 - componentId: `report-viewer`

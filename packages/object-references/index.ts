@@ -1,9 +1,9 @@
 import type {
-  BioAgentMessage,
-  BioAgentReference,
-  BioAgentReferenceKind,
-  BioAgentRun,
-  BioAgentSession,
+  SciForgeMessage,
+  SciForgeReference,
+  SciForgeReferenceKind,
+  SciForgeRun,
+  SciForgeSession,
   ObjectAction,
   ObjectReference,
   PreviewDescriptor,
@@ -21,7 +21,7 @@ export interface WorkspaceFileReferenceLike {
 }
 
 export interface TextSelectionReferenceInput {
-  sourceReference: BioAgentReference;
+  sourceReference: SciForgeReference;
   selectedText: string;
 }
 
@@ -66,7 +66,7 @@ export function normalizeArtifactRef(ref: string) {
   return ref.replace(/^artifact:\/\//i, '').replace(/^artifact:/i, '');
 }
 
-export function findArtifact(session: Pick<BioAgentSession, 'artifacts'>, ref?: string): RuntimeArtifact | undefined {
+export function findArtifact(session: Pick<SciForgeSession, 'artifacts'>, ref?: string): RuntimeArtifact | undefined {
   if (!ref) return undefined;
   const normalizedRef = normalizeArtifactRef(ref);
   return session.artifacts.find((artifact) => artifact.id === ref
@@ -78,14 +78,14 @@ export function findArtifact(session: Pick<BioAgentSession, 'artifacts'>, ref?: 
     || Object.values(artifact.metadata ?? {}).some((value) => value === ref));
 }
 
-export function artifactForObjectReference(reference: ObjectReference, session: Pick<BioAgentSession, 'artifacts'>): RuntimeArtifact | undefined {
+export function artifactForObjectReference(reference: ObjectReference, session: Pick<SciForgeSession, 'artifacts'>): RuntimeArtifact | undefined {
   if (reference.kind !== 'artifact') return undefined;
   return findArtifact(session, reference.ref)
     ?? findArtifact(session, reference.artifactType)
     ?? session.artifacts.find((artifact) => artifact.id === reference.id || artifact.type === reference.artifactType);
 }
 
-export function pathForObjectReference(reference: ObjectReference, session: Pick<BioAgentSession, 'artifacts'>): string | undefined {
+export function pathForObjectReference(reference: ObjectReference, session: Pick<SciForgeSession, 'artifacts'>): string | undefined {
   const artifact = artifactForObjectReference(reference, session);
   const artifactDataRef = asString(artifact?.dataRef);
   if (artifact) {
@@ -142,7 +142,7 @@ export function artifactTypeForPath(path: string, kind: ObjectReference['kind'])
   return 'workspace-file';
 }
 
-export function referenceToPreviewTarget(reference: ObjectReference, session: Pick<BioAgentSession, 'artifacts'>) {
+export function referenceToPreviewTarget(reference: ObjectReference, session: Pick<SciForgeSession, 'artifacts'>) {
   const artifact = artifactForObjectReference(reference, session);
   const path = pathForObjectReference(reference, session);
   return {
@@ -186,7 +186,7 @@ export function objectReferenceChipModel(references: ObjectReference[], expanded
   };
 }
 
-export function referenceForUploadedArtifact(artifact: RuntimeArtifact): BioAgentReference {
+export function referenceForUploadedArtifact(artifact: RuntimeArtifact): SciForgeReference {
   const title = String(artifact.metadata?.title ?? artifact.id);
   return {
     id: `ref-upload-${artifact.id}`,
@@ -242,7 +242,7 @@ export function objectReferenceForArtifactSummary(artifact: RuntimeArtifact, run
   };
 }
 
-export function referenceForArtifact(artifact: RuntimeArtifact, kind: BioAgentReferenceKind = 'file-region'): BioAgentReference {
+export function referenceForArtifact(artifact: RuntimeArtifact, kind: SciForgeReferenceKind = 'file-region'): SciForgeReference {
   const title = titleForArtifact(artifact).slice(0, 52);
   return {
     id: `ref-${kind}-${artifact.id}`,
@@ -264,7 +264,7 @@ export function referenceForArtifact(artifact: RuntimeArtifact, kind: BioAgentRe
   };
 }
 
-export function referenceForMessage(message: BioAgentMessage, runId?: string): BioAgentReference {
+export function referenceForMessage(message: SciForgeMessage, runId?: string): SciForgeReference {
   return {
     id: `ref-message-${message.id}`,
     kind: 'message',
@@ -283,7 +283,7 @@ export function referenceForMessage(message: BioAgentMessage, runId?: string): B
   };
 }
 
-export function referenceForRun(run: BioAgentRun): BioAgentReference {
+export function referenceForRun(run: SciForgeRun): SciForgeReference {
   return {
     id: `ref-run-${run.id}`,
     kind: 'task-result',
@@ -302,8 +302,8 @@ export function referenceForRun(run: BioAgentRun): BioAgentReference {
   };
 }
 
-export function referenceForObjectReference(reference: ObjectReference, kind?: BioAgentReferenceKind): BioAgentReference {
-  const resolvedKind = kind ?? bioAgentKindForObjectReference(reference);
+export function referenceForObjectReference(reference: ObjectReference, kind?: SciForgeReferenceKind): SciForgeReference {
+  const resolvedKind = kind ?? sciForgeKindForObjectReference(reference);
   return {
     id: `ref-${kind ?? 'object'}-${reference.id}`,
     kind: resolvedKind,
@@ -325,14 +325,14 @@ export function referenceForObjectReference(reference: ObjectReference, kind?: B
   };
 }
 
-export function bioAgentKindForObjectReference(reference: ObjectReference): BioAgentReferenceKind {
+export function sciForgeKindForObjectReference(reference: ObjectReference): SciForgeReferenceKind {
   if (reference.kind === 'file') return 'file';
   if (reference.kind === 'artifact' && /table|matrix|csv|dataframe/i.test(reference.artifactType ?? reference.title)) return 'table';
   if (reference.kind === 'artifact' && /chart|plot|graph|visual|umap|heatmap/i.test(reference.artifactType ?? reference.title)) return 'chart';
   return 'task-result';
 }
 
-export function referenceForWorkspaceFileLike(file: WorkspaceFileReferenceLike, kind: BioAgentReferenceKind = 'file'): BioAgentReference {
+export function referenceForWorkspaceFileLike(file: WorkspaceFileReferenceLike, kind: SciForgeReferenceKind = 'file'): SciForgeReference {
   return {
     id: `ref-${kind}-${idSegment(file.path)}`,
     kind,
@@ -357,7 +357,7 @@ export function referenceForResultSlotLike(item: {
   slot: { title?: string };
   module: { moduleId: string; componentId: string; title: string };
   missingFields?: string[];
-}): BioAgentReference {
+}): SciForgeReference {
   return {
     id: `ref-ui-slot-${idSegment(item.id).slice(0, 52)}`,
     kind: 'ui',
@@ -376,7 +376,7 @@ export function referenceForResultSlotLike(item: {
   };
 }
 
-export function referenceForUiElement(element: HTMLElement): BioAgentReference {
+export function referenceForUiElement(element: HTMLElement): SciForgeReference {
   const title = readableElementTitle(element);
   const selector = stableElementSelector(element);
   return {
@@ -394,7 +394,7 @@ export function referenceForUiElement(element: HTMLElement): BioAgentReference {
   };
 }
 
-export function referenceForTextSelection(input: TextSelectionReferenceInput): BioAgentReference | undefined {
+export function referenceForTextSelection(input: TextSelectionReferenceInput): SciForgeReference | undefined {
   const selectedText = input.selectedText.trim();
   if (!selectedText) return undefined;
   const textHash = stableHash(`${input.sourceReference.ref}:${selectedText}`);
@@ -421,7 +421,7 @@ export function referenceForTextSelection(input: TextSelectionReferenceInput): B
   };
 }
 
-export function withRegionLocator(reference: BioAgentReference | undefined, region: string): BioAgentReference | undefined {
+export function withRegionLocator(reference: SciForgeReference | undefined, region: string): SciForgeReference | undefined {
   if (!reference) return undefined;
   return {
     ...reference,
@@ -458,28 +458,28 @@ export function stableElementSelector(element: HTMLElement) {
   return `${element.tagName.toLowerCase()}${className ? `.${className}` : ''}`;
 }
 
-export function parseBioAgentReferenceAttribute(value: string | undefined): BioAgentReference | undefined {
+export function parseSciForgeReferenceAttribute(value: string | undefined): SciForgeReference | undefined {
   if (!value) return undefined;
   try {
-    const parsed = JSON.parse(value) as Partial<BioAgentReference>;
+    const parsed = JSON.parse(value) as Partial<SciForgeReference>;
     if (!parsed.id || !parsed.kind || !parsed.title || !parsed.ref) return undefined;
-    return parsed as BioAgentReference;
+    return parsed as SciForgeReference;
   } catch {
     return undefined;
   }
 }
 
-export function bioAgentReferenceAttribute(reference: BioAgentReference | undefined) {
+export function sciForgeReferenceAttribute(reference: SciForgeReference | undefined) {
   return reference ? JSON.stringify(reference) : undefined;
 }
 
-export function appendReferenceMarkerToInput(currentInput: string, reference: BioAgentReference) {
+export function appendReferenceMarkerToInput(currentInput: string, reference: SciForgeReference) {
   const marker = referenceComposerMarker(reference);
   if (!marker || currentInput.includes(marker)) return currentInput;
   return [currentInput.trimEnd(), marker].filter(Boolean).join(' ');
 }
 
-export function removeReferenceMarkerFromInput(currentInput: string, reference: BioAgentReference) {
+export function removeReferenceMarkerFromInput(currentInput: string, reference: SciForgeReference) {
   const marker = referenceComposerMarker(reference);
   return currentInput
     .replace(marker, '')
@@ -488,13 +488,13 @@ export function removeReferenceMarkerFromInput(currentInput: string, reference: 
     .trimStart();
 }
 
-export function referenceComposerMarker(reference: BioAgentReference) {
+export function referenceComposerMarker(reference: SciForgeReference) {
   const payload = isRecord(reference.payload) ? reference.payload : undefined;
   const marker = typeof payload?.composerMarker === 'string' ? payload.composerMarker : '';
   return marker || '※?';
 }
 
-export function withComposerMarker(reference: BioAgentReference, currentReferences: BioAgentReference[]) {
+export function withComposerMarker(reference: SciForgeReference, currentReferences: SciForgeReference[]) {
   const existing = currentReferences.find((item) => item.id === reference.id);
   if (existing) return existing;
   const marker = nextComposerMarker(currentReferences);
@@ -507,7 +507,7 @@ export function withComposerMarker(reference: BioAgentReference, currentReferenc
   };
 }
 
-export function nextComposerMarker(currentReferences: BioAgentReference[]) {
+export function nextComposerMarker(currentReferences: SciForgeReference[]) {
   const used = new Set(currentReferences.map(referenceComposerMarker));
   for (let index = 1; index <= currentReferences.length + 1; index += 1) {
     const marker = `※${index}`;
@@ -516,7 +516,7 @@ export function nextComposerMarker(currentReferences: BioAgentReference[]) {
   return `※${currentReferences.length + 1}`;
 }
 
-export function bioAgentReferenceKindLabel(kind: BioAgentReference['kind']) {
+export function sciForgeReferenceKindLabel(kind: SciForgeReference['kind']) {
   if (kind === 'file') return 'file';
   if (kind === 'file-region') return 'region';
   if (kind === 'message') return 'msg';
@@ -546,7 +546,7 @@ export function objectReferenceIcon(kind: ObjectReference['kind']) {
   return 'obj';
 }
 
-export function availableObjectActions(reference: ObjectReference, session: Pick<BioAgentSession, 'artifacts'>): ObjectAction[] {
+export function availableObjectActions(reference: ObjectReference, session: Pick<SciForgeSession, 'artifacts'>): ObjectAction[] {
   const declared: ObjectAction[] = reference.actions?.length ? reference.actions : ['focus-right-pane', 'pin'];
   const path = pathForObjectReference(reference, session);
   const hasWorkspacePath = Boolean(path && !/^https?:\/\//i.test(path) && !/^agentserver:\/\//i.test(path) && !/^data:/i.test(path));
@@ -625,7 +625,7 @@ export function uploadedLocatorHintsForFileLike(file: { name: string; type?: str
   return [];
 }
 
-export function artifactReferenceKind(artifact: RuntimeArtifact, componentId = '', rowCount?: number): BioAgentReference['kind'] {
+export function artifactReferenceKind(artifact: RuntimeArtifact, componentId = '', rowCount?: number): SciForgeReference['kind'] {
   const haystack = `${artifact.type} ${artifact.id} ${componentId}`;
   if (artifact.path || artifact.dataRef || artifact.metadata?.filePath || artifact.metadata?.path) {
     if (/\.(pdf|docx?|pptx?|md|txt|png|jpe?g|csv|tsv|xlsx?|pdb|cif|html?)$/i.test(`${artifact.path ?? ''} ${artifact.dataRef ?? ''}`)) return 'file';

@@ -534,7 +534,7 @@
   line-height: 1.45;
 }
 
-.bioagent-reference-strip {
+.sciforge-reference-strip {
   display: flex;
   flex: 1;
   flex-wrap: wrap;
@@ -542,7 +542,7 @@
   min-width: 0;
 }
 
-.bioagent-reference-chip {
+.sciforge-reference-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -558,25 +558,25 @@
   font-weight: 800;
 }
 
-.bioagent-reference-chip:hover {
+.sciforge-reference-chip:hover {
   border-color: var(--accent-border);
   background: var(--accent-soft);
 }
 
-.bioagent-reference-chip > span {
+.sciforge-reference-chip > span {
   color: var(--gold);
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   text-transform: uppercase;
 }
 
-.bioagent-reference-chip strong {
+.sciforge-reference-chip strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.bioagent-reference-chip i {
+.sciforge-reference-chip i {
   display: inline-grid;
   place-items: center;
   width: 18px;
@@ -589,7 +589,7 @@
   font-style: normal;
 }
 
-.bioagent-reference-focus {
+.sciforge-reference-focus {
   outline: 2px solid rgba(0, 229, 160, 0.96);
   outline-offset: 3px;
   box-shadow: 0 0 0 6px var(--accent-muted), 0 18px 50px rgba(0, 0, 0, 0.28);
@@ -767,17 +767,17 @@
   pointer-events: none;
 }
 
-.bioagent-reference-picking {
+.sciforge-reference-picking {
   cursor: crosshair;
   user-select: text;
 }
 
-.bioagent-reference-picking * {
+.sciforge-reference-picking * {
   cursor: crosshair;
   user-select: text;
 }
 
-.bioagent-reference-pick-hover {
+.sciforge-reference-pick-hover {
   outline: 2px solid rgba(0, 229, 160, 0.92);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px var(--accent-muted);

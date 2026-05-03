@@ -19,7 +19,7 @@ const MAX_OBJECT_KEYS = 80;
 const MAX_DEPTH = 7;
 
 export interface BackendHandoffBudget {
-  schemaVersion: 'bioagent.backend-handoff-budget.v1';
+  schemaVersion: 'sciforge.backend-handoff-budget.v1';
   maxPayloadBytes: number;
   maxInlineStringChars: number;
   maxInlineJsonBytes: number;
@@ -66,7 +66,7 @@ export interface BackendHandoffContextEstimate {
 }
 
 export const DEFAULT_BACKEND_HANDOFF_BUDGET: BackendHandoffBudget = {
-  schemaVersion: 'bioagent.backend-handoff-budget.v1',
+  schemaVersion: 'sciforge.backend-handoff-budget.v1',
   maxPayloadBytes: 220_000,
   maxInlineStringChars: 12_000,
   maxInlineJsonBytes: 48_000,
@@ -83,8 +83,8 @@ export function buildWorkspaceTaskInput(input: Record<string, unknown>, refs: Wo
   return {
     ...compacted,
     ...refs,
-    _bioagentInputManifest: {
-      schemaVersion: 'bioagent.task-input.v1',
+    _sciforgeInputManifest: {
+      schemaVersion: 'sciforge.task-input.v1',
       compactedAt: new Date().toISOString(),
       policy: {
         artifactData: 'large inline artifact data is replaced by refs, hashes, sizes, and previews',
@@ -109,12 +109,12 @@ export async function normalizeBackendHandoff<T = unknown>(
   const rawJson = stringifyJson(input);
   const rawSha1 = sha1Text(rawJson);
   const rawRef = join(
-    '.bioagent',
+    '.sciforge',
     'handoffs',
     `${new Date().toISOString().replace(/[:.]/g, '-')}-${safeToken(options.purpose)}-${rawSha1.slice(0, 10)}.json`,
   );
   await writeWorkspaceRef(options.workspacePath, rawRef, JSON.stringify({
-    schemaVersion: 'bioagent.backend-handoff-raw.v1',
+    schemaVersion: 'sciforge.backend-handoff-raw.v1',
     createdAt: new Date().toISOString(),
     purpose: options.purpose,
     rawSha1,
@@ -173,7 +173,7 @@ export async function normalizeBackendHandoff<T = unknown>(
       estimatedBytes: Buffer.byteLength(rawJson, 'utf8'),
     });
     payload = attachHandoffManifest({
-      _bioagentCompacted: true,
+      _sciforgeCompacted: true,
       kind: 'backend-handoff',
       reason: 'payload-budget',
       rawRef,
@@ -272,7 +272,7 @@ function normalizeHandoffObject(value: Record<string, unknown>, context: {
     });
   }
   if (Object.keys(value).length > entries.length) {
-    out._bioagentCompacted = {
+    out._sciforgeCompacted = {
       kind: 'object-fields',
       originalFieldCount: Object.keys(value).length,
       keptFieldCount: entries.length,
@@ -344,7 +344,7 @@ function normalizeHandoffArray(value: unknown[], context: {
     return normalizedItems;
   }
   return {
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: 'array',
     itemCount: value.length,
     estimatedBytes: estimateBytes(value),
@@ -388,7 +388,7 @@ function normalizeHandoffString(value: string, context: {
     estimatedBytes: Buffer.byteLength(value, 'utf8'),
   });
   return {
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: binaryLike ? 'binary' : key === 'stdout' || key === 'stderr' ? 'tool-output' : 'string',
     chars: value.length,
     bytes: Buffer.byteLength(value, 'utf8'),
@@ -417,7 +417,7 @@ function compactBackendInputText(value: string, context: {
     estimatedBytes: Buffer.byteLength(value, 'utf8'),
   });
   return [
-    '[BioAgent compacted backend input.text to stay within handoff budget.]',
+    '[SciForge compacted backend input.text to stay within handoff budget.]',
     `rawRef: ${context.rawRef}`,
     `pointer: ${jsonPointer(context.path)}`,
     `sha1: ${sha1Text(value)}`,
@@ -473,7 +473,7 @@ function normalizePriorAttempts(value: unknown[], context: {
     omittedCount: Math.max(0, value.length - kept.length),
   });
   return {
-    _bioagentCompacted: value.length > kept.length,
+    _sciforgeCompacted: value.length > kept.length,
     kind: 'prior-attempts',
     itemCount: value.length,
     omittedCount: Math.max(0, value.length - kept.length),
@@ -500,7 +500,7 @@ function handoffSummary(value: unknown, context: {
     estimatedBytes: Buffer.byteLength(json, 'utf8'),
   });
   return {
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: Array.isArray(value) ? 'array' : typeof value,
     reason,
     estimatedBytes: Buffer.byteLength(json, 'utf8'),
@@ -540,15 +540,15 @@ function attachHandoffManifest(value: unknown, manifest: {
   forced?: boolean;
 }) {
   const handoffManifest = {
-    schemaVersion: 'bioagent.backend-handoff-normalized.v1',
+    schemaVersion: 'sciforge.backend-handoff-normalized.v1',
     rawRef: manifest.rawRef,
     rawSha1: manifest.rawSha1,
     rawBytes: manifest.rawBytes,
     budget: manifest.budget,
     forcedSecondPass: manifest.forced === true,
   };
-  if (isRecord(value)) return { ...value, _bioagentHandoffManifest: handoffManifest };
-  return { value, _bioagentHandoffManifest: handoffManifest };
+  if (isRecord(value)) return { ...value, _sciforgeHandoffManifest: handoffManifest };
+  return { value, _sciforgeHandoffManifest: handoffManifest };
 }
 
 function compactValue(value: unknown, path: string[], depth: number): unknown {
@@ -580,7 +580,7 @@ function compactObject(value: Record<string, unknown>, path: string[], depth: nu
     }
   }
   if (Object.keys(value).length > entries.length) {
-    out._bioagentCompacted = {
+    out._sciforgeCompacted = {
       kind: 'object-fields',
       originalFieldCount: Object.keys(value).length,
       keptFieldCount: entries.length,
@@ -668,7 +668,7 @@ function compactArray(value: unknown[], path: string[], depth: number) {
     return value.map((item, index) => compactValue(item, [...path, String(index)], depth + 1));
   }
   return {
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: 'array',
     itemCount: value.length,
     estimatedBytes: estimateBytes(value),
@@ -680,7 +680,7 @@ function compactArray(value: unknown[], path: string[], depth: number) {
 function compactLargeObject(out: Record<string, unknown>, original: unknown) {
   return {
     ...pickReferenceFields(isRecord(original) ? original : {}),
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: 'object',
     estimatedBytes: estimateBytes(original),
     sha1: sha1Json(original),
@@ -693,22 +693,22 @@ function compactString(value: string, path: string[]) {
   if (path.length === 1 && path[0] === 'prompt') return compactPrompt(value);
   if (value.length <= MAX_INLINE_STRING_CHARS) return value;
   return {
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: 'string',
     chars: value.length,
     sha1: sha1Text(value),
-    preview: `${value.slice(0, 2000)}\n\n[BioAgent compacted ${value.length - 2000} chars from this field]`,
+    preview: `${value.slice(0, 2000)}\n\n[SciForge compacted ${value.length - 2000} chars from this field]`,
   };
 }
 
 function compactPrompt(value: string) {
   if (value.length <= MAX_PROMPT_CHARS) return value;
-  return `${value.slice(0, MAX_PROMPT_CHARS)}\n\n[BioAgent compacted prompt tail: ${value.length - MAX_PROMPT_CHARS} chars omitted; use recentConversation/artifact refs for full recovery]`;
+  return `${value.slice(0, MAX_PROMPT_CHARS)}\n\n[SciForge compacted prompt tail: ${value.length - MAX_PROMPT_CHARS} chars omitted; use recentConversation/artifact refs for full recovery]`;
 }
 
 function compactSummary(value: unknown, reason: string) {
   return {
-    _bioagentCompacted: true,
+    _sciforgeCompacted: true,
     kind: Array.isArray(value) ? 'array' : typeof value,
     reason,
     estimatedBytes: estimateBytes(value),

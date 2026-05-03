@@ -51,7 +51,7 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
       expectedBehavior: round.acceptanceChecks.join('\n'),
       observedBehavior: status === 'passed'
         ? `Round ${round.round} passed. ${round.referenceOps.map((op) => `${op.marker ?? ''} ${op.kind} changed the conclusion`).join(' ')}`
-        : 'Pending real BioAgent browser run. Fill this during execution.',
+        : 'Pending real SciForge browser run. Fill this during execution.',
       status: status === 'passed' ? 'passed' : 'not-run',
       artifactRefs: round.round === 6 && status === 'passed' ? ['final-report'] : [],
       executionUnitRefs: status === 'passed' ? ['EU-longform'] : [],
@@ -59,7 +59,7 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
     })),
     runtimeProfile: {
       appUrl: 'http://localhost:5173/',
-      workspacePath: '/tmp/bioagent-longform-workspace',
+      workspacePath: '/tmp/sciforge-longform-workspace',
       agentBackend: 'codex',
       modelProvider: 'native',
       modelName: 'fixture-model',
@@ -70,16 +70,16 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
     artifacts: status === 'passed' ? [{
       id: 'final-report',
       type: 'research-report',
-      path: '.bioagent/reports/final.md',
+      path: '.sciforge/reports/final.md',
       round: 6,
       status: 'produced',
       summary: 'Final report explains how ※1 and ※2 changed the evidence ranking.',
     }] : [],
     executionUnits: status === 'passed' ? [{
       id: 'EU-longform',
-      tool: 'bioagent.longform',
+      tool: 'sciforge.longform',
       status: 'done',
-      logRef: '.bioagent/logs/longform.log',
+      logRef: '.sciforge/logs/longform.log',
       artifactRefs: ['final-report'],
     }] : [],
     failurePoints: status === 'passed' ? [] : [{
@@ -107,7 +107,7 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
         : 'Pending.',
     },
     notes: status === 'passed'
-      ? 'Browser evidence, Computer Use right-click selected limitation evidence, and workspace .bioagent artifact refs recorded. Reference impact: ※1/※2 changed final report.'
+      ? 'Browser evidence, Computer Use right-click selected limitation evidence, and workspace .sciforge artifact refs recorded. Reference impact: ※1/※2 changed final report.'
       : 'Prepared T060 longform regression manifest.',
   };
 }

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-general-work-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-general-work-'));
 let sawFullIntent = false;
 
 const generatedTask = String.raw`
@@ -101,10 +101,10 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: '.bioagent/tasks/general-arxiv-report.py', language: 'python', content: generatedTask }],
-            entrypoint: { language: 'python', path: '.bioagent/tasks/general-arxiv-report.py' },
+            taskFiles: [{ path: '.sciforge/tasks/general-arxiv-report.py', language: 'python', content: generatedTask }],
+            entrypoint: { language: 'python', path: '.sciforge/tasks/general-arxiv-report.py' },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/general-arxiv-report.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/general-arxiv-report.py <input> <output>',
             expectedArtifacts: ['paper-list', 'research-report'],
             patchSummary: 'Generated a coordinated arXiv report task.',
           },

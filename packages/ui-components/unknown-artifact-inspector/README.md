@@ -1,4 +1,4 @@
-# @bioagent-ui/unknown-artifact-inspector
+# @sciforge-ui/unknown-artifact-inspector
 
 ## Agent quick contract
 - componentId: `unknown-artifact-inspector`

@@ -116,7 +116,7 @@ Options:
   --run-id <id>             Stable run id prefix. Scenario id is appended for multiple runs.
   --now <iso>               Override current time for weekly selection.
   --weekly-required <n>     Required passed real runs per week. Defaults to 2.
-  --app-url <url>           BioAgent app URL. Defaults to http://localhost:5173/.
+  --app-url <url>           SciForge app URL. Defaults to http://localhost:5173/.
   --workspace-path <path>   Workspace path recorded in prepared manifests.
   --backend <name>          Backend recorded in prepared manifests.
   --model-provider <name>   Model provider recorded in prepared manifests.

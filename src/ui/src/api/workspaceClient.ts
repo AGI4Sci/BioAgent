@@ -1,9 +1,9 @@
-import type { BioAgentConfig, BioAgentWorkspaceState, PreviewDescriptor, PreviewDerivative, RuntimeExecutionUnit } from '../domain';
+import type { SciForgeConfig, SciForgeWorkspaceState, PreviewDescriptor, PreviewDerivative, RuntimeExecutionUnit } from '../domain';
 import type { ScenarioLibraryState } from '../scenarioCompiler/scenarioLibrary';
 import type { ScenarioPackage } from '../scenarioCompiler/scenarioPackage';
 import { parseWorkspaceState } from '../sessionStore';
-import { defaultBioAgentConfig, normalizeConfig, normalizeWorkspaceRootPath } from '../config';
-import { BioAgentClientError, reasonFromResponseText, recoverActionsForService } from './clientError';
+import { defaultSciForgeConfig, normalizeConfig, normalizeWorkspaceRootPath } from '../config';
+import { SciForgeClientError, reasonFromResponseText, recoverActionsForService } from './clientError';
 
 export interface WorkspaceEntry {
   name: string;
@@ -113,46 +113,46 @@ export interface SkillPromotionValidationResult {
   missingArtifactTypes: string[];
 }
 
-export async function loadFileBackedBioAgentConfig(config: BioAgentConfig): Promise<BioAgentConfig | undefined> {
+export async function loadFileBackedSciForgeConfig(config: SciForgeConfig): Promise<SciForgeConfig | undefined> {
   const response = await fetchWorkspaceConfigWithFallback(config);
   if (response.status === 404) return undefined;
   if (!response.ok) throw new Error(await workspaceResponseError(response, `Load config failed: HTTP ${response.status}`));
   const json = await response.json() as { config?: unknown };
-  return isBioAgentConfig(json.config) ? normalizeConfig(json.config) : undefined;
+  return isSciForgeConfig(json.config) ? normalizeConfig(json.config) : undefined;
 }
 
-async function fetchWorkspaceConfigWithFallback(config: BioAgentConfig): Promise<Response> {
-  const primaryUrl = `${config.workspaceWriterBaseUrl}/api/bioagent/config`;
+async function fetchWorkspaceConfigWithFallback(config: SciForgeConfig): Promise<Response> {
+  const primaryUrl = `${config.workspaceWriterBaseUrl}/api/sciforge/config`;
   try {
     return await fetchWorkspace(config, 'load config.local.json', primaryUrl);
   } catch (error) {
-    const fallbackBaseUrl = defaultBioAgentConfig.workspaceWriterBaseUrl;
+    const fallbackBaseUrl = defaultSciForgeConfig.workspaceWriterBaseUrl;
     if (config.workspaceWriterBaseUrl === fallbackBaseUrl) throw error;
     return await fetchWorkspace(
       { ...config, workspaceWriterBaseUrl: fallbackBaseUrl },
       'load config.local.json from default Workspace Writer',
-      `${fallbackBaseUrl}/api/bioagent/config`,
+      `${fallbackBaseUrl}/api/sciforge/config`,
     );
   }
 }
 
-export async function saveFileBackedBioAgentConfig(config: BioAgentConfig): Promise<BioAgentConfig | undefined> {
-  const response = await fetchWorkspace(config, 'save config.local.json', `${config.workspaceWriterBaseUrl}/api/bioagent/config`, {
+export async function saveFileBackedSciForgeConfig(config: SciForgeConfig): Promise<SciForgeConfig | undefined> {
+  const response = await fetchWorkspace(config, 'save config.local.json', `${config.workspaceWriterBaseUrl}/api/sciforge/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ config }),
   });
   if (!response.ok) throw new Error(await workspaceResponseError(response, `Save config failed: HTTP ${response.status}`));
   const json = await response.json() as { config?: unknown };
-  return isBioAgentConfig(json.config) ? normalizeConfig(json.config) : undefined;
+  return isSciForgeConfig(json.config) ? normalizeConfig(json.config) : undefined;
 }
 
-export async function persistWorkspaceState(state: BioAgentWorkspaceState, config: BioAgentConfig): Promise<void> {
+export async function persistWorkspaceState(state: SciForgeWorkspaceState, config: SciForgeConfig): Promise<void> {
   const workspacePath = normalizeWorkspaceRootPath(state.workspacePath);
   if (!workspacePath) return;
   const normalizedState = { ...state, workspacePath };
   const operation = `snapshot workspace ${workspacePath}`;
-  const response = await fetchWorkspace(config, operation, `${config.workspaceWriterBaseUrl}/api/bioagent/workspace/snapshot`, {
+  const response = await fetchWorkspace(config, operation, `${config.workspaceWriterBaseUrl}/api/sciforge/workspace/snapshot`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -166,7 +166,7 @@ export async function persistWorkspaceState(state: BioAgentWorkspaceState, confi
   }
 }
 
-function isBioAgentConfig(value: unknown): value is BioAgentConfig {
+function isSciForgeConfig(value: unknown): value is SciForgeConfig {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
   return record.schemaVersion === 1
@@ -182,13 +182,13 @@ function isBioAgentConfig(value: unknown): value is BioAgentConfig {
     && typeof record.updatedAt === 'string';
 }
 
-export async function loadPersistedWorkspaceState(path: string, config: BioAgentConfig): Promise<BioAgentWorkspaceState | undefined> {
+export async function loadPersistedWorkspaceState(path: string, config: SciForgeConfig): Promise<SciForgeWorkspaceState | undefined> {
   if (path.trim()) return fetchPersistedWorkspaceState(path, config);
   return fetchPersistedWorkspaceState('', config);
 }
 
-async function fetchPersistedWorkspaceState(path: string, config: BioAgentConfig): Promise<BioAgentWorkspaceState | undefined> {
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/workspace/snapshot`);
+async function fetchPersistedWorkspaceState(path: string, config: SciForgeConfig): Promise<SciForgeWorkspaceState | undefined> {
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/workspace/snapshot`);
   if (path.trim()) url.searchParams.set('path', path);
   const label = path.trim() || 'last workspace';
   const response = await fetchWorkspace(config, `load workspace snapshot ${label}`, url);
@@ -202,9 +202,9 @@ async function fetchPersistedWorkspaceState(path: string, config: BioAgentConfig
     : state;
 }
 
-export async function listWorkspace(path: string, config: BioAgentConfig): Promise<WorkspaceEntry[]> {
+export async function listWorkspace(path: string, config: SciForgeConfig): Promise<WorkspaceEntry[]> {
   if (!path.trim()) return [];
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/workspace/list`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/workspace/list`);
   url.searchParams.set('path', path);
   const response = await fetchWorkspace(config, `list workspace ${path}`, url);
   if (!response.ok) throw new Error(await workspaceResponseError(response, `List failed: HTTP ${response.status}`));
@@ -212,9 +212,9 @@ export async function listWorkspace(path: string, config: BioAgentConfig): Promi
   return Array.isArray(json.entries) ? json.entries : [];
 }
 
-export async function readWorkspaceFile(path: string, config: BioAgentConfig): Promise<WorkspaceFileContent> {
+export async function readWorkspaceFile(path: string, config: SciForgeConfig): Promise<WorkspaceFileContent> {
   if (!path.trim()) throw new Error('path is required');
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/workspace/file`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/workspace/file`);
   url.searchParams.set('path', path);
   if (config.workspacePath.trim()) url.searchParams.set('workspacePath', config.workspacePath.trim());
   const response = await fetchWorkspace(config, `read workspace file ${path}`, url);
@@ -224,9 +224,9 @@ export async function readWorkspaceFile(path: string, config: BioAgentConfig): P
   return json.file;
 }
 
-export async function readPreviewDescriptor(ref: string, config: BioAgentConfig): Promise<PreviewDescriptor> {
+export async function readPreviewDescriptor(ref: string, config: SciForgeConfig): Promise<PreviewDescriptor> {
   if (!ref.trim()) throw new Error('ref is required');
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/preview/descriptor`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/preview/descriptor`);
   url.searchParams.set('ref', ref);
   if (config.workspacePath.trim()) url.searchParams.set('workspacePath', config.workspacePath.trim());
   const response = await fetchWorkspace(config, `read preview descriptor ${ref}`, url);
@@ -236,9 +236,9 @@ export async function readPreviewDescriptor(ref: string, config: BioAgentConfig)
   return json.descriptor;
 }
 
-export async function readPreviewDerivative(ref: string, kind: PreviewDerivative['kind'], config: BioAgentConfig): Promise<PreviewDerivative> {
+export async function readPreviewDerivative(ref: string, kind: PreviewDerivative['kind'], config: SciForgeConfig): Promise<PreviewDerivative> {
   if (!ref.trim()) throw new Error('ref is required');
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/preview/derivative`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/preview/derivative`);
   url.searchParams.set('ref', ref);
   url.searchParams.set('kind', kind);
   if (config.workspacePath.trim()) url.searchParams.set('workspacePath', config.workspacePath.trim());
@@ -252,11 +252,11 @@ export async function readPreviewDerivative(ref: string, kind: PreviewDerivative
 export async function writeWorkspaceFile(
   path: string,
   content: string,
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   options?: { encoding?: 'utf8' | 'base64'; mimeType?: string },
 ): Promise<WorkspaceFileContent> {
   if (!path.trim()) throw new Error('path is required');
-  const response = await fetchWorkspace(config, `write workspace file ${path}`, `${config.workspaceWriterBaseUrl}/api/bioagent/workspace/file`, {
+  const response = await fetchWorkspace(config, `write workspace file ${path}`, `${config.workspaceWriterBaseUrl}/api/sciforge/workspace/file`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, content, encoding: options?.encoding, mimeType: options?.mimeType }),
@@ -268,12 +268,12 @@ export async function writeWorkspaceFile(
 }
 
 export async function mutateWorkspaceFile(
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   action: 'create-file' | 'create-folder' | 'rename' | 'delete',
   payload: { path: string; targetPath?: string },
 ): Promise<void> {
   const operation = `${action} ${payload.path}`;
-  const response = await fetchWorkspace(config, operation, `${config.workspaceWriterBaseUrl}/api/bioagent/workspace/file-action`, {
+  const response = await fetchWorkspace(config, operation, `${config.workspaceWriterBaseUrl}/api/sciforge/workspace/file-action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload }),
@@ -282,12 +282,12 @@ export async function mutateWorkspaceFile(
 }
 
 export async function openWorkspaceObject(
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   action: WorkspaceOpenResult['action'],
   path: string,
   workspacePath = config.workspacePath,
 ): Promise<WorkspaceOpenResult> {
-  const response = await fetchWorkspace(config, `${action} workspace object`, `${config.workspaceWriterBaseUrl}/api/bioagent/workspace/open`, {
+  const response = await fetchWorkspace(config, `${action} workspace object`, `${config.workspaceWriterBaseUrl}/api/sciforge/workspace/open`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath, action, path }),
@@ -300,9 +300,9 @@ export async function openWorkspaceObject(
   return json as WorkspaceOpenResult;
 }
 
-export async function listWorkspaceScenarios(config: BioAgentConfig, workspacePath = config.workspacePath): Promise<WorkspaceScenarioListItem[]> {
+export async function listWorkspaceScenarios(config: SciForgeConfig, workspacePath = config.workspacePath): Promise<WorkspaceScenarioListItem[]> {
   if (!workspacePath.trim()) return [];
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/scenarios/list`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/scenarios/list`);
   url.searchParams.set('workspacePath', workspacePath);
   const response = await fetchWorkspace(config, `list scenarios ${workspacePath}`, url);
   if (!response.ok) throw new Error(await workspaceResponseError(response, `List scenarios failed: HTTP ${response.status}`));
@@ -310,9 +310,9 @@ export async function listWorkspaceScenarios(config: BioAgentConfig, workspacePa
   return Array.isArray(json.scenarios) ? json.scenarios : [];
 }
 
-export async function loadScenarioLibrary(config: BioAgentConfig, workspacePath = config.workspacePath): Promise<ScenarioLibraryState | undefined> {
+export async function loadScenarioLibrary(config: SciForgeConfig, workspacePath = config.workspacePath): Promise<ScenarioLibraryState | undefined> {
   if (!workspacePath.trim()) return undefined;
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/scenarios/library`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/scenarios/library`);
   url.searchParams.set('workspacePath', workspacePath);
   const response = await fetchWorkspace(config, `load scenario library ${workspacePath}`, url);
   if (!response.ok) throw new Error(await workspaceResponseError(response, `Load scenario library failed: HTTP ${response.status}`));
@@ -320,9 +320,9 @@ export async function loadScenarioLibrary(config: BioAgentConfig, workspacePath 
   return json.library;
 }
 
-export async function loadWorkspaceScenario(config: BioAgentConfig, id: string, workspacePath = config.workspacePath): Promise<ScenarioPackage | undefined> {
+export async function loadWorkspaceScenario(config: SciForgeConfig, id: string, workspacePath = config.workspacePath): Promise<ScenarioPackage | undefined> {
   if (!workspacePath.trim() || !id.trim()) return undefined;
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/scenarios/get`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/scenarios/get`);
   url.searchParams.set('workspacePath', workspacePath);
   url.searchParams.set('id', id);
   const response = await fetchWorkspace(config, `load scenario ${id}`, url);
@@ -332,33 +332,33 @@ export async function loadWorkspaceScenario(config: BioAgentConfig, id: string, 
   return json.package;
 }
 
-export async function saveWorkspaceScenario(config: BioAgentConfig, pkg: ScenarioPackage, workspacePath = config.workspacePath): Promise<void> {
+export async function saveWorkspaceScenario(config: SciForgeConfig, pkg: ScenarioPackage, workspacePath = config.workspacePath): Promise<void> {
   await writeWorkspaceScenario(config, 'save', { workspacePath, package: pkg });
 }
 
-export async function publishWorkspaceScenario(config: BioAgentConfig, pkg: ScenarioPackage, workspacePath = config.workspacePath): Promise<void> {
+export async function publishWorkspaceScenario(config: SciForgeConfig, pkg: ScenarioPackage, workspacePath = config.workspacePath): Promise<void> {
   await writeWorkspaceScenario(config, 'publish', { workspacePath, package: pkg });
 }
 
-export async function archiveWorkspaceScenario(config: BioAgentConfig, id: string, workspacePath = config.workspacePath): Promise<void> {
+export async function archiveWorkspaceScenario(config: SciForgeConfig, id: string, workspacePath = config.workspacePath): Promise<void> {
   await writeWorkspaceScenario(config, 'archive', { workspacePath, id });
 }
 
-export async function deleteWorkspaceScenario(config: BioAgentConfig, id: string, workspacePath = config.workspacePath): Promise<void> {
+export async function deleteWorkspaceScenario(config: SciForgeConfig, id: string, workspacePath = config.workspacePath): Promise<void> {
   await writeWorkspaceScenario(config, 'delete', { workspacePath, id });
 }
 
-export async function restoreWorkspaceScenario(config: BioAgentConfig, id: string, status: 'draft' | 'validated' | 'published' = 'draft', workspacePath = config.workspacePath): Promise<void> {
+export async function restoreWorkspaceScenario(config: SciForgeConfig, id: string, status: 'draft' | 'validated' | 'published' = 'draft', workspacePath = config.workspacePath): Promise<void> {
   await writeWorkspaceScenario(config, 'restore', { workspacePath, id, status });
 }
 
 export async function listWorkspaceTaskAttempts(
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   options: { workspacePath?: string; skillDomain?: string; scenarioPackageId?: string; limit?: number } = {},
 ): Promise<WorkspaceTaskAttemptRecord[]> {
   const workspacePath = options.workspacePath ?? config.workspacePath;
   if (!workspacePath.trim()) return [];
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/task-attempts/list`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/task-attempts/list`);
   url.searchParams.set('workspacePath', workspacePath);
   if (options.skillDomain) url.searchParams.set('skillDomain', options.skillDomain);
   if (options.scenarioPackageId) url.searchParams.set('scenarioPackageId', options.scenarioPackageId);
@@ -370,12 +370,12 @@ export async function listWorkspaceTaskAttempts(
 }
 
 export async function loadWorkspaceTaskAttempts(
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   id: string,
   workspacePath = config.workspacePath,
 ): Promise<WorkspaceTaskAttemptRecord[]> {
   if (!workspacePath.trim() || !id.trim()) return [];
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/task-attempts/get`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/task-attempts/get`);
   url.searchParams.set('workspacePath', workspacePath);
   url.searchParams.set('id', id);
   const response = await fetchWorkspace(config, `load task attempts ${id}`, url);
@@ -385,11 +385,11 @@ export async function loadWorkspaceTaskAttempts(
 }
 
 export async function listSkillPromotionProposals(
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   workspacePath = config.workspacePath,
 ): Promise<SkillPromotionProposalRecord[]> {
   if (!workspacePath.trim()) return [];
-  const url = new URL(`${config.workspaceWriterBaseUrl}/api/bioagent/skill-proposals/list`);
+  const url = new URL(`${config.workspaceWriterBaseUrl}/api/sciforge/skill-proposals/list`);
   url.searchParams.set('workspacePath', workspacePath);
   const response = await fetchWorkspace(config, `list skill proposals ${workspacePath}`, url);
   if (!response.ok) throw new Error(await workspaceResponseError(response, `List skill proposals failed: HTTP ${response.status}`));
@@ -397,32 +397,32 @@ export async function listSkillPromotionProposals(
   return Array.isArray(json.proposals) ? json.proposals : [];
 }
 
-export async function acceptSkillPromotionProposal(config: BioAgentConfig, id: string, workspacePath = config.workspacePath): Promise<SkillPromotionProposalRecord['proposedManifest']> {
+export async function acceptSkillPromotionProposal(config: SciForgeConfig, id: string, workspacePath = config.workspacePath): Promise<SkillPromotionProposalRecord['proposedManifest']> {
   const json = await mutateSkillPromotionProposal(config, 'accept', { workspacePath, id }) as { manifest?: SkillPromotionProposalRecord['proposedManifest'] };
   if (!json.manifest) throw new Error(`Accept skill proposal ${id} returned no manifest.`);
   return json.manifest;
 }
 
-export async function rejectSkillPromotionProposal(config: BioAgentConfig, id: string, reason?: string, workspacePath = config.workspacePath): Promise<SkillPromotionProposalRecord> {
+export async function rejectSkillPromotionProposal(config: SciForgeConfig, id: string, reason?: string, workspacePath = config.workspacePath): Promise<SkillPromotionProposalRecord> {
   const json = await mutateSkillPromotionProposal(config, 'reject', { workspacePath, id, reason }) as { proposal?: SkillPromotionProposalRecord };
   if (!json.proposal) throw new Error(`Reject skill proposal ${id} returned no proposal.`);
   return json.proposal;
 }
 
-export async function archiveSkillPromotionProposal(config: BioAgentConfig, id: string, reason?: string, workspacePath = config.workspacePath): Promise<SkillPromotionProposalRecord> {
+export async function archiveSkillPromotionProposal(config: SciForgeConfig, id: string, reason?: string, workspacePath = config.workspacePath): Promise<SkillPromotionProposalRecord> {
   const json = await mutateSkillPromotionProposal(config, 'archive', { workspacePath, id, reason }) as { proposal?: SkillPromotionProposalRecord };
   if (!json.proposal) throw new Error(`Archive skill proposal ${id} returned no proposal.`);
   return json.proposal;
 }
 
-export async function validateAcceptedSkillPromotionProposal(config: BioAgentConfig, skillId: string, workspacePath = config.workspacePath): Promise<SkillPromotionValidationResult> {
+export async function validateAcceptedSkillPromotionProposal(config: SciForgeConfig, skillId: string, workspacePath = config.workspacePath): Promise<SkillPromotionValidationResult> {
   const json = await mutateSkillPromotionProposal(config, 'validate', { workspacePath, skillId }) as { validation?: SkillPromotionValidationResult };
   if (!json.validation) throw new Error(`Validate evolved skill ${skillId} returned no validation result.`);
   return json.validation;
 }
 
-async function mutateSkillPromotionProposal(config: BioAgentConfig, action: 'accept' | 'reject' | 'archive' | 'validate', body: Record<string, unknown>) {
-  const response = await fetchWorkspace(config, `${action} skill proposal`, `${config.workspaceWriterBaseUrl}/api/bioagent/skill-proposals/${action}`, {
+async function mutateSkillPromotionProposal(config: SciForgeConfig, action: 'accept' | 'reject' | 'archive' | 'validate', body: Record<string, unknown>) {
+  const response = await fetchWorkspace(config, `${action} skill proposal`, `${config.workspaceWriterBaseUrl}/api/sciforge/skill-proposals/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -431,8 +431,8 @@ async function mutateSkillPromotionProposal(config: BioAgentConfig, action: 'acc
   return response.json();
 }
 
-async function writeWorkspaceScenario(config: BioAgentConfig, action: 'save' | 'publish' | 'archive' | 'restore' | 'delete', body: Record<string, unknown>) {
-  const response = await fetchWorkspace(config, `${action} scenario`, `${config.workspaceWriterBaseUrl}/api/bioagent/scenarios/${action}`, {
+async function writeWorkspaceScenario(config: SciForgeConfig, action: 'save' | 'publish' | 'archive' | 'restore' | 'delete', body: Record<string, unknown>) {
+  const response = await fetchWorkspace(config, `${action} scenario`, `${config.workspaceWriterBaseUrl}/api/sciforge/scenarios/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -442,7 +442,7 @@ async function writeWorkspaceScenario(config: BioAgentConfig, action: 'save' | '
 
 async function workspaceResponseError(response: Response, fallback: string) {
   const text = await response.text();
-  return new BioAgentClientError({
+  return new SciForgeClientError({
     title: 'Workspace Writer 请求失败',
     reason: reasonFromResponseText(text, fallback),
     recoverActions: recoverActionsForService('workspace'),
@@ -451,7 +451,7 @@ async function workspaceResponseError(response: Response, fallback: string) {
 }
 
 async function fetchWorkspace(
-  config: BioAgentConfig,
+  config: SciForgeConfig,
   operation: string,
   input: string | URL,
   init?: RequestInit,
@@ -460,7 +460,7 @@ async function fetchWorkspace(
     return await fetch(input, init);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new BioAgentClientError({
+    throw new SciForgeClientError({
       title: 'Workspace Writer 未连接',
       reason: `${config.workspaceWriterBaseUrl} 无法访问，操作：${operation}。${detail}`,
       recoverActions: recoverActionsForService('workspace'),

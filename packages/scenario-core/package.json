@@ -1,5 +1,5 @@
 {
-  "name": "@bioagent/scenario-core",
+  "name": "@sciforge/scenario-core",
   "version": "1.0.0",
   "type": "module",
   "private": true,

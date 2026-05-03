@@ -7,13 +7,13 @@ import { join } from 'node:path';
 import { appendTaskAttempt, readRecentTaskAttempts } from '../../src/runtime/task-attempt-history';
 import type { TaskAttemptRecord } from '../../src/runtime/runtime-types';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-task-attempts-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-task-attempts-'));
 const port = 20080 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
-    BIOAGENT_WORKSPACE_PORT: String(port),
+    SCIFORGE_WORKSPACE_PORT: String(port),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -36,10 +36,10 @@ try {
     },
     attempt: 1,
     status: 'done',
-    codeRef: '.bioagent/tasks/run-literature-1.py',
-    stdoutRef: '.bioagent/logs/run-literature-1.stdout.log',
-    stderrRef: '.bioagent/logs/run-literature-1.stderr.log',
-    outputRef: '.bioagent/task-results/run-literature-1.json',
+    codeRef: '.sciforge/tasks/run-literature-1.py',
+    stdoutRef: '.sciforge/logs/run-literature-1.stdout.log',
+    stderrRef: '.sciforge/logs/run-literature-1.stderr.log',
+    outputRef: '.sciforge/task-results/run-literature-1.json',
     createdAt: '2026-04-25T00:00:01.000Z',
   };
   await appendTaskAttempt(workspace, record);
@@ -64,7 +64,7 @@ try {
   await waitForHealth(port);
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  let response = await fetch(`${baseUrl}/api/bioagent/task-attempts/list?workspacePath=${encodeURIComponent(workspace)}&skillDomain=literature&scenarioPackageId=literature-evidence-review`);
+  let response = await fetch(`${baseUrl}/api/sciforge/task-attempts/list?workspacePath=${encodeURIComponent(workspace)}&skillDomain=literature&scenarioPackageId=literature-evidence-review`);
   await assertOk(response);
   const listed = await response.json() as { attempts: TaskAttemptRecord[] };
   assert.equal(listed.attempts.length, 1);
@@ -72,13 +72,13 @@ try {
   assert.equal(listed.attempts[0].routeDecision?.selectedSkill, 'literature.pubmed_search');
   assert.equal(listed.attempts[0].scenarioPackageRef?.id, 'literature-evidence-review');
 
-  response = await fetch(`${baseUrl}/api/bioagent/task-attempts/get?workspacePath=${encodeURIComponent(workspace)}&id=run-literature-1`);
+  response = await fetch(`${baseUrl}/api/sciforge/task-attempts/get?workspacePath=${encodeURIComponent(workspace)}&id=run-literature-1`);
   await assertOk(response);
   const loaded = await response.json() as { attempts: TaskAttemptRecord[] };
   assert.equal(loaded.attempts.length, 1);
-  assert.equal(loaded.attempts[0].stdoutRef, '.bioagent/logs/run-literature-1.stdout.log');
+  assert.equal(loaded.attempts[0].stdoutRef, '.sciforge/logs/run-literature-1.stdout.log');
 
-  response = await fetch(`${baseUrl}/api/bioagent/task-attempts/list?workspacePath=${encodeURIComponent(workspace)}&scenarioPackageId=other`);
+  response = await fetch(`${baseUrl}/api/sciforge/task-attempts/list?workspacePath=${encodeURIComponent(workspace)}&scenarioPackageId=other`);
   await assertOk(response);
   const filtered = await response.json() as { attempts: TaskAttemptRecord[] };
   assert.equal(filtered.attempts.length, 0);

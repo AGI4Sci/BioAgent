@@ -83,7 +83,7 @@ Options:
   --out-root <dir>         Output root. Defaults to docs/test-artifacts/deep-scenarios.
   --scripts-dir <dir>      Scenario script directory. Defaults to tests/longform/scenarios.
   --run-id <id>            Stable run id. Defaults to <scenarioId>-<timestamp>.
-  --app-url <url>          BioAgent app URL. Defaults to http://localhost:5173/.
+  --app-url <url>          SciForge app URL. Defaults to http://localhost:5173/.
   --workspace-path <path>  Workspace path recorded in manifest.
   --backend <name>         Backend recorded in manifest.
   --model-provider <name>  Model provider recorded in manifest.

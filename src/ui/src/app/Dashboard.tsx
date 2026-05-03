@@ -5,7 +5,7 @@ import { compileScenarioDraft, type ScenarioBuilderDraft } from '../scenarioComp
 import { compileScenarioIRFromSelection, recommendScenarioElements } from '../scenarioCompiler/scenarioElementCompiler';
 import { buildBuiltInScenarioPackage, type ScenarioPackage } from '../scenarioCompiler/scenarioPackage';
 import type { ScenarioLibraryItem } from '../scenarioCompiler/scenarioLibrary';
-import { nowIso, type BioAgentConfig, type BioAgentRun, type BioAgentWorkspaceState, type ScenarioInstanceId, type ScenarioRuntimeOverride } from '../domain';
+import { nowIso, type SciForgeConfig, type SciForgeRun, type SciForgeWorkspaceState, type ScenarioInstanceId, type ScenarioRuntimeOverride } from '../domain';
 import {
   acceptSkillPromotionProposal,
   archiveSkillPromotionProposal,
@@ -284,8 +284,8 @@ export function Dashboard({
 }: {
   setPage: (page: PageId) => void;
   setScenarioId: (id: ScenarioInstanceId) => void;
-  config: BioAgentConfig;
-  workspaceState: BioAgentWorkspaceState;
+  config: SciForgeConfig;
+  workspaceState: SciForgeWorkspaceState;
   onApplyScenarioDraft: (scenarioId: ScenarioInstanceId, draft: ScenarioRuntimeOverride) => void;
   onWorkbenchPrompt: (scenarioId: ScenarioInstanceId, prompt: string) => void;
 }) {
@@ -367,7 +367,7 @@ export function Dashboard({
 
   async function acceptSkillProposalFromDashboard(id: string, skillId: string) {
     const manifest = await acceptSkillPromotionProposal(config, id);
-    setSkillProposalStatus(`已接受 ${id}，安装到 .bioagent/evolved-skills/${manifest.id}。`);
+    setSkillProposalStatus(`已接受 ${id}，安装到 .sciforge/evolved-skills/${manifest.id}。`);
     await refreshSkillProposals();
     const validation = await validateAcceptedSkillPromotionProposal(config, manifest.id || skillId);
     setSkillProposalValidations((current) => ({ ...current, [manifest.id || skillId]: validation }));
@@ -381,13 +381,13 @@ export function Dashboard({
   }
 
   async function rejectSkillProposalFromDashboard(id: string) {
-    await rejectSkillPromotionProposal(config, id, 'Rejected from BioAgent dashboard review.');
+    await rejectSkillPromotionProposal(config, id, 'Rejected from SciForge dashboard review.');
     await refreshSkillProposals();
     setSkillProposalStatus(`已拒绝 ${id}，不会进入 evolved skills。`);
   }
 
   async function archiveSkillProposalFromDashboard(id: string) {
-    await archiveSkillPromotionProposal(config, id, 'Archived from BioAgent dashboard review.');
+    await archiveSkillPromotionProposal(config, id, 'Archived from SciForge dashboard review.');
     await refreshSkillProposals();
     setSkillProposalStatus(`已归档 ${id}。`);
   }
@@ -869,7 +869,7 @@ function SkillProposalPanel({
   if (!visible.length && !status) return null;
   return (
     <div className="candidate-panel" aria-label="Skill promotion proposals">
-      <SectionHeader title="Skill Proposals" subtitle=".bioagent/skill-proposals → .bioagent/evolved-skills" action={<ActionButton icon={RefreshCw} variant="secondary" onClick={onRefresh}>刷新</ActionButton>} />
+      <SectionHeader title="Skill Proposals" subtitle=".sciforge/skill-proposals → .sciforge/evolved-skills" action={<ActionButton icon={RefreshCw} variant="secondary" onClick={onRefresh}>刷新</ActionButton>} />
       {status ? <p className="scenario-note">{status}</p> : null}
       <div className="candidate-list">
         {visible.map((proposal) => {
@@ -917,12 +917,12 @@ function proposalStatusBadge(proposal: SkillPromotionProposalRecord): 'info' | '
 }
 
 type PackageRunStats = {
-  lastRun?: BioAgentRun;
+  lastRun?: SciForgeRun;
   totalRuns: number;
   failedRuns: number;
 };
 
-function buildPackageRunStats(workspaceState: BioAgentWorkspaceState): Record<string, PackageRunStats> {
+function buildPackageRunStats(workspaceState: SciForgeWorkspaceState): Record<string, PackageRunStats> {
   const stats: Record<string, PackageRunStats> = {};
   const sessions = [
     ...Object.values(workspaceState.sessionsByScenario),

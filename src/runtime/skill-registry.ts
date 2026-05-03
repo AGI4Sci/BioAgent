@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { discoverMarkdownSkillPackages, markdownSkillPackageToRuntimeManifest } from './skill-markdown-catalog.js';
-import type { BioAgentSkillDomain, GatewayRequest, SkillAvailability, SkillManifest } from './runtime-types.js';
+import type { SciForgeSkillDomain, GatewayRequest, SkillAvailability, SkillManifest } from './runtime-types.js';
 import { fileExists } from './workspace-task-runner.js';
 
 export async function loadSkillRegistry(request: Pick<GatewayRequest, 'workspacePath'>): Promise<SkillAvailability[]> {
@@ -11,7 +11,7 @@ export async function loadSkillRegistry(request: Pick<GatewayRequest, 'workspace
     packageSkills.map((manifest) => validateManifest(markdownSkillPackageToRuntimeManifest(manifest), resolve(process.cwd(), manifest.docs.readmePath))),
   );
 
-  for (const manifestPath of await manifestFiles(join(workspace, '.bioagent', 'evolved-skills'))) {
+  for (const manifestPath of await manifestFiles(join(workspace, '.sciforge', 'evolved-skills'))) {
     const manifest = await readManifest(manifestPath, 'workspace');
     skills.push(await validateManifest(manifest, manifestPath));
   }
@@ -68,7 +68,7 @@ function skillAllowedByPrompt(skill: SkillAvailability, prompt: string) {
   return true;
 }
 
-export function agentServerGenerationSkill(skillDomain: BioAgentSkillDomain): SkillAvailability {
+export function agentServerGenerationSkill(skillDomain: SciForgeSkillDomain): SkillAvailability {
   const checkedAt = new Date().toISOString();
   return {
     id: `agentserver.generate.${skillDomain}`,
@@ -111,7 +111,7 @@ async function readManifest(path: string, kind: SkillManifest['kind']): Promise<
     id: String(parsed.id || ''),
     kind: parsed.kind ?? kind,
     description: String(parsed.description || ''),
-    skillDomains: Array.isArray(parsed.skillDomains) ? parsed.skillDomains as BioAgentSkillDomain[] : [],
+    skillDomains: Array.isArray(parsed.skillDomains) ? parsed.skillDomains as SciForgeSkillDomain[] : [],
     inputContract: recordOrEmpty(parsed.inputContract),
     outputArtifactSchema: recordOrEmpty(parsed.outputArtifactSchema),
     entrypoint: recordOrEmpty(parsed.entrypoint) as SkillManifest['entrypoint'],
@@ -146,7 +146,7 @@ async function validateManifest(manifest: SkillManifest, manifestPath: string): 
 }
 
 async function persistWorkspaceSkillStatus(workspace: string, skills: SkillAvailability[]) {
-  const statusPath = join(workspace, '.bioagent', 'skills', 'status.json');
+  const statusPath = join(workspace, '.sciforge', 'skills', 'status.json');
   await mkdir(dirname(statusPath), { recursive: true });
   await writeFile(statusPath, JSON.stringify({
     updatedAt: new Date().toISOString(),
@@ -161,7 +161,7 @@ async function persistWorkspaceSkillStatus(workspace: string, skills: SkillAvail
   }, null, 2));
 }
 
-function scoreSkill(manifest: SkillManifest, skillDomain: BioAgentSkillDomain, prompt: string) {
+function scoreSkill(manifest: SkillManifest, skillDomain: SciForgeSkillDomain, prompt: string) {
   let score = manifest.skillDomains.includes(skillDomain) ? 10 : 0;
   if (manifest.id === 'literature.web_search' && directWebProviderRequested(prompt)) {
     score += 100;

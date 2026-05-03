@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-llm-endpoint-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-llm-endpoint-'));
 const configLocalPath = 'config.local.json';
 const originalConfigLocal = await readFile(configLocalPath, 'utf8').catch(() => '');
-const originalAllowAgentServerDefaultLlm = process.env.BIOAGENT_ALLOW_AGENTSERVER_DEFAULT_LLM;
+const originalAllowAgentServerDefaultLlm = process.env.SCIFORGE_ALLOW_AGENTSERVER_DEFAULT_LLM;
 const localConfig = {
   llm: {
     provider: 'openai-compatible',
@@ -63,7 +63,7 @@ assert.ok(address && typeof address === 'object');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 
 try {
-  process.env.BIOAGENT_ALLOW_AGENTSERVER_DEFAULT_LLM = '0';
+  process.env.SCIFORGE_ALLOW_AGENTSERVER_DEFAULT_LLM = '0';
   await writeFile(configLocalPath, JSON.stringify(localConfig, null, 2));
   const nativeOnlyResult = await runWorkspaceRuntimeGateway({
     skillDomain: 'literature',
@@ -163,12 +163,12 @@ try {
   assert.ok((missingUnit.recoverActions as string[] | undefined)?.some((action) => /fill Model Provider, Model Base URL, Model Name, and API Key/.test(action)));
   assert.match(String(missingUnit.nextStep), /Configure the user-side model endpoint/i);
   assert.equal(requestBody, undefined);
-  console.log('[ok] BioAgent forwards request-selected LLM endpoint to AgentServer runs before local/server defaults');
+  console.log('[ok] SciForge forwards request-selected LLM endpoint to AgentServer runs before local/server defaults');
 } finally {
   if (originalAllowAgentServerDefaultLlm === undefined) {
-    delete process.env.BIOAGENT_ALLOW_AGENTSERVER_DEFAULT_LLM;
+    delete process.env.SCIFORGE_ALLOW_AGENTSERVER_DEFAULT_LLM;
   } else {
-    process.env.BIOAGENT_ALLOW_AGENTSERVER_DEFAULT_LLM = originalAllowAgentServerDefaultLlm;
+    process.env.SCIFORGE_ALLOW_AGENTSERVER_DEFAULT_LLM = originalAllowAgentServerDefaultLlm;
   }
   if (originalConfigLocal) await writeFile(configLocalPath, originalConfigLocal);
   await new Promise<void>((resolve) => server.close(() => resolve()));

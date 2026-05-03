@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { currentTurnContextPolicy, sendBioAgentToolMessage } from './bioagentToolsClient';
+import { currentTurnContextPolicy, sendSciForgeToolMessage } from './sciforgeToolsClient';
 import type { SendAgentMessageInput } from '../domain';
 
 const originalFetch = globalThis.fetch;
@@ -10,7 +10,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-describe('sendBioAgentToolMessage routing', () => {
+describe('sendSciForgeToolMessage routing', () => {
   it('keeps the raw user prompt authoritative even when a local skill is mentioned', async () => {
     let requestBody: Record<string, unknown> | undefined;
     globalThis.fetch = (async (_url, init) => {
@@ -42,7 +42,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       prompt: '请使用已注册本地 workspace skill structure.rcsb_latest_or_entry；不要生成新代码，不要调用 AgentServer。对 PDB 6LUD 运行真实 RCSB metadata/coordinate retrieval。',
     });
@@ -66,7 +66,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-agentserver', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          executionUnits: [{ id: 'EU-agentserver', tool: 'sciforge.workspace-runtime-gateway', status: 'repair-needed' }],
           artifacts: [],
         },
       }), {
@@ -75,7 +75,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       artifacts: [{
         id: 'structure-summary',
@@ -105,7 +105,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-upload-ref', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-upload-ref', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -115,7 +115,7 @@ describe('sendBioAgentToolMessage routing', () => {
     }) as typeof fetch;
 
     const pdfDataUrl = `data:application/pdf;base64,${Buffer.from('fake-pdf-binary'.repeat(80_000)).toString('base64')}`;
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       sessionId: 'session-upload',
       scenarioId: 'literature-evidence-review',
@@ -125,8 +125,8 @@ describe('sendBioAgentToolMessage routing', () => {
         type: 'uploaded-pdf',
         producerScenario: 'literature-evidence-review',
         schemaVersion: '1',
-        dataRef: '.bioagent/uploads/session-upload/upload-pdf.pdf',
-        path: '.bioagent/uploads/session-upload/upload-pdf.pdf',
+        dataRef: '.sciforge/uploads/session-upload/upload-pdf.pdf',
+        path: '.sciforge/uploads/session-upload/upload-pdf.pdf',
         metadata: { fileName: 'paper.pdf', mimeType: 'application/pdf', size: 1234, source: 'user-upload' },
         data: { fileName: 'paper.pdf', mimeType: 'application/pdf', dataUrl: pdfDataUrl },
       }],
@@ -136,8 +136,8 @@ describe('sendBioAgentToolMessage routing', () => {
     const serialized = JSON.stringify(requestBody);
     assert.ok(!serialized.includes(pdfDataUrl.slice(0, 50_000)), 'uploaded PDF dataUrl leaked into AgentServer request');
     const artifacts = requestBody?.artifacts as Array<Record<string, unknown>>;
-    assert.equal(artifacts[0].dataRef, '.bioagent/uploads/session-upload/upload-pdf.pdf');
-    assert.equal(artifacts[0].path, '.bioagent/uploads/session-upload/upload-pdf.pdf');
+    assert.equal(artifacts[0].dataRef, '.sciforge/uploads/session-upload/upload-pdf.pdf');
+    assert.equal(artifacts[0].path, '.sciforge/uploads/session-upload/upload-pdf.pdf');
     assert.equal('data' in artifacts[0], false);
     assert.ok(artifacts[0].dataSummary);
     assert.deepEqual(requestBody?.expectedArtifactTypes, ['research-report']);
@@ -157,7 +157,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-generic-upload', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-generic-upload', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -166,7 +166,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -178,8 +178,8 @@ describe('sendBioAgentToolMessage routing', () => {
         type: 'uploaded-pdf',
         producerScenario: 'literature-evidence-review',
         schemaVersion: '1',
-        dataRef: '.bioagent/uploads/session-upload/paper.pdf',
-        path: '.bioagent/uploads/session-upload/paper.pdf',
+        dataRef: '.sciforge/uploads/session-upload/paper.pdf',
+        path: '.sciforge/uploads/session-upload/paper.pdf',
         metadata: { fileName: 'paper.pdf', mimeType: 'application/pdf', size: 1234, source: 'user-upload' },
       }],
     });
@@ -205,7 +205,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-agentserver-literature', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          executionUnits: [{ id: 'EU-agentserver-literature', tool: 'sciforge.workspace-runtime-gateway', status: 'repair-needed' }],
           artifacts: [],
         },
       }), {
@@ -214,7 +214,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -251,7 +251,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-fresh', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-fresh', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -260,7 +260,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -275,7 +275,7 @@ describe('sendBioAgentToolMessage routing', () => {
         type: 'paper-list',
         producerScenario: 'literature-evidence-review',
         schemaVersion: '1',
-        dataRef: '.bioagent/artifacts/old-paper-list.json',
+        dataRef: '.sciforge/artifacts/old-paper-list.json',
         data: { papers: [{ title: 'Single-cell RNA-seq uncovers dynamic processes in mouse spermatogenesis' }] },
       }],
       executionUnits: [{
@@ -284,7 +284,7 @@ describe('sendBioAgentToolMessage routing', () => {
         params: 'old-pdf',
         status: 'done',
         hash: 'oldhash',
-        outputRef: '.bioagent/task-results/old/output.json',
+        outputRef: '.sciforge/task-results/old/output.json',
       }],
       runs: [{
         id: 'run-old',
@@ -318,7 +318,7 @@ describe('sendBioAgentToolMessage routing', () => {
     const policy = currentTurnContextPolicy({
       ...baseInput(),
       prompt: '检索最新相关论文并对比这份 PDF',
-      references: [{ id: 'ref-pdf', kind: 'file', title: 'paper.pdf', ref: 'file:.bioagent/uploads/paper.pdf' }],
+      references: [{ id: 'ref-pdf', kind: 'file', title: 'paper.pdf', ref: 'file:.sciforge/uploads/paper.pdf' }],
       artifacts: [{ id: 'upload-pdf', type: 'uploaded-pdf', producerScenario: 'literature-evidence-review', schemaVersion: '1' }],
     });
 
@@ -337,7 +337,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-agentserver-literature', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          executionUnits: [{ id: 'EU-agentserver-literature', tool: 'sciforge.workspace-runtime-gateway', status: 'repair-needed' }],
           artifacts: [],
         },
       }), {
@@ -346,7 +346,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -369,7 +369,7 @@ describe('sendBioAgentToolMessage routing', () => {
     assert.deepEqual(uiState.scopeCheck, {
       source: 'structured-scenario-hint',
       decisionOwner: 'AgentServer',
-      note: 'BioAgent does not route or reject current-turn intent by keyword; AgentServer decides from rawUserPrompt and context.',
+      note: 'SciForge does not route or reject current-turn intent by keyword; AgentServer decides from rawUserPrompt and context.',
     });
   });
 
@@ -378,16 +378,16 @@ describe('sendBioAgentToolMessage routing', () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({
       ok: true,
       result: {
-        message: 'BioAgent runtime gateway needs repair before the report can be delivered.',
+        message: 'SciForge runtime gateway needs repair before the report can be delivered.',
         confidence: 0.2,
         claimType: 'fact',
         evidenceLevel: 'runtime',
         uiManifest: [],
         executionUnits: [{
           id: 'EU-agentserver-literature',
-          tool: 'bioagent.workspace-runtime-gateway',
+          tool: 'sciforge.workspace-runtime-gateway',
           status: 'repair-needed',
-          failureReason: 'AgentServer returned taskFiles path-only reference but BioAgent could not read workspace file.',
+          failureReason: 'AgentServer returned taskFiles path-only reference but SciForge could not read workspace file.',
         }],
         artifacts: [{
           id: 'research-report',
@@ -405,7 +405,7 @@ describe('sendBioAgentToolMessage routing', () => {
       headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch;
 
-    const response = await sendBioAgentToolMessage({
+    const response = await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -460,7 +460,7 @@ describe('sendBioAgentToolMessage routing', () => {
       headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch;
 
-    const response = await sendBioAgentToolMessage({
+    const response = await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -525,7 +525,7 @@ describe('sendBioAgentToolMessage routing', () => {
               claimType: 'fact',
               evidenceLevel: 'runtime',
               uiManifest: [],
-              executionUnits: [{ id: 'EU-stream', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+              executionUnits: [{ id: 'EU-stream', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
               artifacts: [],
             },
           },
@@ -538,7 +538,7 @@ describe('sendBioAgentToolMessage routing', () => {
       headers: { 'Content-Type': 'application/x-ndjson' },
     })) as typeof fetch;
 
-    await sendBioAgentToolMessage(baseInput(), {
+    await sendSciForgeToolMessage(baseInput(), {
       onEvent: (event) => {
         events.push(event as Record<string, any>);
       },
@@ -567,7 +567,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-literature', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          executionUnits: [{ id: 'EU-literature', tool: 'sciforge.workspace-runtime-gateway', status: 'repair-needed' }],
           artifacts: [],
         },
       }), {
@@ -576,7 +576,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature',
@@ -585,12 +585,12 @@ describe('sendBioAgentToolMessage routing', () => {
         title: 'T059 literature',
         description: 'external API failure repair loop',
         skillDomain: 'literature',
-        scenarioMarkdown: '必须由 BioAgent/AgentServer 自己生成 workspace-local task。',
+        scenarioMarkdown: '必须由 SciForge/AgentServer 自己生成 workspace-local task。',
         defaultComponents: ['paper-card-list', 'evidence-matrix', 'execution-unit-table'],
         allowedComponents: ['paper-card-list', 'evidence-matrix', 'execution-unit-table'],
         fallbackComponent: 'unknown-artifact-inspector',
       },
-      prompt: 'T059 literature Round 1：不要使用 literature.pubmed_search package skill；请由 BioAgent/AgentServer 自己生成 workspace-local task，故意制造 external API failure，失败时显示 failureReason、stdoutRef/stderrRef 和 ExecutionUnit。',
+      prompt: 'T059 literature Round 1：不要使用 literature.pubmed_search package skill；请由 SciForge/AgentServer 自己生成 workspace-local task，故意制造 external API failure，失败时显示 failureReason、stdoutRef/stderrRef 和 ExecutionUnit。',
       scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
     });
 
@@ -611,7 +611,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-omics', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          executionUnits: [{ id: 'EU-omics', tool: 'sciforge.workspace-runtime-gateway', status: 'repair-needed' }],
           artifacts: [],
         },
       }), {
@@ -620,7 +620,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       scenarioId: 'literature-evidence-review',
       agentName: 'Literature shell',
@@ -637,7 +637,7 @@ describe('sendBioAgentToolMessage routing', () => {
       scenarioPackageRef: { id: 'omics-differential-exploration', version: '1.0.0', source: 'built-in' },
       skillPlanRef: 'skill-plan.omics-differential-exploration.default',
       uiPlanRef: 'ui-plan.omics-differential-exploration.default',
-      prompt: 'T059 omics：只能由 BioAgent/AgentServer 自己生成 workspace-local task。',
+      prompt: 'T059 omics：只能由 SciForge/AgentServer 自己生成 workspace-local task。',
     });
 
     assert.equal(requestBody?.scenarioId, 'omics-differential-exploration');
@@ -660,7 +660,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-structure', tool: 'bioagent.workspace-runtime-gateway', status: 'repair-needed' }],
+          executionUnits: [{ id: 'EU-structure', tool: 'sciforge.workspace-runtime-gateway', status: 'repair-needed' }],
           artifacts: [],
         },
       }), {
@@ -669,7 +669,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       messages: [{
         id: 'msg-stale',
@@ -705,7 +705,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-storage', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-storage', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -714,7 +714,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       sessionId: 'session-alpha',
       messages: [
@@ -735,10 +735,10 @@ describe('sendBioAgentToolMessage routing', () => {
         type: 'runtime-artifact',
         producerScenario: 'workspace-structure-exploration-t055-test',
         schemaVersion: '1',
-        dataRef: '.bioagent/task-results/run-alpha.json',
-        metadata: { outputRef: '.bioagent/task-results/run-alpha.json' },
+        dataRef: '.sciforge/task-results/run-alpha.json',
+        metadata: { outputRef: '.sciforge/task-results/run-alpha.json' },
         data: {
-          files: [{ name: 'result.csv', localPath: '.bioagent/outputs/result.csv' }],
+          files: [{ name: 'result.csv', localPath: '.sciforge/outputs/result.csv' }],
           markdown: 'Report text',
         },
       }],
@@ -748,10 +748,10 @@ describe('sendBioAgentToolMessage routing', () => {
         params: 'n/a',
         status: 'done',
         hash: 'hash',
-        codeRef: '.bioagent/tasks/generated-alpha/main.py',
-        outputRef: '.bioagent/task-results/run-alpha.json',
-        stdoutRef: '.bioagent/logs/run-alpha.stdout.log',
-        stderrRef: '.bioagent/logs/run-alpha.stderr.log',
+        codeRef: '.sciforge/tasks/generated-alpha/main.py',
+        outputRef: '.sciforge/task-results/run-alpha.json',
+        stdoutRef: '.sciforge/logs/run-alpha.stdout.log',
+        stderrRef: '.sciforge/logs/run-alpha.stderr.log',
       }],
       prompt: '这些产物存在哪里？',
     });
@@ -762,17 +762,17 @@ describe('sendBioAgentToolMessage routing', () => {
       'scenario: 已生成报告和数据表。',
       'user: 这些产物存在哪里？',
     ]);
-    assert.deepEqual((uiState.workspacePersistence as Record<string, unknown>).sessionRef, '.bioagent/sessions/session-alpha.json');
+    assert.deepEqual((uiState.workspacePersistence as Record<string, unknown>).sessionRef, '.sciforge/sessions/session-alpha.json');
     const artifacts = requestBody?.artifacts as Array<Record<string, unknown>>;
-    assert.equal(artifacts[0].workspaceArtifactRef, '.bioagent/artifacts/session-alpha-generic-result.json');
-    assert.deepEqual(artifacts[0].fileRefs, ['.bioagent/task-results/run-alpha.json', '.bioagent/outputs/result.csv']);
+    assert.equal(artifacts[0].workspaceArtifactRef, '.sciforge/artifacts/session-alpha-generic-result.json');
+    assert.deepEqual(artifacts[0].fileRefs, ['.sciforge/task-results/run-alpha.json', '.sciforge/outputs/result.csv']);
     const accessPolicy = uiState.artifactAccessPolicy as Record<string, unknown>;
     assert.equal(accessPolicy.mode, 'refs-first-bounded-read');
     assert.match(String(accessPolicy.defaultAction), /metadata/);
     assert.deepEqual(accessPolicy.reusableArtifactRefs, [
       'artifact:generic-result',
-      'file:.bioagent/task-results/run-alpha.json',
-      'file:.bioagent/outputs/result.csv',
+      'file:.sciforge/task-results/run-alpha.json',
+      'file:.sciforge/outputs/result.csv',
     ]);
     const agentContext = uiState.agentContext as Record<string, unknown>;
     assert.deepEqual(agentContext.artifactAccessPolicy, accessPolicy);
@@ -790,7 +790,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-compact-context', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-compact-context', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -800,7 +800,7 @@ describe('sendBioAgentToolMessage routing', () => {
     }) as typeof fetch;
 
     const longAnswer = `开头 ${'token-heavy-content '.repeat(200)} 结尾`;
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       sessionId: 'session-compact-history',
       messages: [
@@ -812,8 +812,8 @@ describe('sendBioAgentToolMessage routing', () => {
         type: 'research-report',
         producerScenario: 'workspace-structure-exploration-t055-test',
         schemaVersion: '1',
-        dataRef: '.bioagent/artifacts/prior-report.json',
-        metadata: { outputRef: '.bioagent/task-results/prior.json' },
+        dataRef: '.sciforge/artifacts/prior-report.json',
+        metadata: { outputRef: '.sciforge/task-results/prior.json' },
         data: { markdown: longAnswer },
       }],
       prompt: '继续，只补充局限性。',
@@ -844,7 +844,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-multi-turn-context', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-multi-turn-context', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -865,7 +865,7 @@ describe('sendBioAgentToolMessage routing', () => {
       type: 'runtime-artifact',
       producerScenario: 'generic-multi-turn-test',
       schemaVersion: '1',
-      dataRef: `.bioagent/artifacts/artifact-${index + 1}.json`,
+      dataRef: `.sciforge/artifacts/artifact-${index + 1}.json`,
       metadata: { runId: `run-${index + 1}` },
       data: { markdown: `artifact ${index + 1}` },
     }));
@@ -875,10 +875,10 @@ describe('sendBioAgentToolMessage routing', () => {
       params: '{}',
       status: 'done' as const,
       hash: `hash-${index + 1}`,
-      outputRef: `.bioagent/task-results/run-${index + 1}.json`,
+      outputRef: `.sciforge/task-results/run-${index + 1}.json`,
     }));
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       sessionId: 'session-multi-turn-ledger',
       messages,
@@ -929,7 +929,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-reference', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-reference', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -938,7 +938,7 @@ describe('sendBioAgentToolMessage routing', () => {
       });
     }) as typeof fetch;
 
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       messages: [{
         id: 'msg-source',
@@ -993,7 +993,7 @@ describe('sendBioAgentToolMessage routing', () => {
           claimType: 'fact',
           evidenceLevel: 'runtime',
           uiManifest: [],
-          executionUnits: [{ id: 'EU-selected-reference', tool: 'bioagent.workspace-runtime-gateway', status: 'done' }],
+          executionUnits: [{ id: 'EU-selected-reference', tool: 'sciforge.workspace-runtime-gateway', status: 'done' }],
           artifacts: [],
         },
       }), {
@@ -1003,7 +1003,7 @@ describe('sendBioAgentToolMessage routing', () => {
     }) as typeof fetch;
 
     const selectedText = 'low sample size weakens the conclusion and must be treated as a limitation';
-    await sendBioAgentToolMessage({
+    await sendSciForgeToolMessage({
       ...baseInput(),
       prompt: '※1 这个限制会不会推翻结论？',
       references: [{
@@ -1051,7 +1051,7 @@ function baseInput(): SendAgentMessageInput {
       schemaVersion: 1,
       agentServerBaseUrl: 'http://127.0.0.1:18080',
       workspaceWriterBaseUrl: 'http://127.0.0.1:5174',
-      workspacePath: '/tmp/bioagent-test-workspace',
+      workspacePath: '/tmp/sciforge-test-workspace',
       agentBackend: 'codex',
       modelProvider: 'native',
       modelBaseUrl: '',

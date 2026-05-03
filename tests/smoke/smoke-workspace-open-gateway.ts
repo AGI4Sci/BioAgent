@@ -4,15 +4,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-workspace-open-'));
-const generatedTmpPath = join(tmpdir(), `bioagent-generated-preview-${Date.now()}.png`);
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-workspace-open-'));
+const generatedTmpPath = join(tmpdir(), `sciforge-generated-preview-${Date.now()}.png`);
 const port = 24080 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
-    BIOAGENT_WORKSPACE_PORT: String(port),
-    BIOAGENT_WORKSPACE_OPEN_DRY_RUN: '1',
+    SCIFORGE_WORKSPACE_PORT: String(port),
+    SCIFORGE_WORKSPACE_OPEN_DRY_RUN: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -77,7 +77,7 @@ try {
 }
 
 function postOpen(baseUrl: string, body: Record<string, unknown>) {
-  return fetch(`${baseUrl}/api/bioagent/workspace/open`, {
+  return fetch(`${baseUrl}/api/sciforge/workspace/open`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

@@ -26,7 +26,7 @@ export async function maybeWriteSkillPromotionProposal(params: {
   if (!await fileExists(sourceTask)) return undefined;
   const sourceTaskText = await readFile(sourceTask, 'utf8');
   const proposal = buildSkillPromotionProposal({ ...params, workspacePath: workspace, sourceTaskText });
-  const proposalDir = join(workspace, '.bioagent', 'skill-proposals', safeName(proposal.id));
+  const proposalDir = join(workspace, '.sciforge', 'skill-proposals', safeName(proposal.id));
   await mkdir(proposalDir, { recursive: true });
   await writeFile(join(proposalDir, 'proposal.json'), JSON.stringify(proposal, null, 2));
   await writeFile(join(proposalDir, 'README.md'), proposalReadme(proposal), 'utf8');
@@ -35,7 +35,7 @@ export async function maybeWriteSkillPromotionProposal(params: {
 
 export async function listSkillPromotionProposals(workspacePath: string): Promise<SkillPromotionProposal[]> {
   const workspace = resolve(workspacePath || process.cwd());
-  const root = join(workspace, '.bioagent', 'skill-proposals');
+  const root = join(workspace, '.sciforge', 'skill-proposals');
   if (!await fileExists(root)) return [];
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   const proposals: SkillPromotionProposal[] = [];
@@ -52,7 +52,7 @@ export async function listSkillPromotionProposals(workspacePath: string): Promis
 
 export async function acceptSkillPromotionProposal(workspacePath: string, proposalId: string): Promise<SkillManifest> {
   const workspace = resolve(workspacePath || process.cwd());
-  const proposalPath = join(workspace, '.bioagent', 'skill-proposals', safeName(proposalId), 'proposal.json');
+  const proposalPath = join(workspace, '.sciforge', 'skill-proposals', safeName(proposalId), 'proposal.json');
   const parsed = JSON.parse(await readFile(proposalPath, 'utf8'));
   if (!isSkillPromotionProposal(parsed)) throw new Error(`Invalid skill promotion proposal: ${proposalId}`);
   if (parsed.status === 'rejected' || parsed.status === 'archived') {
@@ -65,7 +65,7 @@ export async function acceptSkillPromotionProposal(workspacePath: string, propos
   if (!securityGate.passed) {
     throw new Error(`Skill promotion safety gate failed: ${securityGate.findings.join('; ')}`);
   }
-  const skillDir = join(workspace, '.bioagent', 'evolved-skills', safeName(manifest.id));
+  const skillDir = join(workspace, '.sciforge', 'evolved-skills', safeName(manifest.id));
   await mkdir(skillDir, { recursive: true });
   const taskName = taskFileNameForManifest(manifest);
   await copyFile(sourceTask, join(skillDir, taskName));
@@ -117,7 +117,7 @@ async function updateSkillPromotionProposalStatus(
   reason?: string,
 ): Promise<SkillPromotionProposal> {
   const workspace = resolve(workspacePath || process.cwd());
-  const proposalPath = join(workspace, '.bioagent', 'skill-proposals', safeName(proposalId), 'proposal.json');
+  const proposalPath = join(workspace, '.sciforge', 'skill-proposals', safeName(proposalId), 'proposal.json');
   const parsed = JSON.parse(await readFile(proposalPath, 'utf8'));
   if (!isSkillPromotionProposal(parsed)) throw new Error(`Invalid skill promotion proposal: ${proposalId}`);
   if (parsed.status === 'accepted') throw new Error(`Accepted skill promotion proposal cannot be ${status}: ${proposalId}`);
@@ -134,7 +134,7 @@ async function updateSkillPromotionProposalStatus(
 export async function runAcceptedSkillValidationSmoke(workspacePath: string, skillId: string) {
   const workspace = resolve(workspacePath || process.cwd());
   const registry = await loadSkillRegistry({ workspacePath: workspace });
-  const skill = registry.find((item) => item.id === skillId && item.available && item.manifestPath.includes(`${join('.bioagent', 'evolved-skills')}`));
+  const skill = registry.find((item) => item.id === skillId && item.available && item.manifestPath.includes(`${join('.sciforge', 'evolved-skills')}`));
   if (!skill) throw new Error(`Accepted evolved skill is not discoverable in registry: ${skillId}`);
   if (skill.manifest.entrypoint.type !== 'workspace-task' || !skill.manifest.entrypoint.path) {
     throw new Error(`Accepted evolved skill is not a workspace task: ${skillId}`);
@@ -154,10 +154,10 @@ export async function runAcceptedSkillValidationSmoke(workspacePath: string, ski
       validationSmoke: true,
       skillId,
     },
-    outputRel: `.bioagent/validation/${safeName(skill.id)}/output.json`,
-    stdoutRel: `.bioagent/validation/${safeName(skill.id)}/stdout.txt`,
-    stderrRel: `.bioagent/validation/${safeName(skill.id)}/stderr.txt`,
-    taskRel: `.bioagent/validation/${safeName(skill.id)}/${basename(entrypointPath)}`,
+    outputRel: `.sciforge/validation/${safeName(skill.id)}/output.json`,
+    stdoutRel: `.sciforge/validation/${safeName(skill.id)}/stdout.txt`,
+    stderrRel: `.sciforge/validation/${safeName(skill.id)}/stderr.txt`,
+    taskRel: `.sciforge/validation/${safeName(skill.id)}/${basename(entrypointPath)}`,
     timeoutMs: 120000,
   });
   const payload: unknown = JSON.parse(await readFile(join(workspace, run.outputRef), 'utf8'));
@@ -183,7 +183,7 @@ export async function runAcceptedSkillValidationSmoke(workspacePath: string, ski
 }
 
 function shouldProposeSkill(skill: SkillAvailability, taskRel: string, selfHealed?: boolean) {
-  if (skill.kind === 'workspace' && skill.manifestPath.includes(`${join('.bioagent', 'evolved-skills')}`)) return false;
+  if (skill.kind === 'workspace' && skill.manifestPath.includes(`${join('.sciforge', 'evolved-skills')}`)) return false;
   if (selfHealed) return true;
   if (skill.manifest.entrypoint.type === 'agentserver-generation') return true;
   if (skill.id.startsWith('agentserver.generate.')) return true;
@@ -321,7 +321,7 @@ function proposalReadme(proposal: SkillPromotionProposal) {
     '## Required Review',
     '- Check generated code for hard-coded user data, credentials, absolute paths, private file references, and hidden network assumptions.',
     '- Run the validation smoke prompt before accepting.',
-    '- Accepting the proposal installs it into `.bioagent/evolved-skills/` for future registry matching without modifying seed or preinstalled skills.',
+    '- Accepting the proposal installs it into `.sciforge/evolved-skills/` for future registry matching without modifying seed or preinstalled skills.',
     proposal.securityGate?.passed ? '- Safety gate: passed.' : `- Safety gate: failed (${proposal.securityGate?.findings.join('; ') || 'unknown'}).`,
   ].filter(Boolean).join('\n');
 }

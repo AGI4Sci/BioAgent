@@ -5,7 +5,7 @@ import {
   type AgentServerRunPayload,
   type AgentBackendId,
   type AgentStreamEvent,
-  type BioAgentMessage,
+  type SciForgeMessage,
   type NormalizedAgentResponse,
   type ObjectAction,
   type ObjectReference,
@@ -20,7 +20,7 @@ import {
 } from '../domain';
 import { agentProtocolForPrompt, SCENARIO_SPECS } from '../scenarioSpecs';
 import { expectedArtifactsForCurrentTurn } from '../artifactIntent';
-import { BioAgentClientError, reasonFromResponseText, recoverActionsForService } from './clientError';
+import { SciForgeClientError, reasonFromResponseText, recoverActionsForService } from './clientError';
 import { promptWithScopeCheck, scopeCheck } from './scopeCheck';
 
 const DEFAULT_AGENT_SERVER_URL = 'http://127.0.0.1:18080';
@@ -65,10 +65,10 @@ function agentSystemPrompt(input: SendAgentMessageInput) {
   const scenario = SCENARIO_SPECS[builtInScenarioId];
   const runtimeScenario = input.scenarioOverride;
   return [
-    `你运行在 BioAgent 的场景工作台中，当前 Scenario 是「${runtimeScenario?.title ?? scenario.title}」，skill domain 是 ${runtimeScenario?.skillDomain ?? scenario.skillDomain}，领域是 ${input.agentDomain}。`,
+    `你运行在 SciForge 的场景工作台中，当前 Scenario 是「${runtimeScenario?.title ?? scenario.title}」，skill domain 是 ${runtimeScenario?.skillDomain ?? scenario.skillDomain}，领域是 ${input.agentDomain}。`,
     '当前用户原始问题是最高优先级；ScenarioSpec、UI 默认组件和历史请求只能作为上下文提示，不能替用户添加没有要求的目标。',
     '请用中文回答生命科学研究问题。',
-    '优先使用当前 backend 的 native tools；只有 native tools 不可用时，才把 BioAgent/AgentServer tools 当兜底。',
+    '优先使用当前 backend 的 native tools；只有 native tools 不可用时，才把 SciForge/AgentServer tools 当兜底。',
     '只在本轮用户明确需要时输出 artifact/uiManifest；不要因为场景默认值自动生成 paper-list、evidence-matrix、notebook-timeline。',
     '需要执行或产物时，输出可追溯证据、置信度、事实/推断/假设区分，以及可复现 ExecutionUnit 草案。',
     '不要生成 UI 代码；如需驱动前端 UI，请在回答末尾附加一个 JSON 对象。',
@@ -91,16 +91,16 @@ function buildPrompt(input: SendAgentMessageInput) {
   const recentHistory = input.messages.slice(-6).map((message) => ({
     role: message.role,
     content: clipPromptText(message.content, 900),
-    references: message.references?.map(compactBioAgentReference),
+    references: message.references?.map(compactSciForgeReference),
   }));
   const artifactContext = summarizeArtifacts(input.artifacts ?? []);
-  const referenceContext = summarizeBioAgentReferences(input.references ?? []);
+  const referenceContext = summarizeSciForgeReferences(input.references ?? []);
   const artifactAccessPolicy = buildArtifactAccessPolicy(input, artifactContext);
   return [
     '用户原始问题（权威）:',
     input.prompt,
     '',
-    `当前 BioAgent scenario: ${input.scenarioId}`,
+    `当前 SciForge scenario: ${input.scenarioId}`,
     `internal skill domain: ${input.scenarioOverride?.skillDomain ?? SCENARIO_SPECS[builtInScenarioId].skillDomain}`,
     `本轮显式 expected artifacts: ${expectedArtifacts.join(', ') || 'backend-decides'}`,
     `用户勾选的可用 UI 组件白名单: ${(input.availableComponentIds ?? []).join(', ') || 'none'}`,
@@ -140,7 +140,7 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
       systemPrompt: agentSystemPrompt(input),
       reconcileExisting: true,
       metadata: {
-        bioAgentScenario: input.scenarioId,
+        sciForgeScenario: input.scenarioId,
         scenarioPackageRef: input.scenarioPackageRef,
         skillPlanRef: input.skillPlanRef,
         uiPlanRef: input.uiPlanRef,
@@ -166,14 +166,14 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
         scenarioOverride: input.scenarioOverride,
         artifacts: artifactSummary,
         artifactAccessPolicy: buildArtifactAccessPolicy(input, artifactSummary),
-        references: summarizeBioAgentReferences(input.references ?? []),
+        references: summarizeSciForgeReferences(input.references ?? []),
         scopeCheck: scopeCheck(builtInScenarioId, input.prompt),
       },
     },
     runtime,
     metadata: {
-      project: 'BioAgent',
-      source: 'bioagent-web-ui',
+      project: 'SciForge',
+      source: 'sciforge-web-ui',
       scenarioId: input.scenarioId,
       runtimeConfig: {
         agentBackend: input.config.agentBackend,
@@ -188,11 +188,11 @@ function buildRunPayload(input: SendAgentMessageInput): AgentServerRunPayload {
   };
 }
 
-function summarizeBioAgentReferences(references: NonNullable<SendAgentMessageInput['references']>) {
-  return references.slice(0, 8).map(compactBioAgentReference);
+function summarizeSciForgeReferences(references: NonNullable<SendAgentMessageInput['references']>) {
+  return references.slice(0, 8).map(compactSciForgeReference);
 }
 
-function compactBioAgentReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {
+function compactSciForgeReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {
   return {
     id: reference.id,
     kind: reference.kind,
@@ -297,7 +297,7 @@ function buildRuntimeConfig(input: SendAgentMessageInput): NonNullable<AgentServ
     backend: normalizeAgentBackend(input.config.agentBackend),
     cwd: input.config.workspacePath,
     metadata: {
-      bioAgentScenario: input.scenarioId,
+      sciForgeScenario: input.scenarioId,
       scenarioPackageRef: input.scenarioPackageRef,
       skillPlanRef: input.skillPlanRef,
       uiPlanRef: input.uiPlanRef,
@@ -1246,7 +1246,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput, signal?: Ab
       // Keep the raw text for diagnostics.
     }
     if (!response.ok) {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: 'AgentServer 请求失败',
         reason: reasonFromResponseText(text, `HTTP ${response.status}`),
         recoverActions: recoverActionsForService('agentserver'),
@@ -1256,7 +1256,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput, signal?: Ab
     return normalizeAgentResponse(input.scenarioId, input.prompt, json);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: 'AgentServer 请求超时',
         reason: '请求已取消或超过配置的 timeout。',
         recoverActions: ['检查模型后端是否响应', '调大 Timeout ms', '重试当前请求'],
@@ -1265,7 +1265,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput, signal?: Ab
       });
     }
     if (err instanceof TypeError) {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: '无法连接 AgentServer',
         reason: `${input.config.agentServerBaseUrl || DEFAULT_AGENT_SERVER_URL} 未响应。`,
         recoverActions: recoverActionsForService('agentserver'),
@@ -1301,7 +1301,7 @@ export async function sendAgentMessageStream(
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: 'AgentServer 流式请求失败',
         reason: reasonFromResponseText(text, `HTTP ${response.status}`),
         recoverActions: recoverActionsForService('agentserver'),
@@ -1309,7 +1309,7 @@ export async function sendAgentMessageStream(
       });
     }
     if (!response.body) {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: 'AgentServer 流式响应不可读',
         reason: '服务返回了成功状态，但没有可读取的响应体。',
         recoverActions: recoverActionsForService('agentserver'),
@@ -1360,7 +1360,7 @@ export async function sendAgentMessageStream(
       }
     }
     if (!finalResult) {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: 'AgentServer 流式响应不完整',
         reason: '流结束时没有最终 run result。',
         recoverActions: ['查看 AgentServer 日志', '重试当前请求', '改用 workspace/evolved capability 或 workspace runtime'],
@@ -1370,7 +1370,7 @@ export async function sendAgentMessageStream(
     return normalizeAgentResponse(input.scenarioId, input.prompt, { ok: true, data: finalResult });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: 'AgentServer 流式请求超时',
         reason: '请求已取消或超过配置的 timeout。',
         recoverActions: ['检查模型后端是否响应', '调大 Timeout ms', '重试当前请求'],
@@ -1379,7 +1379,7 @@ export async function sendAgentMessageStream(
       });
     }
     if (err instanceof TypeError) {
-      throw new BioAgentClientError({
+      throw new SciForgeClientError({
         title: '无法连接 AgentServer stream',
         reason: `${input.config.agentServerBaseUrl || DEFAULT_AGENT_SERVER_URL} 未响应。`,
         recoverActions: recoverActionsForService('agentserver'),
@@ -1456,7 +1456,7 @@ function buildSemanticAcceptancePayload(
   },
 ) {
   return {
-    contract: 'bioagent.semantic-turn-acceptance.v1',
+    contract: 'sciforge.semantic-turn-acceptance.v1',
     instruction: 'Return only an acceptance judgment. Do not write or rewrite the user-facing final answer.',
     userGoalSnapshot: args.snapshot,
     finalResponse: args.response.message.content,
@@ -1466,8 +1466,8 @@ function buildSemanticAcceptancePayload(
     deterministicAcceptance: args.deterministicAcceptance,
     runRef: `run:${args.response.run.id}`,
     metadata: {
-      project: 'BioAgent',
-      source: 'bioagent-web-ui',
+      project: 'SciForge',
+      source: 'sciforge-web-ui',
       sessionId: input.sessionId,
       scenarioId: input.scenarioId,
       agentBackend: input.config.agentBackend,
@@ -1503,8 +1503,8 @@ export async function compactAgentContext(input: SendAgentMessageInput, reason: 
   const scenario = SCENARIO_SPECS[builtInScenarioId];
   const payload = {
     reason,
-    project: 'BioAgent',
-    source: 'bioagent-web-ui',
+    project: 'SciForge',
+    source: 'sciforge-web-ui',
     agent: {
       id: scenario.runtimeId,
       backend: normalizeAgentBackend(input.config.agentBackend),

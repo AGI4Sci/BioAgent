@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { loadSkillRegistry, matchSkill } from '../../src/runtime/skill-registry.js';
 import type { SkillAvailability } from '../../src/runtime/runtime-types.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-skill-registry-'));
-const brokenSkillDir = join(workspace, '.bioagent', 'evolved-skills', 'broken.skill');
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-skill-registry-'));
+const brokenSkillDir = join(workspace, '.sciforge', 'evolved-skills', 'broken.skill');
 await mkdir(brokenSkillDir, { recursive: true });
 await writeFile(join(brokenSkillDir, 'skill.json'), JSON.stringify({
   id: 'broken.skill',
@@ -83,7 +83,7 @@ const tcgaMatched = matchSkill({
 }, skills);
 assert.equal(tcgaMatched?.id, 'scp.tcga-gene-expression', 'SCP TCGA Markdown skill should be matchable in omics');
 
-const status = JSON.parse(await readFile(join(workspace, '.bioagent', 'skills', 'status.json'), 'utf8')) as {
+const status = JSON.parse(await readFile(join(workspace, '.sciforge', 'skills', 'status.json'), 'utf8')) as {
   skills: Array<Pick<SkillAvailability, 'id' | 'available' | 'reason'>>;
 };
 const statusBroken = status.skills.find((skill) => skill.id === 'broken.skill');

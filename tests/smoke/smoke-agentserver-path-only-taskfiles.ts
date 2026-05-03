@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 import { appendTaskAttempt } from '../../src/runtime/task-attempt-history.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-path-only-'));
-await mkdir(join(workspace, '.bioagent', 'tasks'), { recursive: true });
-await writeFile(join(workspace, '.bioagent', 'tasks', 'path_only.py'), [
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-path-only-'));
+await mkdir(join(workspace, '.sciforge', 'tasks'), { recursive: true });
+await writeFile(join(workspace, '.sciforge', 'tasks', 'path_only.py'), [
   'import json, sys',
   'with open(sys.argv[1], "r", encoding="utf-8") as handle:',
   '    request = json.load(handle)',
@@ -55,8 +55,8 @@ const server = createServer(async (req, res) => {
         id: 'mock-agentserver-path-only-run',
         status: 'completed',
         output: {
-          taskFiles: [{ path: '.bioagent/tasks/path_only.py', language: 'python' }],
-          entrypoint: { language: 'python', path: '.bioagent/tasks/path_only.py' },
+          taskFiles: [{ path: '.sciforge/tasks/path_only.py', language: 'python' }],
+          entrypoint: { language: 'python', path: '.sciforge/tasks/path_only.py' },
           expectedArtifacts: ['research-report'],
           patchSummary: 'AgentServer wrote the task directly in the workspace and returned a path-only reference.',
         },
@@ -114,11 +114,11 @@ try {
   assert.match(promptText, /report-viewer/);
   assert.match(promptText, /prior-path-only-attempt/);
 
-  const taskArchives = await readdir(join(workspace, '.bioagent', 'tasks'));
+  const taskArchives = await readdir(join(workspace, '.sciforge', 'tasks'));
   assert.ok(taskArchives.some((entry) => entry.startsWith('generated-literature-')));
-  const debugFiles = await readdir(join(workspace, '.bioagent', 'debug', 'agentserver'));
+  const debugFiles = await readdir(join(workspace, '.sciforge', 'debug', 'agentserver'));
   assert.equal(debugFiles.length, 1);
-  const debug = await readFile(join(workspace, '.bioagent', 'debug', 'agentserver', debugFiles[0]), 'utf8');
+  const debug = await readFile(join(workspace, '.sciforge', 'debug', 'agentserver', debugFiles[0]), 'utf8');
   assert.doesNotMatch(debug, /path-only-secret-key/);
   assert.match(debug, /\[redacted\]/);
   console.log('[ok] path-only AgentServer taskFiles reuse workspace edits and write redacted debug artifact');

@@ -1,4 +1,4 @@
-export type BioAgentSkillDomain = 'literature' | 'structure' | 'omics' | 'knowledge';
+export type SciForgeSkillDomain = 'literature' | 'structure' | 'omics' | 'knowledge';
 
 export type ExecutionUnitStatus =
   | 'planned'
@@ -11,7 +11,7 @@ export type ExecutionUnitStatus =
   | 'failed-with-reason';
 
 export interface GatewayRequest {
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   prompt: string;
   workspacePath?: string;
   agentServerBaseUrl?: string;
@@ -187,7 +187,7 @@ export interface SkillManifest {
   id: string;
   kind: 'package' | 'workspace' | 'installed';
   description: string;
-  skillDomains: BioAgentSkillDomain[];
+  skillDomains: SciForgeSkillDomain[];
   inputContract: Record<string, unknown>;
   outputArtifactSchema: Record<string, unknown>;
   entrypoint: {
@@ -324,7 +324,7 @@ export interface SkillPromotionProposal {
 
 export interface AgentServerGenerationRequest {
   prompt: string;
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   contextEnvelope?: Record<string, unknown>;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
   availableSkills: Array<Pick<SkillAvailability, 'id' | 'kind' | 'available' | 'reason' | 'manifestPath'> & {
@@ -356,7 +356,7 @@ export interface AgentServerGenerationResponse {
 
 export interface AgentServerRepairRequest {
   prompt: string;
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   contextEnvelope?: Record<string, unknown>;
   codeRef: string;
   inputRef?: string;
@@ -378,7 +378,7 @@ export interface AgentServerRepairResponse extends AgentServerGenerationResponse
 export interface TaskAttemptRecord {
   id: string;
   prompt: string;
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   skillId?: string;
   scenarioPackageRef?: ScenarioPackageRef;
   skillPlanRef?: string;

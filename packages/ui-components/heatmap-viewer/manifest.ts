@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/heatmap-viewer',
+  packageName: '@sciforge-ui/heatmap-viewer',
   moduleId: 'omics-heatmap-viewer',
   version: '1.0.0',
   title: 'Heatmap viewer',

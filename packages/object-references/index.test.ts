@@ -13,7 +13,7 @@ import {
   syntheticArtifactForObjectReference,
   withComposerMarker,
 } from './index';
-import type { BioAgentSession, ObjectReference, RuntimeArtifact } from '../../src/ui/src/domain';
+import type { SciForgeSession, ObjectReference, RuntimeArtifact } from '../../src/ui/src/domain';
 
 const artifact: RuntimeArtifact = {
   id: 'artifact-1',
@@ -26,7 +26,7 @@ const artifact: RuntimeArtifact = {
   data: { rows: [{ gene: 'TP53' }] },
 };
 
-const session = { artifacts: [artifact] } as BioAgentSession;
+const session = { artifacts: [artifact] } as SciForgeSession;
 const artifactRef: ObjectReference = {
   id: 'obj-1',
   title: 'DE genes',
@@ -57,8 +57,8 @@ const uploaded = {
   ...artifact,
   id: 'upload-1',
   type: 'uploaded-pdf',
-  path: '.bioagent/uploads/session/upload-1-paper.pdf',
-  dataRef: '.bioagent/uploads/session/upload-1-paper.pdf',
+  path: '.sciforge/uploads/session/upload-1-paper.pdf',
+  dataRef: '.sciforge/uploads/session/upload-1-paper.pdf',
   metadata: { title: 'paper.pdf', size: 1234 },
 };
 assert.equal(referenceForUploadedArtifact(uploaded).ref, uploaded.dataRef);

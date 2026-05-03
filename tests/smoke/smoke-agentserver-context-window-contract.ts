@@ -192,7 +192,7 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 try {
   for (const backend of AGENT_BACKENDS) {
     activeBackend = backend;
-    const workspace = await mkdtemp(join(tmpdir(), `bioagent-context-window-${backend}-`));
+    const workspace = await mkdtemp(join(tmpdir(), `sciforge-context-window-${backend}-`));
     const events: Array<Record<string, unknown>> = [];
     const payload = await runWorkspaceRuntimeGateway({
       skillDomain: 'literature',
@@ -202,12 +202,12 @@ try {
       agentServerBaseUrl: baseUrl,
       prompt: `T057 context window contract smoke for ${backend}`,
       expectedArtifactTypes: ['research-report'],
-      artifacts: [{ id: 'prior-report', type: 'research-report', dataRef: '.bioagent/artifacts/prior-report.json' }],
+      artifacts: [{ id: 'prior-report', type: 'research-report', dataRef: '.sciforge/artifacts/prior-report.json' }],
       uiState: {
         sessionId: `context-window-${backend}`,
         currentPrompt: `T057 context window contract smoke for ${backend}`,
         recentConversation: ['user: previous turn', 'assistant: previous answer'],
-        recentExecutionRefs: [{ id: 'prior-run', status: 'done', outputRef: '.bioagent/task-results/prior.json' }],
+        recentExecutionRefs: [{ id: 'prior-run', status: 'done', outputRef: '.sciforge/task-results/prior.json' }],
         forceAgentServerGeneration: true,
       },
     }, {
@@ -297,7 +297,7 @@ try {
   assert.ok((rateLimitEventsByBackend.get('hermes-agent') ?? []).some((event) => event.resetAt === '2026-05-02T02:30:00.000Z'), 'Hermes compat rate-limit reset should normalize to rateLimit event');
 
   activeBackend = 'openteam_agent';
-  const recoverySuccessWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-openteam-context-window-retry-success-'));
+  const recoverySuccessWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-openteam-context-window-retry-success-'));
   const recoveryEvents: Record<string, unknown>[] = [];
   recoveryMode = 'success';
   const recovered = await runWorkspaceRuntimeGateway({
@@ -328,7 +328,7 @@ try {
 
   for (const backend of AGENT_BACKENDS) {
     activeBackend = backend;
-    const recoveryFailureWorkspace = await mkdtemp(join(tmpdir(), `bioagent-${backend}-context-window-retry-failure-`));
+    const recoveryFailureWorkspace = await mkdtemp(join(tmpdir(), `sciforge-${backend}-context-window-retry-failure-`));
     recoveryMode = 'failure';
     const failed = await runWorkspaceRuntimeGateway({
       skillDomain: 'literature',
@@ -354,7 +354,7 @@ try {
     const refs = isRecord(failedUnit.refs) ? failedUnit.refs : {};
     assert.equal(refs.backend, backend);
     assert.ok(typeof refs.provider === 'string' && refs.provider.length > 0, `${backend} failed recovery should include provider ref`);
-    assert.match(String(refs.sessionRef || ''), /\/api\/agent-server\/agents\/bioagent-literature-/);
+    assert.match(String(refs.sessionRef || ''), /\/api\/agent-server\/agents\/sciforge-literature-/);
     assert.ok(isRecord(refs.compactResult), `${backend} failed recovery should include compact result refs`);
     const compactResult = refs.compactResult as Record<string, unknown>;
     if (backend === 'openclaw') {

@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/notebook-timeline',
+  packageName: '@sciforge-ui/notebook-timeline',
   moduleId: 'notebook-research-timeline',
   version: '1.0.0',
   title: 'Research notebook timeline',

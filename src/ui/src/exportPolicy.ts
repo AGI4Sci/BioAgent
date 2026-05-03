@@ -1,4 +1,4 @@
-import { nowIso, type BioAgentSession, type RuntimeArtifact } from './domain';
+import { nowIso, type SciForgeSession, type RuntimeArtifact } from './domain';
 
 export interface ExportPolicyDecision {
   allowed: boolean;
@@ -8,7 +8,7 @@ export interface ExportPolicyDecision {
   warnings: string[];
 }
 
-export function evaluateExecutionBundleExport(session: BioAgentSession): ExportPolicyDecision {
+export function evaluateExecutionBundleExport(session: SciForgeSession): ExportPolicyDecision {
   const blocked = session.artifacts.filter((artifact) => artifact.exportPolicy === 'blocked');
   const restricted = session.artifacts.filter((artifact) => artifact.exportPolicy === 'restricted');
   const sensitiveFlags = unique(session.artifacts.flatMap((artifact) => artifact.sensitiveDataFlags ?? []));
@@ -30,7 +30,7 @@ export function evaluateExecutionBundleExport(session: BioAgentSession): ExportP
   };
 }
 
-export function buildExecutionBundle(session: BioAgentSession, decision = evaluateExecutionBundleExport(session)) {
+export function buildExecutionBundle(session: SciForgeSession, decision = evaluateExecutionBundleExport(session)) {
   if (!decision.allowed) {
     throw new Error(`Export blocked by artifact policy: ${decision.blockedArtifactIds.join(', ')}`);
   }

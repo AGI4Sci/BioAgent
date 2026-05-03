@@ -3,7 +3,7 @@ import type { SkillPackageManifest } from './types';
 export const skillPackageManifests = [
   {
     "id": "pdf-extract",
-    "packageName": "@bioagent-skill/pdf-extract",
+    "packageName": "@sciforge-skill/pdf-extract",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Pdf Extract",
@@ -41,7 +41,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "pdf extract",
       "extract processing",
-      "Use pdf extract and return structured BioAgent artifacts"
+      "Use pdf extract and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/xejrax/pdf-extract/SKILL.md",
@@ -58,7 +58,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.admet_druglikeness_report",
-    "packageName": "@bioagent-skill/admet_druglikeness_report",
+    "packageName": "@sciforge-skill/admet_druglikeness_report",
     "kind": "skill",
     "version": "1.0.0",
     "label": "admet_druglikeness_report",
@@ -96,7 +96,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "admet druglikeness report",
       "likeness assessment evaluating absorption distribution metabolism excretion toxicity",
-      "Use admet druglikeness report and return structured BioAgent artifacts"
+      "Use admet druglikeness report and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/admet_druglikeness_report/SKILL.md",
@@ -117,7 +117,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.antibody_drug_development",
-    "packageName": "@bioagent-skill/antibody_drug_development",
+    "packageName": "@sciforge-skill/antibody_drug_development",
     "kind": "skill",
     "version": "1.0.0",
     "label": "antibody_drug_development",
@@ -153,7 +153,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "antibody drug development",
       "antibody development develop antibody epitope prediction humanness scoring",
-      "Use antibody drug development and return structured BioAgent artifacts"
+      "Use antibody drug development and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/antibody_drug_development/SKILL.md",
@@ -172,7 +172,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.antibody_target_analysis",
-    "packageName": "@bioagent-skill/antibody_target_analysis",
+    "packageName": "@sciforge-skill/antibody_target_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "antibody_target_analysis",
@@ -208,7 +208,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "antibody target analysis",
       "antibody target analysis identify validate antibody targets through",
-      "Use antibody target analysis and return structured BioAgent artifacts"
+      "Use antibody target analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/antibody_target_analysis/SKILL.md",
@@ -227,7 +227,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.atc_drug_classification",
-    "packageName": "@bioagent-skill/atc_drug_classification",
+    "packageName": "@sciforge-skill/atc_drug_classification",
     "kind": "skill",
     "version": "1.0.0",
     "label": "atc_drug_classification",
@@ -264,7 +264,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "atc drug classification",
       "classify according anatomical therapeutic chemical classification system compound",
-      "Use atc drug classification and return structured BioAgent artifacts"
+      "Use atc drug classification and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/atc_drug_classification/SKILL.md",
@@ -285,7 +285,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.binding_site_characterization",
-    "packageName": "@bioagent-skill/binding_site_characterization",
+    "packageName": "@sciforge-skill/binding_site_characterization",
     "kind": "skill",
     "version": "1.0.0",
     "label": "binding_site_characterization",
@@ -323,7 +323,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "binding site characterization",
       "characterize protein binding including pocket detection analysis pharmacological",
-      "Use binding site characterization and return structured BioAgent artifacts"
+      "Use binding site characterization and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/binding_site_characterization/SKILL.md",
@@ -345,7 +345,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.biomarker_discovery",
-    "packageName": "@bioagent-skill/biomarker_discovery",
+    "packageName": "@sciforge-skill/biomarker_discovery",
     "kind": "skill",
     "version": "1.0.0",
     "label": "biomarker_discovery",
@@ -384,7 +384,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "biomarker discovery",
       "biomarker discovery identify validate diagnostic prognostic predictive biomarkers",
-      "Use biomarker discovery and return structured BioAgent artifacts"
+      "Use biomarker discovery and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/biomarker_discovery/SKILL.md",
@@ -405,7 +405,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.biomedical-web-search",
-    "packageName": "@bioagent-skill/biomedical-web-search",
+    "packageName": "@sciforge-skill/biomedical-web-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "biomedical-web-search",
@@ -446,7 +446,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "biomedical web search",
       "search biomedical literature databases clinical resources across pubmed",
-      "Use biomedical web search and return structured BioAgent artifacts"
+      "Use biomedical web search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/biomedical-web-search/SKILL.md",
@@ -467,7 +467,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.cancer_therapy_design",
-    "packageName": "@bioagent-skill/cancer_therapy_design",
+    "packageName": "@sciforge-skill/cancer_therapy_design",
     "kind": "skill",
     "version": "1.0.0",
     "label": "cancer_therapy_design",
@@ -507,7 +507,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "cancer therapy design",
       "design personalized cancer therapeutic strategies integrating including genomics",
-      "Use cancer therapy design and return structured BioAgent artifacts"
+      "Use cancer therapy design and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/cancer_therapy_design/SKILL.md",
@@ -530,7 +530,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.cell_line_assay_analysis",
-    "packageName": "@bioagent-skill/cell_line_assay_analysis",
+    "packageName": "@sciforge-skill/cell_line_assay_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "cell_line_assay_analysis",
@@ -565,7 +565,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "cell line assay analysis",
       "analysis analyze including viability cytotoxicity proliferation apoptosis assays",
-      "Use cell line assay analysis and return structured BioAgent artifacts"
+      "Use cell line assay analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/cell_line_assay_analysis/SKILL.md",
@@ -585,7 +585,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.chembl-molecule-search",
-    "packageName": "@bioagent-skill/chembl-molecule-search",
+    "packageName": "@sciforge-skill/chembl-molecule-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "ChEMBL Molecule Search",
@@ -621,7 +621,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "chembl molecule search",
       "search chembl database bioactive molecules compounds associated biological",
-      "Use chembl molecule search and return structured BioAgent artifacts"
+      "Use chembl molecule search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/chembl-molecule-search/SKILL.md",
@@ -637,7 +637,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.chemical_structure_comparison",
-    "packageName": "@bioagent-skill/chemical_structure_comparison",
+    "packageName": "@sciforge-skill/chemical_structure_comparison",
     "kind": "skill",
     "version": "1.0.0",
     "label": "chemical_structure_comparison",
@@ -675,7 +675,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "chemical structure comparison",
       "chemical structure comparison compare molecular structures smiles molecular",
-      "Use chemical structure comparison and return structured BioAgent artifacts"
+      "Use chemical structure comparison and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/chemical_structure_comparison/SKILL.md",
@@ -697,7 +697,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.chemical-mass-percent-calculation",
-    "packageName": "@bioagent-skill/chemical-mass-percent-calculation",
+    "packageName": "@sciforge-skill/chemical-mass-percent-calculation",
     "kind": "skill",
     "version": "1.0.0",
     "label": "chemical-mass-percent-calculation",
@@ -733,7 +733,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "chemical mass percent calculation",
       "calculate percent composition chemical compounds molecular formula smiles",
-      "Use chemical mass percent calculation and return structured BioAgent artifacts"
+      "Use chemical mass percent calculation and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/chemical-mass-percent-calculation/SKILL.md",
@@ -751,7 +751,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.chemical-safety-assessment",
-    "packageName": "@bioagent-skill/chemical-safety-assessment",
+    "packageName": "@sciforge-skill/chemical-safety-assessment",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Chemical Safety Assessment",
@@ -788,7 +788,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "chemical safety assessment",
       "evaluate chemical compound safety profiles including toxicity endpoints",
-      "Use chemical safety assessment and return structured BioAgent artifacts"
+      "Use chemical safety assessment and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/chemical_safety_assessment/SKILL.md",
@@ -805,7 +805,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.combinatorial_chemistry",
-    "packageName": "@bioagent-skill/combinatorial_chemistry",
+    "packageName": "@sciforge-skill/combinatorial_chemistry",
     "kind": "skill",
     "version": "1.0.0",
     "label": "combinatorial_chemistry",
@@ -841,7 +841,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "combinatorial chemistry",
       "combinatorial chemistry library design design combinatorial library validate",
-      "Use combinatorial chemistry and return structured BioAgent artifacts"
+      "Use combinatorial chemistry and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/combinatorial_chemistry/SKILL.md",
@@ -860,7 +860,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.comparative_drug_analysis",
-    "packageName": "@bioagent-skill/comparative_drug_analysis",
+    "packageName": "@sciforge-skill/comparative_drug_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "comparative_drug_analysis",
@@ -897,7 +897,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "comparative drug analysis",
       "comparative analysis compare mechanism action target profiling pathway",
-      "Use comparative drug analysis and return structured BioAgent artifacts"
+      "Use comparative drug analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/comparative_drug_analysis/SKILL.md",
@@ -917,7 +917,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.compound_database_crossref",
-    "packageName": "@bioagent-skill/compound_database_crossref",
+    "packageName": "@sciforge-skill/compound_database_crossref",
     "kind": "skill",
     "version": "1.0.0",
     "label": "compound_database_crossref",
@@ -953,7 +953,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "compound database crossref",
       "reference chemical compounds across multiple databases including pubchem",
-      "Use compound database crossref and return structured BioAgent artifacts"
+      "Use compound database crossref and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/compound_database_crossref/SKILL.md",
@@ -972,7 +972,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.compound-name-retrieval",
-    "packageName": "@bioagent-skill/compound-name-retrieval",
+    "packageName": "@sciforge-skill/compound-name-retrieval",
     "kind": "skill",
     "version": "1.0.0",
     "label": "compound-name-retrieval",
@@ -1008,7 +1008,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "compound name retrieval",
       "retrieve chemical compounds common synonyms multiple chemical databases",
-      "Use compound name retrieval and return structured BioAgent artifacts"
+      "Use compound name retrieval and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/compound-name-retrieval/SKILL.md",
@@ -1026,7 +1026,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.compound-to-drug-pipeline",
-    "packageName": "@bioagent-skill/compound-to-drug-pipeline",
+    "packageName": "@sciforge-skill/compound-to-drug-pipeline",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Compound-to-Drug Pipeline",
@@ -1061,7 +1061,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "compound to drug pipeline",
       "pipeline discovery stages including prediction target identification optimization",
-      "Use compound to drug pipeline and return structured BioAgent artifacts"
+      "Use compound to drug pipeline and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/compound_to_drug_pipeline/SKILL.md",
@@ -1077,7 +1077,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.comprehensive-protein-analysis",
-    "packageName": "@bioagent-skill/comprehensive-protein-analysis",
+    "packageName": "@sciforge-skill/comprehensive-protein-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "comprehensive-protein-analysis",
@@ -1116,7 +1116,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "comprehensive protein analysis",
       "comprehensive protein analysis analyze proteins sequence features structural",
-      "Use comprehensive protein analysis and return structured BioAgent artifacts"
+      "Use comprehensive protein analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/comprehensive-protein-analysis/SKILL.md",
@@ -1135,7 +1135,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.cross_species_genomics",
-    "packageName": "@bioagent-skill/cross_species_genomics",
+    "packageName": "@sciforge-skill/cross_species_genomics",
     "kind": "skill",
     "version": "1.0.0",
     "label": "cross_species_genomics",
@@ -1171,7 +1171,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "cross species genomics",
       "species comparative genomics compare genomes across species ensembl",
-      "Use cross species genomics and return structured BioAgent artifacts"
+      "Use cross species genomics and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/cross_species_genomics/SKILL.md",
@@ -1190,7 +1190,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.disease_compound_pipeline",
-    "packageName": "@bioagent-skill/disease_compound_pipeline",
+    "packageName": "@sciforge-skill/disease_compound_pipeline",
     "kind": "skill",
     "version": "1.0.0",
     "label": "disease_compound_pipeline",
@@ -1226,7 +1226,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "disease compound pipeline",
       "disease compound pipeline diseases compounds disease identification target",
-      "Use disease compound pipeline and return structured BioAgent artifacts"
+      "Use disease compound pipeline and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/disease_compound_pipeline/SKILL.md",
@@ -1245,7 +1245,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.disease_knowledge_graph",
-    "packageName": "@bioagent-skill/disease_knowledge_graph",
+    "packageName": "@sciforge-skill/disease_knowledge_graph",
     "kind": "skill",
     "version": "1.0.0",
     "label": "disease_knowledge_graph",
@@ -1280,7 +1280,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "disease knowledge graph",
       "disease knowledge disease knowledge disease relationships associations targets",
-      "Use disease knowledge graph and return structured BioAgent artifacts"
+      "Use disease knowledge graph and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/disease_knowledge_graph/SKILL.md",
@@ -1299,7 +1299,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.disease_protein_profiling",
-    "packageName": "@bioagent-skill/disease_protein_profiling",
+    "packageName": "@sciforge-skill/disease_protein_profiling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "disease_protein_profiling",
@@ -1337,7 +1337,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "disease protein profiling",
       "disease protein profiling profile disease protein uniprot alphafold",
-      "Use disease protein profiling and return structured BioAgent artifacts"
+      "Use disease protein profiling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/disease_protein_profiling/SKILL.md",
@@ -1357,7 +1357,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.dna-rna-sequence-analysis",
-    "packageName": "@bioagent-skill/dna-rna-sequence-analysis",
+    "packageName": "@sciforge-skill/dna-rna-sequence-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "dna-rna-sequence-analysis",
@@ -1395,7 +1395,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "dna rna sequence analysis",
       "sequence analysis analyze sequences sequence alignment finding expression",
-      "Use dna rna sequence analysis and return structured BioAgent artifacts"
+      "Use dna rna sequence analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/dna-rna-sequence-analysis/SKILL.md",
@@ -1414,7 +1414,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.dna-sequencing",
-    "packageName": "@bioagent-skill/dna-sequencing",
+    "packageName": "@sciforge-skill/dna-sequencing",
     "kind": "skill",
     "version": "1.0.0",
     "label": "dna-sequencing",
@@ -1453,7 +1453,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "dna sequencing",
       "sequencing analysis sequence validation quality assessment bioinformatics processing",
-      "Use dna sequencing and return structured BioAgent artifacts"
+      "Use dna sequencing and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/dna-sequencing/SKILL.md",
@@ -1475,7 +1475,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug_indication_mapping",
-    "packageName": "@bioagent-skill/drug_indication_mapping",
+    "packageName": "@sciforge-skill/drug_indication_mapping",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drug_indication_mapping",
@@ -1513,7 +1513,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug indication mapping",
       "indication mapping indications chembl indications indications opentargets associations",
-      "Use drug indication mapping and return structured BioAgent artifacts"
+      "Use drug indication mapping and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_indication_mapping/SKILL.md",
@@ -1533,7 +1533,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug_interaction_checker",
-    "packageName": "@bioagent-skill/drug_interaction_checker",
+    "packageName": "@sciforge-skill/drug_interaction_checker",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drug_interaction_checker",
@@ -1568,7 +1568,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug interaction checker",
       "interaction checker interactions between multiple interaction pubchem compound",
-      "Use drug interaction checker and return structured BioAgent artifacts"
+      "Use drug interaction checker and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_interaction_checker/SKILL.md",
@@ -1587,7 +1587,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug_metabolism_study",
-    "packageName": "@bioagent-skill/drug_metabolism_study",
+    "packageName": "@sciforge-skill/drug_metabolism_study",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drug_metabolism_study",
@@ -1622,7 +1622,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug metabolism study",
       "metabolism analyze metabolism pathways predict metabolites assess metabolic",
-      "Use drug metabolism study and return structured BioAgent artifacts"
+      "Use drug metabolism study and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_metabolism_study/SKILL.md",
@@ -1643,7 +1643,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug_repurposing_screen",
-    "packageName": "@bioagent-skill/drug_repurposing_screen",
+    "packageName": "@sciforge-skill/drug_repurposing_screen",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drug_repurposing_screen",
@@ -1678,7 +1678,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug repurposing screen",
       "repurposing screen screen repurposing target identification disease matching",
-      "Use drug repurposing screen and return structured BioAgent artifacts"
+      "Use drug repurposing screen and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_repurposing_screen/SKILL.md",
@@ -1697,7 +1697,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug_safety_profile",
-    "packageName": "@bioagent-skill/drug_safety_profile",
+    "packageName": "@sciforge-skill/drug_safety_profile",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drug_safety_profile",
@@ -1732,7 +1732,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug safety profile",
       "safety profile profile safety adverse reactions toxicity prediction",
-      "Use drug safety profile and return structured BioAgent artifacts"
+      "Use drug safety profile and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_safety_profile/SKILL.md",
@@ -1751,7 +1751,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug-screening-docking",
-    "packageName": "@bioagent-skill/drug-screening-docking",
+    "packageName": "@sciforge-skill/drug-screening-docking",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drug-screening-docking",
@@ -1789,7 +1789,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug screening docking",
       "comprehensive screening pipeline molecular filtering through criteria protein",
-      "Use drug screening docking and return structured BioAgent artifacts"
+      "Use drug screening docking and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug-screening-docking/SKILL.md",
@@ -1808,7 +1808,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug-target-structure",
-    "packageName": "@bioagent-skill/drug-target-structure",
+    "packageName": "@sciforge-skill/drug-target-structure",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Drug Target Structure",
@@ -1847,7 +1847,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug target structure",
       "analyze predict protein binding structures supports target identification",
-      "Use drug target structure and return structured BioAgent artifacts"
+      "Use drug target structure and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_target_structure/SKILL.md",
@@ -1864,7 +1864,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drug-warning-report",
-    "packageName": "@bioagent-skill/drug-warning-report",
+    "packageName": "@sciforge-skill/drug-warning-report",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Drug Warning Report",
@@ -1900,7 +1900,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drug warning report",
       "safety warnings warnings contraindications",
-      "Use drug warning report and return structured BioAgent artifacts"
+      "Use drug warning report and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drug_warning_report/SKILL.md",
@@ -1916,7 +1916,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-admet",
-    "packageName": "@bioagent-skill/drugsda-admet",
+    "packageName": "@sciforge-skill/drugsda-admet",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-admet",
@@ -1953,7 +1953,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda admet",
       "predict absorption distribution metabolism excretion toxicity properties molecules",
-      "Use drugsda admet and return structured BioAgent artifacts"
+      "Use drugsda admet and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-admet/SKILL.md",
@@ -1971,7 +1971,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-compound-retrieve",
-    "packageName": "@bioagent-skill/drugsda-compound-retrieve",
+    "packageName": "@sciforge-skill/drugsda-compound-retrieve",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-compound-retrieve",
@@ -2009,7 +2009,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda compound retrieve",
       "retrieve compound information drugsda database including structures properties",
-      "Use drugsda compound retrieve and return structured BioAgent artifacts"
+      "Use drugsda compound retrieve and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-compound-retrieve/SKILL.md",
@@ -2028,7 +2028,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-de-novo-sampling",
-    "packageName": "@bioagent-skill/drugsda-de-novo-sampling",
+    "packageName": "@sciforge-skill/drugsda-de-novo-sampling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "DrugSDA De Novo Sampling",
@@ -2064,7 +2064,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda de novo sampling",
       "generate molecules learning molecular design receives smiles string",
-      "Use drugsda de novo sampling and return structured BioAgent artifacts"
+      "Use drugsda de novo sampling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-denovo-sampling/SKILL.md",
@@ -2080,7 +2080,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-drug-likeness",
-    "packageName": "@bioagent-skill/drugsda-drug-likeness",
+    "packageName": "@sciforge-skill/drugsda-drug-likeness",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-drug-likeness",
@@ -2116,7 +2116,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda drug likeness",
       "likeness assessment evaluate compound likeness lipinski criteria pharmaceutical",
-      "Use drugsda drug likeness and return structured BioAgent artifacts"
+      "Use drugsda drug likeness and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-drug-likeness/SKILL.md",
@@ -2136,7 +2136,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-esmfold",
-    "packageName": "@bioagent-skill/drugsda-esmfold",
+    "packageName": "@sciforge-skill/drugsda-esmfold",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-esmfold",
@@ -2174,7 +2174,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda esmfold",
       "esmfold predict structure protein sequence",
-      "Use drugsda esmfold and return structured BioAgent artifacts"
+      "Use drugsda esmfold and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-esmfold/SKILL.md",
@@ -2193,7 +2193,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-linker-sampling",
-    "packageName": "@bioagent-skill/drugsda-linker-sampling",
+    "packageName": "@sciforge-skill/drugsda-linker-sampling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-linker-sampling",
@@ -2229,7 +2229,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda linker sampling",
       "sample chemical linkers molecular fusion connecting pharmacophores optimal",
-      "Use drugsda linker sampling and return structured BioAgent artifacts"
+      "Use drugsda linker sampling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-linker-sampling/SKILL.md",
@@ -2247,7 +2247,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-mol-properties",
-    "packageName": "@bioagent-skill/drugsda-mol-properties",
+    "packageName": "@sciforge-skill/drugsda-mol-properties",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-mol-properties",
@@ -2283,7 +2283,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda mol properties",
       "calculate different molecular properties smiles strings covering physicochemical",
-      "Use drugsda mol properties and return structured BioAgent artifacts"
+      "Use drugsda mol properties and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-mol-properties/SKILL.md",
@@ -2301,7 +2301,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-mol-similarity",
-    "packageName": "@bioagent-skill/drugsda-mol-similarity",
+    "packageName": "@sciforge-skill/drugsda-mol-similarity",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-mol-similarity",
@@ -2337,7 +2337,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda mol similarity",
       "search similar molecules drugsda database molecular fingerprints tanimoto",
-      "Use drugsda mol similarity and return structured BioAgent artifacts"
+      "Use drugsda mol similarity and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-mol-similarity/SKILL.md",
@@ -2355,7 +2355,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-mol2mol-sampling",
-    "packageName": "@bioagent-skill/drugsda-mol2mol-sampling",
+    "packageName": "@sciforge-skill/drugsda-mol2mol-sampling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "DrugSDA Mol2Mol Sampling",
@@ -2391,7 +2391,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda mol2mol sampling",
       "generate molecules mol2mol transformer models",
-      "Use drugsda mol2mol sampling and return structured BioAgent artifacts"
+      "Use drugsda mol2mol sampling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-mol2mol-sampling/SKILL.md",
@@ -2407,7 +2407,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-p2rank",
-    "packageName": "@bioagent-skill/drugsda-p2rank",
+    "packageName": "@sciforge-skill/drugsda-p2rank",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-p2rank",
@@ -2445,7 +2445,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda p2rank",
       "predict protein binding p2rank machine learning algorithm druggable",
-      "Use drugsda p2rank and return structured BioAgent artifacts"
+      "Use drugsda p2rank and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-p2rank/SKILL.md",
@@ -2464,7 +2464,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-peptide-sampling",
-    "packageName": "@bioagent-skill/drugsda-peptide-sampling",
+    "packageName": "@sciforge-skill/drugsda-peptide-sampling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-peptide-sampling",
@@ -2503,7 +2503,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda peptide sampling",
       "design generate therapeutic peptides learning models predicting secondary",
-      "Use drugsda peptide sampling and return structured BioAgent artifacts"
+      "Use drugsda peptide sampling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-peptide-sampling/SKILL.md",
@@ -2525,7 +2525,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-rgroup-sampling",
-    "packageName": "@bioagent-skill/drugsda-rgroup-sampling",
+    "packageName": "@sciforge-skill/drugsda-rgroup-sampling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "drugsda-rgroup-sampling",
@@ -2561,7 +2561,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda rgroup sampling",
       "drugsda sampling generate substituents scaffold modifications generative models",
-      "Use drugsda rgroup sampling and return structured BioAgent artifacts"
+      "Use drugsda rgroup sampling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-rgroup-sampling/SKILL.md",
@@ -2582,7 +2582,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.drugsda-target-retrieve",
-    "packageName": "@bioagent-skill/drugsda-target-retrieve",
+    "packageName": "@sciforge-skill/drugsda-target-retrieve",
     "kind": "skill",
     "version": "1.0.0",
     "label": "DrugSDA Target Retrieve",
@@ -2619,7 +2619,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "drugsda target retrieve",
       "identify protein targets molecules similarity binding prediction",
-      "Use drugsda target retrieve and return structured BioAgent artifacts"
+      "Use drugsda target retrieve and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/drugsda-target-retrieve/SKILL.md",
@@ -2635,7 +2635,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.enetic_counseling_report",
-    "packageName": "@bioagent-skill/enetic_counseling_report",
+    "packageName": "@sciforge-skill/enetic_counseling_report",
     "kind": "skill",
     "version": "1.0.0",
     "label": "enetic_counseling_report",
@@ -2671,7 +2671,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "enetic counseling report",
       "genetic counseling report generate genetic counseling reports variant",
-      "Use enetic counseling report and return structured BioAgent artifacts"
+      "Use enetic counseling report and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/enetic_counseling_report/SKILL.md",
@@ -2690,7 +2690,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.ensembl-sequence-retrieval",
-    "packageName": "@bioagent-skill/ensembl-sequence-retrieval",
+    "packageName": "@sciforge-skill/ensembl-sequence-retrieval",
     "kind": "skill",
     "version": "1.0.0",
     "label": "ensembl-sequence-retrieval",
@@ -2727,7 +2727,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "ensembl sequence retrieval",
       "retrieve protein sequences ensembl database species region",
-      "Use ensembl sequence retrieval and return structured BioAgent artifacts"
+      "Use ensembl sequence retrieval and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/ensembl-sequence-retrieval/SKILL.md",
@@ -2746,7 +2746,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.enzyme-inhibitor-design",
-    "packageName": "@bioagent-skill/enzyme-inhibitor-design",
+    "packageName": "@sciforge-skill/enzyme-inhibitor-design",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Enzyme Inhibitor Design",
@@ -2782,7 +2782,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "enzyme inhibitor design",
       "design optimize enzyme inhibitors therapeutic applications supports competitive",
-      "Use enzyme inhibitor design and return structured BioAgent artifacts"
+      "Use enzyme inhibitor design and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/enzyme_inhibitor_design/SKILL.md",
@@ -2798,7 +2798,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.epigenetics_drug",
-    "packageName": "@bioagent-skill/epigenetics_drug",
+    "packageName": "@sciforge-skill/epigenetics_drug",
     "kind": "skill",
     "version": "1.0.0",
     "label": "epigenetics_drug",
@@ -2835,7 +2835,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "epigenetics drug",
       "epigenetics analysis analyze epigenetic histone modification targeting methylation",
-      "Use epigenetics drug and return structured BioAgent artifacts"
+      "Use epigenetics drug and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/epigenetics_drug/SKILL.md",
@@ -2855,7 +2855,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.example-bio-chem-tool",
-    "packageName": "@bioagent-skill/example-bio-chem-tool",
+    "packageName": "@sciforge-skill/example-bio-chem-tool",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Example Bio-Chem Tool",
@@ -2891,7 +2891,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "example bio chem tool",
       "example biochemistry template development demonstrates standard structure frontmatter",
-      "Use example bio chem tool and return structured BioAgent artifacts"
+      "Use example bio chem tool and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/example-bio-chem-tool/SKILL.md",
@@ -2908,7 +2908,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.fda-drug-risk-assessment",
-    "packageName": "@bioagent-skill/fda-drug-risk-assessment",
+    "packageName": "@sciforge-skill/fda-drug-risk-assessment",
     "kind": "skill",
     "version": "1.0.0",
     "label": "fda-drug-risk-assessment",
@@ -2944,7 +2944,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "fda drug risk assessment",
       "assessment assess warnings adverse reports recall history safety",
-      "Use fda drug risk assessment and return structured BioAgent artifacts"
+      "Use fda drug risk assessment and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/fda-drug-risk-assessment/SKILL.md",
@@ -2962,7 +2962,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.full_protein_analysis",
-    "packageName": "@bioagent-skill/full_protein_analysis",
+    "packageName": "@sciforge-skill/full_protein_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "full_protein_analysis",
@@ -3001,7 +3001,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "full protein analysis",
       "protein analysis comprehensive protein sequence structure analysis including",
-      "Use full protein analysis and return structured BioAgent artifacts"
+      "Use full protein analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/full_protein_analysis/SKILL.md",
@@ -3023,7 +3023,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.functional_group_profiling",
-    "packageName": "@bioagent-skill/functional_group_profiling",
+    "packageName": "@sciforge-skill/functional_group_profiling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "functional_group_profiling",
@@ -3058,7 +3058,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "functional group profiling",
       "functional profiling profile functional groups radical assignment analysis",
-      "Use functional group profiling and return structured BioAgent artifacts"
+      "Use functional group profiling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/functional_group_profiling/SKILL.md",
@@ -3077,7 +3077,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.gene_disease_association",
-    "packageName": "@bioagent-skill/gene_disease_association",
+    "packageName": "@sciforge-skill/gene_disease_association",
     "kind": "skill",
     "version": "1.0.0",
     "label": "gene_disease_association",
@@ -3117,7 +3117,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "gene disease association",
       "disease association explore analyze associations between diseases involving",
-      "Use gene disease association and return structured BioAgent artifacts"
+      "Use gene disease association and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/gene_disease_association/SKILL.md",
@@ -3139,7 +3139,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.gene_family_evolution",
-    "packageName": "@bioagent-skill/gene_family_evolution",
+    "packageName": "@sciforge-skill/gene_family_evolution",
     "kind": "skill",
     "version": "1.0.0",
     "label": "gene_family_evolution",
@@ -3174,7 +3174,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "gene family evolution",
       "family evolution analysis analyze family evolution homology ensembl",
-      "Use gene family evolution and return structured BioAgent artifacts"
+      "Use gene family evolution and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/gene_family_evolution/SKILL.md",
@@ -3193,7 +3193,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.gene_therapy_target",
-    "packageName": "@bioagent-skill/gene_therapy_target",
+    "packageName": "@sciforge-skill/gene_therapy_target",
     "kind": "skill",
     "version": "1.0.0",
     "label": "gene_therapy_target",
@@ -3232,7 +3232,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "gene therapy target",
       "therapy target identification identify therapy targets disease prioritization",
-      "Use gene therapy target and return structured BioAgent artifacts"
+      "Use gene therapy target and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/gene_therapy_target/SKILL.md",
@@ -3252,7 +3252,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.genome-annotation",
-    "packageName": "@bioagent-skill/genome-annotation",
+    "packageName": "@sciforge-skill/genome-annotation",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Genome Annotation",
@@ -3289,7 +3289,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "genome annotation",
       "perform automated genome annotation identifying classifying genomic features",
-      "Use genome annotation and return structured BioAgent artifacts"
+      "Use genome annotation and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/genome_annotation/SKILL.md",
@@ -3305,7 +3305,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.go-term-analysis",
-    "packageName": "@bioagent-skill/go-term-analysis",
+    "packageName": "@sciforge-skill/go-term-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "GO Term Analysis",
@@ -3341,7 +3341,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "go term analysis",
       "perform ontology enrichment analysis functional annotation supports mapping",
-      "Use go term analysis and return structured BioAgent artifacts"
+      "Use go term analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/go_term_analysis/SKILL.md",
@@ -3357,7 +3357,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.infectious_disease_analysis",
-    "packageName": "@bioagent-skill/infectious_disease_analysis",
+    "packageName": "@sciforge-skill/infectious_disease_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "infectious_disease_analysis",
@@ -3394,7 +3394,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "infectious disease analysis",
       "infectious disease analysis analyze infectious diseases pathogen identification",
-      "Use infectious disease analysis and return structured BioAgent artifacts"
+      "Use infectious disease analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/infectious_disease_analysis/SKILL.md",
@@ -3414,7 +3414,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.interproscan-domain-analysis",
-    "packageName": "@bioagent-skill/interproscan-domain-analysis",
+    "packageName": "@sciforge-skill/interproscan-domain-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "interproscan-domain-analysis",
@@ -3450,7 +3450,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "interproscan domain analysis",
       "analyze protein sequences functional domains interproscan database prediction",
-      "Use interproscan domain analysis and return structured BioAgent artifacts"
+      "Use interproscan domain analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/interproscan-domain-analysis/SKILL.md",
@@ -3468,7 +3468,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.interproscan-pipeline",
-    "packageName": "@bioagent-skill/interproscan-pipeline",
+    "packageName": "@sciforge-skill/interproscan-pipeline",
     "kind": "skill",
     "version": "1.0.0",
     "label": "InterProScan Pipeline",
@@ -3504,7 +3504,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "interproscan pipeline",
       "predict protein domain families functional annotation interproscan protein",
-      "Use interproscan pipeline and return structured BioAgent artifacts"
+      "Use interproscan pipeline and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/interproscan_pipeline/SKILL.md",
@@ -3520,7 +3520,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.kegg-gene-search",
-    "packageName": "@bioagent-skill/kegg-gene-search",
+    "packageName": "@sciforge-skill/kegg-gene-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "KEGG Gene Search",
@@ -3556,7 +3556,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "kegg gene search",
       "retrieve information encyclopedia genomes database search identifier pathway",
-      "Use kegg gene search and return structured BioAgent artifacts"
+      "Use kegg gene search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/kegg-gene-search/SKILL.md",
@@ -3572,7 +3572,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.lead_compound_optimization",
-    "packageName": "@bioagent-skill/lead_compound_optimization",
+    "packageName": "@sciforge-skill/lead_compound_optimization",
     "kind": "skill",
     "version": "1.0.0",
     "label": "lead_compound_optimization",
@@ -3610,7 +3610,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "lead compound optimization",
       "compound optimization optimize compounds through iterative medicinal chemistry",
-      "Use lead compound optimization and return structured BioAgent artifacts"
+      "Use lead compound optimization and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/lead_compound_optimization/SKILL.md",
@@ -3631,7 +3631,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.metabolomics_pathway",
-    "packageName": "@bioagent-skill/metabolomics_pathway",
+    "packageName": "@sciforge-skill/metabolomics_pathway",
     "kind": "skill",
     "version": "1.0.0",
     "label": "metabolomics_pathway",
@@ -3667,7 +3667,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "metabolomics pathway",
       "metabolomics pathway analysis analyze metabolomics compound identification pathway",
-      "Use metabolomics pathway and return structured BioAgent artifacts"
+      "Use metabolomics pathway and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/metabolomics_pathway/SKILL.md",
@@ -3687,7 +3687,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular_docking_pipeline",
-    "packageName": "@bioagent-skill/molecular_docking_pipeline",
+    "packageName": "@sciforge-skill/molecular_docking_pipeline",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular_docking_pipeline",
@@ -3725,7 +3725,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular docking pipeline",
       "molecular docking pipeline molecules proteins structure preparation binding",
-      "Use molecular docking pipeline and return structured BioAgent artifacts"
+      "Use molecular docking pipeline and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular_docking_pipeline/SKILL.md",
@@ -3745,7 +3745,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular_fingerprint_analysis",
-    "packageName": "@bioagent-skill/molecular_fingerprint_analysis",
+    "packageName": "@sciforge-skill/molecular_fingerprint_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular_fingerprint_analysis",
@@ -3782,7 +3782,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular fingerprint analysis",
       "molecular fingerprint analysis analyze molecular fingerprints morgan fingerprints",
-      "Use molecular fingerprint analysis and return structured BioAgent artifacts"
+      "Use molecular fingerprint analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular_fingerprint_analysis/SKILL.md",
@@ -3802,7 +3802,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular_visualization_suite",
-    "packageName": "@bioagent-skill/molecular_visualization_suite",
+    "packageName": "@sciforge-skill/molecular_visualization_suite",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular_visualization_suite",
@@ -3840,7 +3840,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular visualization suite",
       "molecular visualization visualize molecules smiles formats molecular visualization",
-      "Use molecular visualization suite and return structured BioAgent artifacts"
+      "Use molecular visualization suite and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular_visualization_suite/SKILL.md",
@@ -3860,7 +3860,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular-descriptors-calculation",
-    "packageName": "@bioagent-skill/molecular-descriptors-calculation",
+    "packageName": "@sciforge-skill/molecular-descriptors-calculation",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular-descriptors-calculation",
@@ -3896,7 +3896,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular descriptors calculation",
       "calculate advanced molecular descriptors including indices connectivity indices",
-      "Use molecular descriptors calculation and return structured BioAgent artifacts"
+      "Use molecular descriptors calculation and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular-descriptors-calculation/SKILL.md",
@@ -3914,7 +3914,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular-docking",
-    "packageName": "@bioagent-skill/molecular-docking",
+    "packageName": "@sciforge-skill/molecular-docking",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular-docking",
@@ -3952,7 +3952,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular docking",
       "molecular docking predicting binding affinity between molecules protein",
-      "Use molecular docking and return structured BioAgent artifacts"
+      "Use molecular docking and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular-docking/SKILL.md",
@@ -3973,7 +3973,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular-properties-calculation",
-    "packageName": "@bioagent-skill/molecular-properties-calculation",
+    "packageName": "@sciforge-skill/molecular-properties-calculation",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular-properties-calculation",
@@ -4009,7 +4009,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular properties calculation",
       "calculate molecular properties smiles including molecular weight formula",
-      "Use molecular properties calculation and return structured BioAgent artifacts"
+      "Use molecular properties calculation and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular-properties-calculation/SKILL.md",
@@ -4027,7 +4027,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular-property-profiling",
-    "packageName": "@bioagent-skill/molecular-property-profiling",
+    "packageName": "@sciforge-skill/molecular-property-profiling",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular-property-profiling",
@@ -4063,7 +4063,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular property profiling",
       "comprehensive molecular property analysis covering hydrophobicity hydrogen bonding",
-      "Use molecular property profiling and return structured BioAgent artifacts"
+      "Use molecular property profiling and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular-property-profiling/SKILL.md",
@@ -4081,7 +4081,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.molecular-similarity-search",
-    "packageName": "@bioagent-skill/molecular-similarity-search",
+    "packageName": "@sciforge-skill/molecular-similarity-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "molecular-similarity-search",
@@ -4117,7 +4117,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "molecular similarity search",
       "search similar molecules tanimoto similarity morgan fingerprints identify",
-      "Use molecular similarity search and return structured BioAgent artifacts"
+      "Use molecular similarity search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/molecular-similarity-search/SKILL.md",
@@ -4135,7 +4135,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.mouse_model_analysis",
-    "packageName": "@bioagent-skill/mouse_model_analysis",
+    "packageName": "@sciforge-skill/mouse_model_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "mouse_model_analysis",
@@ -4170,7 +4170,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "mouse model analysis",
       "analysis analyze models phenotype genetic modifications disease relevance",
-      "Use mouse model analysis and return structured BioAgent artifacts"
+      "Use mouse model analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/mouse_model_analysis/SKILL.md",
@@ -4189,7 +4189,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.multispecies_gene_analysis",
-    "packageName": "@bioagent-skill/multispecies_gene_analysis",
+    "packageName": "@sciforge-skill/multispecies_gene_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "multispecies_gene_analysis",
@@ -4226,7 +4226,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "multispecies gene analysis",
       "multispecies analysis analyze across species orthology mapping conservation",
-      "Use multispecies gene analysis and return structured BioAgent artifacts"
+      "Use multispecies gene analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/multispecies_gene_analysis/SKILL.md",
@@ -4246,7 +4246,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.natural_product_analysis",
-    "packageName": "@bioagent-skill/natural_product_analysis",
+    "packageName": "@sciforge-skill/natural_product_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "natural_product_analysis",
@@ -4283,7 +4283,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "natural product analysis",
       "natural product analysis analyze natural products smiles pubchem",
-      "Use natural product analysis and return structured BioAgent artifacts"
+      "Use natural product analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/natural_product_analysis/SKILL.md",
@@ -4303,7 +4303,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.ncbi_gene_deep_dive",
-    "packageName": "@bioagent-skill/ncbi_gene_deep_dive",
+    "packageName": "@sciforge-skill/ncbi_gene_deep_dive",
     "kind": "skill",
     "version": "1.0.0",
     "label": "ncbi_gene_deep_dive",
@@ -4341,7 +4341,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "ncbi gene deep dive",
       "comprehensive retrieval pathway involvement disease associations literature mining",
-      "Use ncbi gene deep dive and return structured BioAgent artifacts"
+      "Use ncbi gene deep dive and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/ncbi_gene_deep_dive/SKILL.md",
@@ -4361,7 +4361,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.ncbi-gene-retrieval",
-    "packageName": "@bioagent-skill/ncbi-gene-retrieval",
+    "packageName": "@sciforge-skill/ncbi-gene-retrieval",
     "kind": "skill",
     "version": "1.0.0",
     "label": "ncbi-gene-retrieval",
@@ -4399,7 +4399,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "ncbi gene retrieval",
       "retrieve information including sequences aliases summaries genomic location",
-      "Use ncbi gene retrieval and return structured BioAgent artifacts"
+      "Use ncbi gene retrieval and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/ncbi-gene-retrieval/SKILL.md",
@@ -4418,7 +4418,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.one_health_analysis",
-    "packageName": "@bioagent-skill/one_health_analysis",
+    "packageName": "@sciforge-skill/one_health_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "one_health_analysis",
@@ -4454,7 +4454,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "one health analysis",
       "health pathogen analysis health analysis pathogen genomes species",
-      "Use one health analysis and return structured BioAgent artifacts"
+      "Use one health analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/one_health_analysis/SKILL.md",
@@ -4473,7 +4473,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.opentargets-disease-target",
-    "packageName": "@bioagent-skill/opentargets-disease-target",
+    "packageName": "@sciforge-skill/opentargets-disease-target",
     "kind": "skill",
     "version": "1.0.0",
     "label": "opentargets-disease-target",
@@ -4508,7 +4508,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "opentargets disease target",
       "disease retrieve disease related targets opentargets identify therapeutic",
-      "Use opentargets disease target and return structured BioAgent artifacts"
+      "Use opentargets disease target and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/opentargets-disease-target/SKILL.md",
@@ -4526,7 +4526,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.organism_classification",
-    "packageName": "@bioagent-skill/organism_classification",
+    "packageName": "@sciforge-skill/organism_classification",
     "kind": "skill",
     "version": "1.0.0",
     "label": "organism_classification",
@@ -4561,7 +4561,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "organism classification",
       "organism classification database classify organisms taxonomy ensembl classification",
-      "Use organism classification and return structured BioAgent artifacts"
+      "Use organism classification and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/organism_classification/SKILL.md",
@@ -4580,7 +4580,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.orphan_drug_analysis",
-    "packageName": "@bioagent-skill/orphan_drug_analysis",
+    "packageName": "@sciforge-skill/orphan_drug_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "orphan_drug_analysis",
@@ -4617,7 +4617,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "orphan drug analysis",
       "orphan disease analysis analyze orphan monarch disease phenotypes",
-      "Use orphan drug analysis and return structured BioAgent artifacts"
+      "Use orphan drug analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/orphan_drug_analysis/SKILL.md",
@@ -4637,7 +4637,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.pandemic_preparedness",
-    "packageName": "@bioagent-skill/pandemic_preparedness",
+    "packageName": "@sciforge-skill/pandemic_preparedness",
     "kind": "skill",
     "version": "1.0.0",
     "label": "pandemic_preparedness",
@@ -4674,7 +4674,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "pandemic preparedness",
       "pandemic preparedness analysis analyze pandemic preparedness pathogen surveillance",
-      "Use pandemic preparedness and return structured BioAgent artifacts"
+      "Use pandemic preparedness and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/pandemic_preparedness/SKILL.md",
@@ -4694,7 +4694,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.pediatric_drug_safety",
-    "packageName": "@bioagent-skill/pediatric_drug_safety",
+    "packageName": "@sciforge-skill/pediatric_drug_safety",
     "kind": "skill",
     "version": "1.0.0",
     "label": "pediatric_drug_safety",
@@ -4729,7 +4729,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "pediatric drug safety",
       "pediatric safety review evaluate pediatric safety pediatric information",
-      "Use pediatric drug safety and return structured BioAgent artifacts"
+      "Use pediatric drug safety and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/pediatric_drug_safety/SKILL.md",
@@ -4748,7 +4748,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.peptide-properties-calculation",
-    "packageName": "@bioagent-skill/peptide-properties-calculation",
+    "packageName": "@sciforge-skill/peptide-properties-calculation",
     "kind": "skill",
     "version": "1.0.0",
     "label": "peptide-properties-calculation",
@@ -4785,7 +4785,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "peptide properties calculation",
       "calculate peptide properties including isoelectric hydrophobicity charge stability",
-      "Use peptide properties calculation and return structured BioAgent artifacts"
+      "Use peptide properties calculation and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/peptide-properties-calculation/SKILL.md",
@@ -4803,7 +4803,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.personalized_medicine",
-    "packageName": "@bioagent-skill/personalized_medicine",
+    "packageName": "@sciforge-skill/personalized_medicine",
     "kind": "skill",
     "version": "1.0.0",
     "label": "personalized_medicine",
@@ -4839,7 +4839,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "personalized medicine",
       "personalized medicine analysis analyze personalized medicine genomic markers",
-      "Use personalized medicine and return structured BioAgent artifacts"
+      "Use personalized medicine and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/personalized_medicine/SKILL.md",
@@ -4858,7 +4858,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.pharmacogenomics_analysis",
-    "packageName": "@bioagent-skill/pharmacogenomics_analysis",
+    "packageName": "@sciforge-skill/pharmacogenomics_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "pharmacogenomics_analysis",
@@ -4895,7 +4895,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "pharmacogenomics analysis",
       "pharmacogenomics analysis analyze pharmacogenomics response variant effects dosing",
-      "Use pharmacogenomics analysis and return structured BioAgent artifacts"
+      "Use pharmacogenomics analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/pharmacogenomics_analysis/SKILL.md",
@@ -4915,7 +4915,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.pharmacokinetics_profile",
-    "packageName": "@bioagent-skill/pharmacokinetics_profile",
+    "packageName": "@sciforge-skill/pharmacokinetics_profile",
     "kind": "skill",
     "version": "1.0.0",
     "label": "pharmacokinetics_profile",
@@ -4952,7 +4952,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "pharmacokinetics profile",
       "pharmacokinetics profile profile pharmacokinetics absorption prediction distribution modeling",
-      "Use pharmacokinetics profile and return structured BioAgent artifacts"
+      "Use pharmacokinetics profile and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/pharmacokinetics_profile/SKILL.md",
@@ -4972,7 +4972,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.phenotype-by-hpo-id",
-    "packageName": "@bioagent-skill/phenotype-by-hpo-id",
+    "packageName": "@sciforge-skill/phenotype-by-hpo-id",
     "kind": "skill",
     "version": "1.0.0",
     "label": "phenotype-by-hpo-id",
@@ -5007,7 +5007,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "phenotype by hpo id",
       "retrieve clinical phenotypes associated phenotype ontology",
-      "Use phenotype by hpo id and return structured BioAgent artifacts"
+      "Use phenotype by hpo id and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/phenotype-by-hpo-id/SKILL.md",
@@ -5025,7 +5025,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.polypharmacology_analysis",
-    "packageName": "@bioagent-skill/polypharmacology_analysis",
+    "packageName": "@sciforge-skill/polypharmacology_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "polypharmacology_analysis",
@@ -5060,7 +5060,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "polypharmacology analysis",
       "polypharmacology analysis analyze polypharmacology target profiling pathway network",
-      "Use polypharmacology analysis and return structured BioAgent artifacts"
+      "Use polypharmacology analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/polypharmacology_analysis/SKILL.md",
@@ -5079,7 +5079,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.population_genetics",
-    "packageName": "@bioagent-skill/population_genetics",
+    "packageName": "@sciforge-skill/population_genetics",
     "kind": "skill",
     "version": "1.0.0",
     "label": "population_genetics",
@@ -5114,7 +5114,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "population genetics",
       "population genetics analysis analyze population genetics allele frequency",
-      "Use population genetics and return structured BioAgent artifacts"
+      "Use population genetics and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/population_genetics/SKILL.md",
@@ -5133,7 +5133,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.precision_oncology",
-    "packageName": "@bioagent-skill/precision_oncology",
+    "packageName": "@sciforge-skill/precision_oncology",
     "kind": "skill",
     "version": "1.0.0",
     "label": "precision_oncology",
@@ -5172,7 +5172,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "precision oncology",
       "precision oncology analysis analyze precision oncology profiling target",
-      "Use precision oncology and return structured BioAgent artifacts"
+      "Use precision oncology and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/precision_oncology/SKILL.md",
@@ -5192,7 +5192,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein_classification_analysis",
-    "packageName": "@bioagent-skill/protein_classification_analysis",
+    "packageName": "@sciforge-skill/protein_classification_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "protein_classification_analysis",
@@ -5229,7 +5229,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein classification analysis",
       "protein classification analysis classify proteins families structural classes",
-      "Use protein classification analysis and return structured BioAgent artifacts"
+      "Use protein classification analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_classification_analysis/SKILL.md",
@@ -5249,7 +5249,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein_complex_analysis",
-    "packageName": "@bioagent-skill/protein_complex_analysis",
+    "packageName": "@sciforge-skill/protein_complex_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "protein_complex_analysis",
@@ -5287,7 +5287,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein complex analysis",
       "protein complex analysis analyze protein protein interactions predict",
-      "Use protein complex analysis and return structured BioAgent artifacts"
+      "Use protein complex analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_complex_analysis/SKILL.md",
@@ -5309,7 +5309,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein_property_comparison",
-    "packageName": "@bioagent-skill/protein_property_comparison",
+    "packageName": "@sciforge-skill/protein_property_comparison",
     "kind": "skill",
     "version": "1.0.0",
     "label": "protein_property_comparison",
@@ -5347,7 +5347,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein property comparison",
       "compare physicochemical properties structural features functional annotations between",
-      "Use protein property comparison and return structured BioAgent artifacts"
+      "Use protein property comparison and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_property_comparison/SKILL.md",
@@ -5369,7 +5369,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein_quality_assessment",
-    "packageName": "@bioagent-skill/protein_quality_assessment",
+    "packageName": "@sciforge-skill/protein_quality_assessment",
     "kind": "skill",
     "version": "1.0.0",
     "label": "protein_quality_assessment",
@@ -5408,7 +5408,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein quality assessment",
       "protein quality assessment evaluate protein structure quality stability",
-      "Use protein quality assessment and return structured BioAgent artifacts"
+      "Use protein quality assessment and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_quality_assessment/SKILL.md",
@@ -5430,7 +5430,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein-blast-search",
-    "packageName": "@bioagent-skill/protein-blast-search",
+    "packageName": "@sciforge-skill/protein-blast-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "protein-blast-search",
@@ -5465,7 +5465,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein blast search",
       "search similar protein sequences uniprot database identify homologous",
-      "Use protein blast search and return structured BioAgent artifacts"
+      "Use protein blast search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein-blast-search/SKILL.md",
@@ -5483,7 +5483,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein-database-crossref",
-    "packageName": "@bioagent-skill/protein-database-crossref",
+    "packageName": "@sciforge-skill/protein-database-crossref",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Protein Database CrossRef",
@@ -5521,7 +5521,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein database crossref",
       "reference protein across multiple databases including uniprot interpro",
-      "Use protein database crossref and return structured BioAgent artifacts"
+      "Use protein database crossref and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_database_crossref/SKILL.md",
@@ -5538,7 +5538,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein-engineering",
-    "packageName": "@bioagent-skill/protein-engineering",
+    "packageName": "@sciforge-skill/protein-engineering",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Protein Engineering",
@@ -5576,7 +5576,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein engineering",
       "design optimize protein sequences desired properties including stability",
-      "Use protein engineering and return structured BioAgent artifacts"
+      "Use protein engineering and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_engineering/SKILL.md",
@@ -5593,7 +5593,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein-properties-calculation",
-    "packageName": "@bioagent-skill/protein-properties-calculation",
+    "packageName": "@sciforge-skill/protein-properties-calculation",
     "kind": "skill",
     "version": "1.0.0",
     "label": "protein-properties-calculation",
@@ -5629,7 +5629,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein properties calculation",
       "calculate physicochemical properties protein sequences including molecular weight",
-      "Use protein properties calculation and return structured BioAgent artifacts"
+      "Use protein properties calculation and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein-properties-calculation/SKILL.md",
@@ -5648,7 +5648,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein-similarity-search",
-    "packageName": "@bioagent-skill/protein-similarity-search",
+    "packageName": "@sciforge-skill/protein-similarity-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Protein Similarity Search",
@@ -5683,7 +5683,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein similarity search",
       "protein_similarity_search",
-      "Use protein similarity search and return structured BioAgent artifacts"
+      "Use protein similarity search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_similarity_search/SKILL.md",
@@ -5699,7 +5699,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.protein-structure-analysis",
-    "packageName": "@bioagent-skill/protein-structure-analysis",
+    "packageName": "@sciforge-skill/protein-structure-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Protein Structure Analysis",
@@ -5736,7 +5736,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "protein structure analysis",
       "analyze protein structures predict secondary structure elements helices",
-      "Use protein structure analysis and return structured BioAgent artifacts"
+      "Use protein structure analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/protein_structure_analysis/SKILL.md",
@@ -5753,7 +5753,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.pubchem-deep-dive",
-    "packageName": "@bioagent-skill/pubchem-deep-dive",
+    "packageName": "@sciforge-skill/pubchem-deep-dive",
     "kind": "skill",
     "version": "1.0.0",
     "label": "PubChem Deep Dive",
@@ -5791,7 +5791,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "pubchem deep dive",
       "comprehensive pubchem database exploration including compound properties bioactivity",
-      "Use pubchem deep dive and return structured BioAgent artifacts"
+      "Use pubchem deep dive and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/pubchem_deep_dive/SKILL.md",
@@ -5808,7 +5808,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.rare-disease-genetics",
-    "packageName": "@bioagent-skill/rare-disease-genetics",
+    "packageName": "@sciforge-skill/rare-disease-genetics",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Rare Disease Genetics",
@@ -5849,7 +5849,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "rare disease genetics",
       "identify analyze genetic variants associated diseases integration phenotype",
-      "Use rare disease genetics and return structured BioAgent artifacts"
+      "Use rare disease genetics and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/rare_disease_genetics/SKILL.md",
@@ -5867,7 +5867,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.regulatory-region-analysis",
-    "packageName": "@bioagent-skill/regulatory-region-analysis",
+    "packageName": "@sciforge-skill/regulatory-region-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Regulatory Region Analysis",
@@ -5905,7 +5905,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "regulatory region analysis",
       "analyze genomic regulatory regions promoters enhancers silencers transcription",
-      "Use regulatory region analysis and return structured BioAgent artifacts"
+      "Use regulatory region analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/regulatory_region_analysis/SKILL.md",
@@ -5922,7 +5922,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.sequence-alignment-pairwise",
-    "packageName": "@bioagent-skill/sequence-alignment-pairwise",
+    "packageName": "@sciforge-skill/sequence-alignment-pairwise",
     "kind": "skill",
     "version": "1.0.0",
     "label": "sequence-alignment-pairwise",
@@ -5959,7 +5959,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "sequence alignment pairwise",
       "pairwise sequence alignment protein sequences global alignment",
-      "Use sequence alignment pairwise and return structured BioAgent artifacts"
+      "Use sequence alignment pairwise and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/sequence-alignment-pairwise/SKILL.md",
@@ -5979,7 +5979,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.smiles_comprehensive_analysis",
-    "packageName": "@bioagent-skill/smiles_comprehensive_analysis",
+    "packageName": "@sciforge-skill/smiles_comprehensive_analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "smiles_comprehensive_analysis",
@@ -6016,7 +6016,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "smiles comprehensive analysis",
       "smiles comprehensive analysis comprehensive analysis molecules smiles structure",
-      "Use smiles comprehensive analysis and return structured BioAgent artifacts"
+      "Use smiles comprehensive analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/smiles_comprehensive_analysis/SKILL.md",
@@ -6036,7 +6036,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.structural_pharmacogenomics",
-    "packageName": "@bioagent-skill/structural_pharmacogenomics",
+    "packageName": "@sciforge-skill/structural_pharmacogenomics",
     "kind": "skill",
     "version": "1.0.0",
     "label": "structural_pharmacogenomics",
@@ -6075,7 +6075,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "structural pharmacogenomics",
       "structural pharmacogenomics analyze genetic variants target proteins predict",
-      "Use structural pharmacogenomics and return structured BioAgent artifacts"
+      "Use structural pharmacogenomics and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/structural_pharmacogenomics/SKILL.md",
@@ -6096,7 +6096,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.substance-toxicology",
-    "packageName": "@bioagent-skill/substance-toxicology",
+    "packageName": "@sciforge-skill/substance-toxicology",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Substance Toxicology",
@@ -6131,7 +6131,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "substance toxicology",
       "substance_toxicology",
-      "Use substance toxicology and return structured BioAgent artifacts"
+      "Use substance toxicology and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/substance_toxicology/SKILL.md",
@@ -6147,7 +6147,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.substructure-activity-search",
-    "packageName": "@bioagent-skill/substructure-activity-search",
+    "packageName": "@sciforge-skill/substructure-activity-search",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Substructure Activity Search",
@@ -6184,7 +6184,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "substructure activity search",
       "perform substructure activity relationship analysis identify molecular substructures",
-      "Use substructure activity search and return structured BioAgent artifacts"
+      "Use substructure activity search and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/substructure_activity_search/SKILL.md",
@@ -6201,7 +6201,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.synthetic-biology-design",
-    "packageName": "@bioagent-skill/synthetic-biology-design",
+    "packageName": "@sciforge-skill/synthetic-biology-design",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Synthetic Biology Design",
@@ -6239,7 +6239,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "synthetic biology design",
       "design synthetic biology constructs including circuits crispr components",
-      "Use synthetic biology design and return structured BioAgent artifacts"
+      "Use synthetic biology design and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/synthetic_biology_design/SKILL.md",
@@ -6256,7 +6256,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.systems-pharmacology",
-    "packageName": "@bioagent-skill/systems-pharmacology",
+    "packageName": "@sciforge-skill/systems-pharmacology",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Systems Pharmacology",
@@ -6291,7 +6291,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "systems pharmacology",
       "systems_pharmacology",
-      "Use systems pharmacology and return structured BioAgent artifacts"
+      "Use systems pharmacology and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/systems_pharmacology/SKILL.md",
@@ -6307,7 +6307,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.tcga-gene-expression",
-    "packageName": "@bioagent-skill/tcga-gene-expression",
+    "packageName": "@sciforge-skill/tcga-gene-expression",
     "kind": "skill",
     "version": "1.0.0",
     "label": "TCGA Gene Expression",
@@ -6345,7 +6345,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "tcga gene expression",
       "analyze expression profiles cancer genome supports cohort expression",
-      "Use tcga gene expression and return structured BioAgent artifacts"
+      "Use tcga gene expression and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/tcga-gene-expression/SKILL.md",
@@ -6362,7 +6362,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.tissue-specific-analysis",
-    "packageName": "@bioagent-skill/tissue-specific-analysis",
+    "packageName": "@sciforge-skill/tissue-specific-analysis",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Tissue Specific Analysis",
@@ -6400,7 +6400,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "tissue specific analysis",
       "analyze expression patterns across different tissue identify tissue",
-      "Use tissue specific analysis and return structured BioAgent artifacts"
+      "Use tissue specific analysis and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/tissue_specific_analysis/SKILL.md",
@@ -6417,7 +6417,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.uniprot-protein-retrieval",
-    "packageName": "@bioagent-skill/uniprot-protein-retrieval",
+    "packageName": "@sciforge-skill/uniprot-protein-retrieval",
     "kind": "skill",
     "version": "1.0.0",
     "label": "UniProt Protein Retrieval",
@@ -6451,7 +6451,7 @@ export const skillPackageManifests = [
     ],
     "examplePrompts": [
       "uniprot protein retrieval",
-      "Use uniprot protein retrieval and return structured BioAgent artifacts"
+      "Use uniprot protein retrieval and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/uniprot-protein-retrieval/SKILL.md",
@@ -6467,7 +6467,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.variant_pathogenicity",
-    "packageName": "@bioagent-skill/variant_pathogenicity",
+    "packageName": "@sciforge-skill/variant_pathogenicity",
     "kind": "skill",
     "version": "1.0.0",
     "label": "variant_pathogenicity",
@@ -6502,7 +6502,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "variant pathogenicity",
       "variant pathogenicity prediction predict variant pathogenicity deleteriousness scoring",
-      "Use variant pathogenicity and return structured BioAgent artifacts"
+      "Use variant pathogenicity and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/variant_pathogenicity/SKILL.md",
@@ -6521,7 +6521,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.variant-functional-prediction",
-    "packageName": "@bioagent-skill/variant-functional-prediction",
+    "packageName": "@sciforge-skill/variant-functional-prediction",
     "kind": "skill",
     "version": "1.0.0",
     "label": "variant-functional-prediction",
@@ -6559,7 +6559,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "variant functional prediction",
       "predict functional impact genetic variants including missense nonsense",
-      "Use variant functional prediction and return structured BioAgent artifacts"
+      "Use variant functional prediction and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/variant-functional-prediction/SKILL.md",
@@ -6580,7 +6580,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.variant-gwas-associations",
-    "packageName": "@bioagent-skill/variant-gwas-associations",
+    "packageName": "@sciforge-skill/variant-gwas-associations",
     "kind": "skill",
     "version": "1.0.0",
     "label": "Variant GWAS Associations",
@@ -6616,7 +6616,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "variant gwas associations",
       "analyze genome association genetic variants supports associations lookups",
-      "Use variant gwas associations and return structured BioAgent artifacts"
+      "Use variant gwas associations and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/variant-gwas-associations/SKILL.md",
@@ -6633,7 +6633,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.variant-pharmacogenomics",
-    "packageName": "@bioagent-skill/variant-pharmacogenomics",
+    "packageName": "@sciforge-skill/variant-pharmacogenomics",
     "kind": "skill",
     "version": "1.0.0",
     "label": "variant-pharmacogenomics",
@@ -6669,7 +6669,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "variant pharmacogenomics",
       "variant pharmacogenomics analysis analyze pharmacogenomic variants variant effect",
-      "Use variant pharmacogenomics and return structured BioAgent artifacts"
+      "Use variant pharmacogenomics and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/variant-pharmacogenomics/SKILL.md",
@@ -6687,7 +6687,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.variant-population-frequency",
-    "packageName": "@bioagent-skill/variant-population-frequency",
+    "packageName": "@sciforge-skill/variant-population-frequency",
     "kind": "skill",
     "version": "1.0.0",
     "label": "variant-population-frequency",
@@ -6722,7 +6722,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "variant population frequency",
       "retrieve population frequency genetic variants gnomad population databases",
-      "Use variant population frequency and return structured BioAgent artifacts"
+      "Use variant population frequency and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/variant-population-frequency/SKILL.md",
@@ -6740,7 +6740,7 @@ export const skillPackageManifests = [
   },
   {
     "id": "scp.virus_genomics",
-    "packageName": "@bioagent-skill/virus_genomics",
+    "packageName": "@sciforge-skill/virus_genomics",
     "kind": "skill",
     "version": "1.0.0",
     "label": "virus_genomics",
@@ -6776,7 +6776,7 @@ export const skillPackageManifests = [
     "examplePrompts": [
       "virus genomics",
       "genomics analysis analyze genomics genome annotation interaction prediction",
-      "Use virus genomics and return structured BioAgent artifacts"
+      "Use virus genomics and return structured SciForge artifacts"
     ],
     "docs": {
       "readmePath": "packages/skills/installed/scp/virus_genomics/SKILL.md",

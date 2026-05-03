@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const workspace = await createRepairWorkspace('bioagent-workspace-http-repair-');
+const workspace = await createRepairWorkspace('sciforge-workspace-http-repair-');
 
 const brokenGeneratedTask = [
   'import json, sys',
@@ -52,10 +52,10 @@ const agentServer = createServer(async (req, res) => {
           status: 'completed',
           output: {
             result: {
-              taskFiles: [{ path: '.bioagent/tasks/omics-generated.py', language: 'python', content: brokenGeneratedTask }],
-              entrypoint: { language: 'python', path: '.bioagent/tasks/omics-generated.py' },
+              taskFiles: [{ path: '.sciforge/tasks/omics-generated.py', language: 'python', content: brokenGeneratedTask }],
+              entrypoint: { language: 'python', path: '.sciforge/tasks/omics-generated.py' },
               environmentRequirements: { language: 'python' },
-              validationCommand: 'python .bioagent/tasks/omics-generated.py <input> <output>',
+              validationCommand: 'python .sciforge/tasks/omics-generated.py <input> <output>',
               expectedArtifacts: ['omics-differential-expression'],
               patchSummary: 'Generated an omics task that intentionally needs repair.',
             },
@@ -66,7 +66,7 @@ const agentServer = createServer(async (req, res) => {
     return;
   }
   const codeRef = typeof metadata.codeRef === 'string' ? metadata.codeRef : '';
-  assert.ok(codeRef.startsWith('.bioagent/tasks/'));
+  assert.ok(codeRef.startsWith('.sciforge/tasks/'));
   const taskPath = join(repairWorkspace, codeRef);
   const source = await readFile(taskPath, 'utf8');
   await writeFile(taskPath, source
@@ -95,13 +95,13 @@ const agentServerBaseUrl = `http://127.0.0.1:${agentAddress.port}`;
 const workspacePort = await freePort();
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
-  env: { ...process.env, BIOAGENT_WORKSPACE_PORT: String(workspacePort) },
+  env: { ...process.env, SCIFORGE_WORKSPACE_PORT: String(workspacePort) },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
 try {
   await waitForHealth(`http://127.0.0.1:${workspacePort}/health`);
-  const response = await fetch(`http://127.0.0.1:${workspacePort}/api/bioagent/tools/run`, {
+  const response = await fetch(`http://127.0.0.1:${workspacePort}/api/sciforge/tools/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -124,10 +124,10 @@ try {
 
   await assertSelfHealedAttemptHistory(workspace);
 
-  const configuredWorkspace = await createRepairWorkspace('bioagent-workspace-http-repair-config-');
-  await mkdir(join(configuredWorkspace, '.bioagent'), { recursive: true });
-  await writeFile(join(configuredWorkspace, '.bioagent', 'config.json'), JSON.stringify({ agentServerBaseUrl }, null, 2));
-  const configuredResponse = await fetch(`http://127.0.0.1:${workspacePort}/api/bioagent/tools/run`, {
+  const configuredWorkspace = await createRepairWorkspace('sciforge-workspace-http-repair-config-');
+  await mkdir(join(configuredWorkspace, '.sciforge'), { recursive: true });
+  await writeFile(join(configuredWorkspace, '.sciforge', 'config.json'), JSON.stringify({ agentServerBaseUrl }, null, 2));
+  const configuredResponse = await fetch(`http://127.0.0.1:${workspacePort}/api/sciforge/tools/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -220,9 +220,9 @@ async function createRepairWorkspace(prefix: string) {
 }
 
 async function assertSelfHealedAttemptHistory(repairWorkspace: string) {
-  const attemptFiles = await readdir(join(repairWorkspace, '.bioagent', 'task-attempts'));
+  const attemptFiles = await readdir(join(repairWorkspace, '.sciforge', 'task-attempts'));
   assert.equal(attemptFiles.length, 1);
-  const attemptHistory = JSON.parse(await readFile(join(repairWorkspace, '.bioagent', 'task-attempts', attemptFiles[0]), 'utf8'));
+  const attemptHistory = JSON.parse(await readFile(join(repairWorkspace, '.sciforge', 'task-attempts', attemptFiles[0]), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 2);
   assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
   assert.equal(attemptHistory.attempts[1].status, 'done');

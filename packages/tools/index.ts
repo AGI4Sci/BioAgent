@@ -3,7 +3,7 @@ import type { ToolPackageManifest } from './types';
 export const toolPackageManifests = [
   {
     "id": "clawhub.playwright-mcp",
-    "packageName": "@bioagent-tool/playwright-mcp",
+    "packageName": "@sciforge-tool/playwright-mcp",
     "kind": "tool",
     "version": "1.0.0",
     "label": "playwright-mcp",

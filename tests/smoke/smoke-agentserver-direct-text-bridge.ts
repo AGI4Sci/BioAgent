@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-direct-text-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-direct-text-'));
 
 const server = createServer(async (req, res) => {
   if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
@@ -41,7 +41,7 @@ const server = createServer(async (req, res) => {
             '# Agent paper report',
             '',
             'AgentServer completed the reading task but returned plain text instead of taskFiles.',
-            'BioAgent should preserve this as a research-report artifact for the user.',
+            'SciForge should preserve this as a research-report artifact for the user.',
           ].join('\n'),
         },
       },
@@ -88,7 +88,7 @@ try {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
-const fencedWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-fenced-json-'));
+const fencedWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-fenced-json-'));
 const fencedServer = createServer(async (req, res) => {
   if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });

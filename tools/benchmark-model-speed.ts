@@ -310,7 +310,7 @@ function sourceFor(cliValue: unknown, configValue: unknown, envValue: unknown) {
 }
 
 function buildCases(args: Record<string, string | boolean>) {
-  if (args.suite === true || args.suite === 'bioagent') return BENCHMARK_CASES;
+  if (args.suite === true || args.suite === 'sciforge') return BENCHMARK_CASES;
   const prompt = String(args.prompt || process.env.LLM_BENCH_PROMPT || DEFAULT_PROMPT);
   return [{ name: String(args.case || 'default'), prompt }];
 }

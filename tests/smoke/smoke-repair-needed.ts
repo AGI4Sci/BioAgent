@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-repair-needed-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-repair-needed-'));
 const result = await runWorkspaceRuntimeGateway({
   skillDomain: 'omics',
   prompt: 'Run omics differential expression without matrixRef or metadataRef',
@@ -19,7 +19,7 @@ assert.match(String(result.executionUnits[0].failureReason || result.message), /
 assert.equal(result.executionUnits[0].codeRef, undefined);
 assert.equal(result.executionUnits[0].stderrRef, undefined);
 
-const attemptsDir = join(workspace, '.bioagent', 'task-attempts');
+const attemptsDir = join(workspace, '.sciforge', 'task-attempts');
 let attemptFiles: string[] = [];
 try {
   attemptFiles = await readdir(attemptsDir);

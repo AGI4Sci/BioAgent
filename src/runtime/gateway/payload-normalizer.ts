@@ -59,7 +59,7 @@ export function coerceStandaloneArtifactPayload(value: Record<string, unknown>):
     confidence: 0.7,
     claimType: 'artifact',
     evidenceLevel: 'runtime',
-    reasoningTrace: 'Workspace task returned a standalone artifact; BioAgent wrapped it as ToolPayload.',
+    reasoningTrace: 'Workspace task returned a standalone artifact; SciForge wrapped it as ToolPayload.',
     claims: [],
     uiManifest: [{ componentId: componentForStandaloneArtifact(artifactType), artifactRef: artifact.id, priority: 1 }],
     executionUnits: [],
@@ -164,7 +164,7 @@ export function toolPayloadFromPlainAgentOutput(text: string, request: GatewayRe
     confidence: 0.72,
     claimType: 'evidence-summary',
     evidenceLevel: 'agentserver-direct',
-    reasoningTrace: 'AgentServer returned plain text; BioAgent converted it into a ToolPayload so the work remains visible and auditable.',
+    reasoningTrace: 'AgentServer returned plain text; SciForge converted it into a ToolPayload so the work remains visible and auditable.',
     claims: [{
       text: text.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, 240) || 'AgentServer completed the request.',
       type: 'inference',
@@ -298,7 +298,7 @@ function splitCommandLine(command: string) {
 function extractEntrypointPath(value: unknown) {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) return undefined;
-  const token = text.match(/(?:^|\s)(\.?\/?\.bioagent\/tasks\/[^\s"'<>]+\.(?:py|R|r|sh))(?:\s|$)/)?.[1]
+  const token = text.match(/(?:^|\s)(\.?\/?\.sciforge\/tasks\/[^\s"'<>]+\.(?:py|R|r|sh))(?:\s|$)/)?.[1]
     ?? text.match(/(?:^|\s)([^\s"'<>]+\.(?:py|R|r|sh))(?:\s|$)/)?.[1];
   return token ? token.replace(/^\.\//, '') : undefined;
 }

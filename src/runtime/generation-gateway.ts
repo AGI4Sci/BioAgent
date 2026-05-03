@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { agentServerGenerationSkill, loadSkillRegistry } from './skill-registry.js';
 import { appendTaskAttempt, readRecentTaskAttempts, readTaskAttempts } from './task-attempt-history.js';
-import type { AgentBackendAdapter, AgentBackendCapabilities, AgentServerGenerationResponse, BackendContextCompactionResult, BackendContextWindowState, BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeContextBudget, WorkspaceRuntimeContextCompaction, WorkspaceRuntimeContextWindowSource, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
+import type { AgentBackendAdapter, AgentBackendCapabilities, AgentServerGenerationResponse, BackendContextCompactionResult, BackendContextWindowState, SciForgeSkillDomain, GatewayRequest, LlmEndpointConfig, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceRuntimeContextBudget, WorkspaceRuntimeContextCompaction, WorkspaceRuntimeContextWindowSource, WorkspaceRuntimeEvent, WorkspaceTaskRunResult } from './runtime-types.js';
 import { fileExists, runWorkspaceTask, sha1 } from './workspace-task-runner.js';
 import { maybeWriteSkillPromotionProposal } from './skill-promotion.js';
 import { emitWorkspaceRuntimeEvent, throwIfRuntimeAborted } from './workspace-runtime-events.js';
@@ -11,10 +11,10 @@ import { cleanUrl, clipForAgentServerJson, clipForAgentServerPrompt, errorMessag
 import { normalizeBackendHandoff } from './workspace-task-input.js';
 import { normalizeGatewayRequest as normalizeGatewayRequestFromModule } from './gateway/gateway-request.js';
 
-const SKILL_DOMAIN_SET = new Set<BioAgentSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
+const SKILL_DOMAIN_SET = new Set<SciForgeSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
 const AGENT_BACKEND_ANSWER_PRINCIPLE = [
   'All normal user-visible answers must be reasoned by the agent backend.',
-  'BioAgent must not use preset reply templates for user requests; local code may only provide protocol validation, execution recovery, safety-boundary diagnostics, and artifact display.',
+  'SciForge must not use preset reply templates for user requests; local code may only provide protocol validation, execution recovery, safety-boundary diagnostics, and artifact display.',
 ].join(' ');
 
 type AgentServerContextMode = 'full' | 'delta';
@@ -39,7 +39,7 @@ interface AgentServerBackendFailureDiagnostic {
 }
 
 interface AgentServerGenerationRetryAudit {
-  schemaVersion: 'bioagent.agentserver-generation-retry.v1';
+  schemaVersion: 'sciforge.agentserver-generation-retry.v1';
   attempt: 2;
   maxAttempts: 2;
   trigger: AgentServerBackendFailureDiagnostic;
@@ -163,7 +163,7 @@ async function runAgentServerGeneratedTask(
       reasoningTrace: [
         normalized.reasoningTrace,
         `AgentServer generation run: ${directGeneration.runId || 'unknown'}`,
-        'AgentServer returned a BioAgent ToolPayload directly; no workspace task archive was required.',
+        'AgentServer returned a SciForge ToolPayload directly; no workspace task archive was required.',
       ].filter(Boolean).join('\n'),
       executionUnits: normalized.executionUnits.map((unit) => isRecord(unit) ? {
         ...unit,
@@ -228,7 +228,7 @@ async function runAgentServerGeneratedTask(
         return repairNeededPayload(
           request,
           skill,
-          `AgentServer returned taskFiles path-only reference but BioAgent could not read workspace file: ${declaredRel}`,
+          `AgentServer returned taskFiles path-only reference but SciForge could not read workspace file: ${declaredRel}`,
         );
       }
       await mkdir(dirname(join(workspace, declaredRel)), { recursive: true });
@@ -247,9 +247,9 @@ async function runAgentServerGeneratedTask(
   }
   const entrypointOriginalRel = safeWorkspaceRel(generation.response.entrypoint.path);
   const taskRel = generatedPathMap.get(entrypointOriginalRel) ?? generatedTaskArchiveRel(taskId, generation.response.entrypoint.path);
-  const outputRel = `.bioagent/task-results/${taskId}.json`;
-  const stdoutRel = `.bioagent/logs/${taskId}.stdout.log`;
-  const stderrRel = `.bioagent/logs/${taskId}.stderr.log`;
+  const outputRel = `.sciforge/task-results/${taskId}.json`;
+  const stdoutRel = `.sciforge/logs/${taskId}.stdout.log`;
+  const stderrRel = `.sciforge/logs/${taskId}.stderr.log`;
   const generatedExpectedArtifacts = expectedArtifactTypesForGeneratedRun(request, generation.response.expectedArtifacts);
   const generatedSupplementScope = supplementScopeForGeneratedRun(request, generation.response.expectedArtifacts);
   const run = await runWorkspaceTask(workspace, {
@@ -291,7 +291,7 @@ async function runAgentServerGeneratedTask(
       attempt: 1,
       status: 'repair-needed',
       codeRef: taskRel,
-      inputRef: `.bioagent/task-inputs/${taskId}.json`,
+      inputRef: `.sciforge/task-inputs/${taskId}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -335,7 +335,7 @@ async function runAgentServerGeneratedTask(
       attempt: 1,
       status: errors.length || shouldRepairExecutionFailure ? 'repair-needed' : payloadHasFailureStatus(payload) ? 'failed-with-reason' : 'done',
       codeRef: taskRel,
-      inputRef: `.bioagent/task-inputs/${taskId}.json`,
+      inputRef: `.sciforge/task-inputs/${taskId}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -380,7 +380,7 @@ async function runAgentServerGeneratedTask(
       skill,
       taskId,
       taskRel,
-      inputRef: `.bioagent/task-inputs/${taskId}.json`,
+      inputRef: `.sciforge/task-inputs/${taskId}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -393,7 +393,7 @@ async function runAgentServerGeneratedTask(
         normalized.reasoningTrace,
         `AgentServer generation run: ${generation.runId || 'unknown'}`,
         `Generation summary: ${generation.response.patchSummary || 'task generated'}`,
-        proposal ? `Skill promotion proposal: .bioagent/skill-proposals/${proposal.id}` : '',
+        proposal ? `Skill promotion proposal: .sciforge/skill-proposals/${proposal.id}` : '',
       ].filter(Boolean).join('\n'),
       executionUnits: normalized.executionUnits.map((unit) => isRecord(unit) ? {
         ...unit,
@@ -414,7 +414,7 @@ async function runAgentServerGeneratedTask(
       attempt: 1,
       status: 'repair-needed',
       codeRef: taskRel,
-      inputRef: `.bioagent/task-inputs/${taskId}.json`,
+      inputRef: `.sciforge/task-inputs/${taskId}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -564,8 +564,8 @@ async function missingGeneratedTaskFileContents(
 }
 
 function normalizeGatewayRequest(body: Record<string, unknown>): GatewayRequest {
-  const skillDomain = String(body.skillDomain || '') as BioAgentSkillDomain;
-  if (!SKILL_DOMAIN_SET.has(skillDomain)) throw new Error(`Unsupported BioAgent skill domain: ${String(body.skillDomain || '')}`);
+  const skillDomain = String(body.skillDomain || '') as SciForgeSkillDomain;
+  if (!SKILL_DOMAIN_SET.has(skillDomain)) throw new Error(`Unsupported SciForge skill domain: ${String(body.skillDomain || '')}`);
   return {
     skillDomain,
     prompt: String(body.prompt || ''),
@@ -714,7 +714,7 @@ function isFailedReferenceAttempt(value: unknown) {
 }
 
 async function readRecentArtifactFiles(workspace: string, sessionId?: string) {
-  const dir = join(workspace, '.bioagent', 'artifacts');
+  const dir = join(workspace, '.sciforge', 'artifacts');
   if (!await fileExists(dir)) return [] as Array<{ rel: string; artifact: Record<string, unknown>; mtimeMs: number }>;
   let files: string[] = [];
   try {
@@ -725,7 +725,7 @@ async function readRecentArtifactFiles(workspace: string, sessionId?: string) {
   const entries = await Promise.all(files
     .filter((file) => file.endsWith('.json'))
     .map(async (file) => {
-      const rel = `.bioagent/artifacts/${file}`;
+      const rel = `.sciforge/artifacts/${file}`;
       const path = join(workspace, rel);
       try {
         const [stats, text] = await Promise.all([stat(path), readFile(path, 'utf8')]);
@@ -841,7 +841,7 @@ function agentServerBackend(request?: GatewayRequest, llmEndpoint?: LlmEndpointC
   if (requestBackend && ['openteam_agent', 'claude-code', 'codex', 'hermes-agent', 'openclaw', 'gemini'].includes(requestBackend)) {
     return requestBackend;
   }
-  const requested = process.env.BIOAGENT_AGENTSERVER_BACKEND?.trim();
+  const requested = process.env.SCIFORGE_AGENTSERVER_BACKEND?.trim();
   if (requested && ['openteam_agent', 'claude-code', 'codex', 'hermes-agent', 'openclaw', 'gemini'].includes(requested)) {
     return requested;
   }
@@ -1464,7 +1464,7 @@ function agentServerAgentId(request: GatewayRequest, _purpose: string) {
   const stable = [packageId, sessionId || request.skillPlanRef || request.skillDomain]
     .filter(Boolean)
     .join(':');
-  return `bioagent-${request.skillDomain}-${sha1(stable).slice(0, 12)}`;
+  return `sciforge-${request.skillDomain}-${sha1(stable).slice(0, 12)}`;
 }
 
 function agentServerContextPolicy(request: GatewayRequest) {
@@ -1639,11 +1639,11 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
   const workspace = resolve(request.workspacePath || process.cwd());
   const executionPrompt = executionPromptForWorkspaceSkill(request);
   const runId = sha1(`${taskPrefix}:${executionPrompt}:${Date.now()}`).slice(0, 12);
-  const outputRel = `.bioagent/task-results/${taskPrefix}-${runId}.json`;
-  const inputRel = `.bioagent/task-inputs/${taskPrefix}-${runId}.json`;
-  const stdoutRel = `.bioagent/logs/${taskPrefix}-${runId}.stdout.log`;
-  const stderrRel = `.bioagent/logs/${taskPrefix}-${runId}.stderr.log`;
-  const taskRel = `.bioagent/tasks/${taskPrefix}-${runId}.py`;
+  const outputRel = `.sciforge/task-results/${taskPrefix}-${runId}.json`;
+  const inputRel = `.sciforge/task-inputs/${taskPrefix}-${runId}.json`;
+  const stdoutRel = `.sciforge/logs/${taskPrefix}-${runId}.stdout.log`;
+  const stderrRel = `.sciforge/logs/${taskPrefix}-${runId}.stderr.log`;
+  const taskRel = `.sciforge/tasks/${taskPrefix}-${runId}.py`;
   const taskId = `${taskPrefix}-${runId}`;
   emitWorkspaceRuntimeEvent(callbacks, {
     type: 'workspace-task-start',
@@ -1651,7 +1651,7 @@ async function runPythonWorkspaceSkill(request: GatewayRequest, skill: SkillAvai
     message: `Running ${skill.id}`,
     detail: `${taskPrefix} task ${taskId}`,
   });
-  if (taskPrefix === 'structure') await mkdir(join(workspace, '.bioagent', 'structures'), { recursive: true });
+  if (taskPrefix === 'structure') await mkdir(join(workspace, '.sciforge', 'structures'), { recursive: true });
   const entrypointPath = resolve(dirname(skill.manifestPath), String(skill.manifest.entrypoint.path || ''));
   const run = await runWorkspaceTask(workspace, {
     id: taskId,
@@ -1833,7 +1833,7 @@ async function tryAgentServerRepairAndRerun(params: {
   callbacks?: WorkspaceRuntimeCallbacks;
 }): Promise<ToolPayload | undefined> {
   const baseUrl = params.request.agentServerBaseUrl || await readConfiguredAgentServerBaseUrl(params.run.workspace);
-  if (!baseUrl || process.env.BIOAGENT_ENABLE_AGENTSERVER_REPAIR === '0') return undefined;
+  if (!baseUrl || process.env.SCIFORGE_ENABLE_AGENTSERVER_REPAIR === '0') return undefined;
   throwIfRuntimeAborted(params.callbacks);
   const workspace = params.run.workspace;
   const taskPath = join(workspace, params.run.spec.taskRel);
@@ -1864,7 +1864,7 @@ async function tryAgentServerRepairAndRerun(params: {
   const diffSummary = repair.ok
     ? summarizeTextChange(beforeCode, afterCode, repair.diffSummary)
     : repair.error;
-  const diffRel = `.bioagent/task-diffs/${params.taskId}-attempt-${attempt}.diff.txt`;
+  const diffRel = `.sciforge/task-diffs/${params.taskId}-attempt-${attempt}.diff.txt`;
   await mkdir(dirname(join(workspace, diffRel)), { recursive: true });
   await writeFile(join(workspace, diffRel), diffSummary || 'AgentServer repair produced no diff summary.');
 
@@ -1882,7 +1882,7 @@ async function tryAgentServerRepairAndRerun(params: {
       diffRef: diffRel,
       status: 'failed-with-reason',
       codeRef: params.run.spec.taskRel,
-      inputRef: params.run.spec.id ? `.bioagent/task-inputs/${params.run.spec.id}.json` : undefined,
+      inputRef: params.run.spec.id ? `.sciforge/task-inputs/${params.run.spec.id}.json` : undefined,
       outputRef: params.run.outputRef,
       stdoutRef: params.run.stdoutRef,
       stderrRef: params.run.stderrRef,
@@ -1892,9 +1892,9 @@ async function tryAgentServerRepairAndRerun(params: {
     return undefined;
   }
 
-  const outputRel = `.bioagent/task-results/${params.taskId}-attempt-${attempt}.json`;
-  const stdoutRel = `.bioagent/logs/${params.taskId}-attempt-${attempt}.stdout.log`;
-  const stderrRel = `.bioagent/logs/${params.taskId}-attempt-${attempt}.stderr.log`;
+  const outputRel = `.sciforge/task-results/${params.taskId}-attempt-${attempt}.json`;
+  const stdoutRel = `.sciforge/logs/${params.taskId}-attempt-${attempt}.stdout.log`;
+  const stderrRel = `.sciforge/logs/${params.taskId}-attempt-${attempt}.stderr.log`;
   const rerun = await runWorkspaceTask(workspace, {
     id: `${params.taskId}-attempt-${attempt}`,
     language: params.run.spec.language,
@@ -1940,7 +1940,7 @@ async function tryAgentServerRepairAndRerun(params: {
       diffRef: diffRel,
       status: 'failed-with-reason',
       codeRef: params.run.spec.taskRel,
-      inputRef: `.bioagent/task-inputs/${params.taskId}-attempt-${attempt}.json`,
+      inputRef: `.sciforge/task-inputs/${params.taskId}-attempt-${attempt}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -1985,7 +1985,7 @@ async function tryAgentServerRepairAndRerun(params: {
       diffRef: diffRel,
       status: errors.length ? 'repair-needed' : payloadHasFailureStatus(payload) || rerun.exitCode !== 0 ? 'failed-with-reason' : 'done',
       codeRef: params.run.spec.taskRel,
-      inputRef: `.bioagent/task-inputs/${params.taskId}-attempt-${attempt}.json`,
+      inputRef: `.sciforge/task-inputs/${params.taskId}-attempt-${attempt}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -2015,7 +2015,7 @@ async function tryAgentServerRepairAndRerun(params: {
       skill: params.skill,
       taskId: params.taskId,
       taskRel: params.run.spec.taskRel,
-      inputRef: `.bioagent/task-inputs/${params.taskId}-attempt-${attempt}.json`,
+      inputRef: `.sciforge/task-inputs/${params.taskId}-attempt-${attempt}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -2030,7 +2030,7 @@ async function tryAgentServerRepairAndRerun(params: {
         `AgentServer repair run: ${repair.runId || 'unknown'} (attempt ${attempt}/${maxAttempts})`,
         `Self-heal reason: ${params.failureReason}`,
         `Diff ref: ${diffRel}`,
-        proposal ? `Skill promotion proposal: .bioagent/skill-proposals/${proposal.id}` : '',
+        proposal ? `Skill promotion proposal: .sciforge/skill-proposals/${proposal.id}` : '',
       ].filter(Boolean).join('\n'),
       executionUnits: normalized.executionUnits.map((unit) => isRecord(unit) ? {
         ...unit,
@@ -2062,7 +2062,7 @@ async function tryAgentServerRepairAndRerun(params: {
       diffRef: diffRel,
       status: 'failed-with-reason',
       codeRef: params.run.spec.taskRel,
-      inputRef: `.bioagent/task-inputs/${params.taskId}-attempt-${attempt}.json`,
+      inputRef: `.sciforge/task-inputs/${params.taskId}-attempt-${attempt}.json`,
       outputRef: outputRel,
       stdoutRef: stdoutRel,
       stderrRef: stderrRel,
@@ -2084,7 +2084,7 @@ async function tryAgentServerRepairAndRerun(params: {
 }
 
 function agentServerRepairMaxAttempts() {
-  const value = Number(process.env.BIOAGENT_AGENTSERVER_REPAIR_MAX_ATTEMPTS || 12);
+  const value = Number(process.env.SCIFORGE_AGENTSERVER_REPAIR_MAX_ATTEMPTS || 12);
   return Number.isFinite(value) ? Math.max(2, Math.min(50, Math.floor(value))) : 12;
 }
 
@@ -2098,7 +2098,7 @@ async function requestAgentServerGeneration(params: {
   strictTaskFilesReason?: string;
 }): Promise<AgentServerGenerationResult> {
   const controller = new AbortController();
-  const timeoutMs = Number(process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS || 900000);
+  const timeoutMs = Number(process.env.SCIFORGE_AGENTSERVER_GENERATION_TIMEOUT_MS || 900000);
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let runPayload: unknown;
   let contextRecovery: AgentServerGenerationFailureDiagnostics | undefined;
@@ -2187,29 +2187,29 @@ async function requestAgentServerGeneration(params: {
     runPayload = {
       agent: {
         id: agentId,
-        name: `BioAgent ${params.request.skillDomain} Task Generation`,
+        name: `SciForge ${params.request.skillDomain} Task Generation`,
         backend,
         workspace: params.workspace,
         workingDirectory: params.workspace,
         reconcileExisting: true,
         systemPrompt: [
           AGENT_BACKEND_ANSWER_PRINCIPLE,
-          'You generate BioAgent workspace-local task code.',
-          'Write task files that accept inputPath and outputPath argv values and write a BioAgent ToolPayload JSON object.',
+          'You generate SciForge workspace-local task code.',
+          'Write task files that accept inputPath and outputPath argv values and write a SciForge ToolPayload JSON object.',
           'Do not create demo/default success artifacts; if the real task cannot be generated, explain the missing condition.',
         ].join(' '),
       },
       input: {
         text: generationPrompt,
         metadata: {
-          project: 'BioAgent',
+          project: 'SciForge',
           purpose: 'workspace-task-generation',
           skillDomain: params.request.skillDomain,
           skillId: params.skill.id,
           expectedArtifactTypes: generationRequest.expectedArtifactTypes,
           selectedComponentIds: generationRequest.selectedComponentIds,
           priorAttemptCount: generationRequest.priorAttempts.length,
-          contextEnvelopeVersion: 'bioagent.context-envelope.v1',
+          contextEnvelopeVersion: 'sciforge.context-envelope.v1',
           contextMode: compactContext.mode,
           retryAudit: contextRecovery?.retryAudit,
           contextEnvelopeBytes,
@@ -2231,7 +2231,7 @@ async function requestAgentServerGeneration(params: {
         metadata: {
           autoApprove: true,
           sandbox: 'danger-full-access',
-          source: 'bioagent-workspace-runtime-gateway',
+          source: 'sciforge-workspace-runtime-gateway',
           purpose: 'workspace-task-generation',
           maxContextWindowTokens: params.request.maxContextWindowTokens,
           contextWindowLimit: params.request.maxContextWindowTokens,
@@ -2242,7 +2242,7 @@ async function requestAgentServerGeneration(params: {
         },
       },
       metadata: {
-        project: 'BioAgent',
+        project: 'SciForge',
         source: 'workspace-runtime-gateway',
         task: 'generation',
         workspace: params.workspace,
@@ -2443,7 +2443,7 @@ async function requestAgentServerGeneration(params: {
         callbacks: params.callbacks,
       });
       }
-      return { ok: false, error: 'AgentServer generation response did not include taskFiles and entrypoint or a BioAgent ToolPayload.' };
+      return { ok: false, error: 'AgentServer generation response did not include taskFiles and entrypoint or a SciForge ToolPayload.' };
     }
     return await finalizeAgentServerGenerationSuccess({
       result: {
@@ -2756,7 +2756,7 @@ async function recoverOrReturnAgentServerGenerationFailure(params: {
   }
 
   const retryAudit: AgentServerGenerationRetryAudit = {
-    schemaVersion: 'bioagent.agentserver-generation-retry.v1',
+    schemaVersion: 'sciforge.agentserver-generation-retry.v1',
     attempt: 2,
     maxAttempts: 2,
     trigger: diagnostic,
@@ -2878,8 +2878,8 @@ function providerRateLimitDiagnosticMessage(diagnostic: AgentServerBackendFailur
   const retryAfter = diagnostic.retryAfterMs !== undefined ? ` retryAfterMs=${diagnostic.retryAfterMs}.` : '';
   const resetAt = diagnostic.resetAt ? ` resetAt=${diagnostic.resetAt}.` : '';
   const retry = finalFailure
-    ? ' BioAgent already performed the single allowed compact/slim retry and will not retry again automatically.'
-    : ' BioAgent will back off, compact/slim the handoff, and retry once.';
+    ? ' SciForge already performed the single allowed compact/slim retry and will not retry again automatically.'
+    : ' SciForge will back off, compact/slim the handoff, and retry once.';
   return `AgentServer/provider failure classified as ${labels} for ${provider}.${retryAfter}${resetAt}${retry} Detail: ${diagnostic.message}`;
 }
 
@@ -2895,7 +2895,7 @@ function rateLimitRecoverActions(diagnostic: AgentServerBackendFailureDiagnostic
 }
 
 function boundedRateLimitBackoffMs(diagnostic: AgentServerBackendFailureDiagnostic) {
-  const configuredMax = Number(process.env.BIOAGENT_AGENTSERVER_RATE_LIMIT_BACKOFF_MAX_MS || 1500);
+  const configuredMax = Number(process.env.SCIFORGE_AGENTSERVER_RATE_LIMIT_BACKOFF_MAX_MS || 1500);
   const max = Number.isFinite(configuredMax) ? Math.max(0, Math.min(10_000, configuredMax)) : 1500;
   const requested = diagnostic.retryAfterMs ?? 250;
   return Math.min(max, Math.max(0, requested));
@@ -3307,7 +3307,7 @@ async function requestAgentServerRepair(params: {
   priorAttempts: unknown[];
 }): Promise<{ ok: true; runId?: string; diffSummary?: string } | { ok: false; error: string }> {
   const controller = new AbortController();
-  const timeoutMs = Number(process.env.BIOAGENT_AGENTSERVER_REPAIR_TIMEOUT_MS || 900000);
+  const timeoutMs = Number(process.env.SCIFORGE_AGENTSERVER_REPAIR_TIMEOUT_MS || 900000);
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let runPayload: unknown;
   try {
@@ -3340,23 +3340,23 @@ async function requestAgentServerRepair(params: {
     runPayload = {
       agent: {
         id: agentId,
-        name: `BioAgent ${params.request.skillDomain} Runtime Repair`,
+        name: `SciForge ${params.request.skillDomain} Runtime Repair`,
         backend,
         workspace: params.run.workspace,
         workingDirectory: params.run.workspace,
         reconcileExisting: true,
         systemPrompt: [
           AGENT_BACKEND_ANSWER_PRINCIPLE,
-          'You repair BioAgent workspace-local task code.',
+          'You repair SciForge workspace-local task code.',
           'Edit the referenced task file or adjacent helper files in the workspace, then stop.',
-          'Preserve the task contract: task receives inputPath and outputPath argv values and writes a BioAgent ToolPayload JSON object.',
+          'Preserve the task contract: task receives inputPath and outputPath argv values and writes a SciForge ToolPayload JSON object.',
           'Do not create demo/default success artifacts; if the real task cannot be repaired, explain the missing condition.',
         ].join(' '),
       },
       input: {
         text: repairPrompt,
         metadata: {
-          project: 'BioAgent',
+          project: 'SciForge',
           purpose: 'workspace-task-repair',
           skillDomain: params.request.skillDomain,
           skillId: params.skill.id,
@@ -3365,7 +3365,7 @@ async function requestAgentServerRepair(params: {
           stderrRef: params.run.stderrRef,
           outputRef: params.run.outputRef,
           schemaErrors: params.schemaErrors,
-          repairContextVersion: 'bioagent.repair-context.v1',
+          repairContextVersion: 'sciforge.repair-context.v1',
           contextMode: 'compact-repair',
           repairContextBytes,
           promptChars: repairPrompt.length,
@@ -3379,12 +3379,12 @@ async function requestAgentServerRepair(params: {
         metadata: {
           autoApprove: true,
           sandbox: 'danger-full-access',
-          source: 'bioagent-workspace-runtime-gateway',
+          source: 'sciforge-workspace-runtime-gateway',
           llmEndpointSource: llmRuntime.llmEndpoint ? llmEndpointSource : undefined,
         },
       },
       metadata: {
-        project: 'BioAgent',
+        project: 'SciForge',
         source: 'workspace-runtime-gateway',
         taskId: params.run.spec.id,
         repairOf: params.run.spec.taskRel,
@@ -3453,7 +3453,7 @@ async function requestAgentServerRepair(params: {
 
 async function readConfiguredAgentServerBaseUrl(workspace: string) {
   try {
-    const parsed = JSON.parse(await readFile(join(workspace, '.bioagent', 'config.json'), 'utf8'));
+    const parsed = JSON.parse(await readFile(join(workspace, '.sciforge', 'config.json'), 'utf8'));
     if (isRecord(parsed) && typeof parsed.agentServerBaseUrl === 'string') {
       return cleanUrl(parsed.agentServerBaseUrl);
     }
@@ -3472,7 +3472,7 @@ async function writeAgentServerDebugArtifact(
 ) {
   try {
     const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${task}-${sha1(JSON.stringify(requestPayload)).slice(0, 8)}`;
-    const rel = join('.bioagent', 'debug', 'agentserver', `${id}.json`);
+    const rel = join('.sciforge', 'debug', 'agentserver', `${id}.json`);
     await mkdir(dirname(join(workspace, rel)), { recursive: true });
     await writeFile(join(workspace, rel), JSON.stringify({
       createdAt: new Date().toISOString(),
@@ -3528,7 +3528,7 @@ async function agentServerLlmRuntime(request: GatewayRequest, workspace: string)
   }
   const fromLocal = await readConfiguredLlmEndpoint(join(process.cwd(), 'config.local.json'), 'config.local.json');
   if (fromLocal) return fromLocal;
-  const fromWorkspace = await readConfiguredLlmEndpoint(join(workspace, '.bioagent', 'config.json'), 'workspace-config');
+  const fromWorkspace = await readConfiguredLlmEndpoint(join(workspace, '.sciforge', 'config.json'), 'workspace-config');
   if (fromWorkspace) return fromWorkspace;
   return {};
 }
@@ -3540,7 +3540,7 @@ function hasExplicitRequestLlmConfig(request: GatewayRequest) {
 }
 
 function requiresUserLlmEndpoint(agentServerBaseUrl: string) {
-  if (process.env.BIOAGENT_ALLOW_AGENTSERVER_DEFAULT_LLM === '1') return false;
+  if (process.env.SCIFORGE_ALLOW_AGENTSERVER_DEFAULT_LLM === '1') return false;
   try {
     const url = new URL(agentServerBaseUrl);
     return ['127.0.0.1', 'localhost', '::1'].includes(url.hostname) && url.port === '18080';
@@ -3552,8 +3552,8 @@ function requiresUserLlmEndpoint(agentServerBaseUrl: string) {
 function missingUserLlmEndpointMessage() {
   return [
     'User-side model configuration is required before using the default local AgentServer.',
-    'Set Model Provider, Model Base URL, Model Name, and API Key in BioAgent settings so the request-selected llmEndpoint is forwarded.',
-    'BioAgent will not fall back to AgentServer openteam.json defaults for this path.',
+    'Set Model Provider, Model Base URL, Model Name, and API Key in SciForge settings so the request-selected llmEndpoint is forwarded.',
+    'SciForge will not fall back to AgentServer openteam.json defaults for this path.',
   ].join(' ');
 }
 
@@ -3567,7 +3567,7 @@ async function buildCompactRepairContext(params: {
   priorAttempts: unknown[];
 }) {
   const taskAbs = join(params.workspace, params.run.spec.taskRel);
-  const inputRel = `.bioagent/task-inputs/${params.run.spec.id}.json`;
+  const inputRel = `.sciforge/task-inputs/${params.run.spec.id}.json`;
   const [code, stdout, stderr, output, input] = await Promise.all([
     readTextIfExists(taskAbs),
     readTextIfExists(join(params.workspace, params.run.stdoutRef)),
@@ -3577,12 +3577,12 @@ async function buildCompactRepairContext(params: {
   ]);
   const failureEvidence = `${params.failureReason}\n${stderr}\n${stdout}`;
   return {
-    version: 'bioagent.repair-context.v1',
+    version: 'sciforge.repair-context.v1',
     createdAt: new Date().toISOString(),
     projectFacts: {
-      project: 'BioAgent',
+      project: 'SciForge',
       runtimeRole: 'scenario-first AI4Science workspace runtime',
-      taskCodePolicy: 'Generated tasks live in workspace .bioagent/tasks and must be runnable from inputPath/outputPath.',
+      taskCodePolicy: 'Generated tasks live in workspace .sciforge/tasks and must be runnable from inputPath/outputPath.',
       completionPolicy: 'The final user-visible result must come from executing the repaired task and writing a valid ToolPayload, not from code generation alone.',
       toolPayloadContract: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'displayIntent', 'uiManifest', 'executionUnits', 'artifacts', 'objectReferences'],
     },
@@ -3676,9 +3676,9 @@ function buildAgentServerRepairPrompt(params: {
   repairContext?: Record<string, unknown>;
 }) {
   return [
-    'Repair this BioAgent workspace task and leave the workspace ready for BioAgent to rerun it.',
+    'Repair this SciForge workspace task and leave the workspace ready for SciForge to rerun it.',
     'Use the compact repair context below: it contains the current user goal, workspace refs, failure evidence, and relevant code/log excerpts.',
-    'Edit the referenced task file or adjacent helper files only as needed. BioAgent will rerun the task after you finish.',
+    'Edit the referenced task file or adjacent helper files only as needed. SciForge will rerun the task after you finish.',
     'The repaired task must execute the user goal end-to-end, not merely generate code or report that code was generated.',
     'Preserve failureReason in the next ToolPayload only if the real blocker remains after repair.',
     'Do not fabricate success or replace the user goal with an unrelated demo task.',
@@ -3694,7 +3694,7 @@ function buildAgentServerRepairPrompt(params: {
 
 function buildAgentServerGenerationPrompt(request: {
   prompt: string;
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   contextEnvelope?: Record<string, unknown>;
   workspaceTreeSummary: Array<{ path: string; kind: 'file' | 'folder'; sizeBytes?: number }>;
   availableSkills: Array<{
@@ -3724,30 +3724,30 @@ function buildAgentServerGenerationPrompt(request: {
       workspaceFacts: Boolean(request.contextEnvelope.workspaceFacts),
       longTermRefs: Boolean(request.contextEnvelope.longTermRefs),
     }, null, 2) : '',
-    'Handle this BioAgent request as the agent backend decision-maker.',
-    'AgentServer owns orchestration, domain reasoning, tool choice, continuation, and repair strategy. BioAgent only validates protocol, runs returned workspace tasks, persists refs/artifacts, and reports contract failures.',
-    'First infer the current-turn intent from prompt, recentConversation, priorAttempts, artifacts, recentExecutionRefs, and workspace refs. BioAgent is only the protocol/execution layer; you decide whether to answer, continue, repair, rerun, retrieve, or generate new workspace task code.',
+    'Handle this SciForge request as the agent backend decision-maker.',
+    'AgentServer owns orchestration, domain reasoning, tool choice, continuation, and repair strategy. SciForge only validates protocol, runs returned workspace tasks, persists refs/artifacts, and reports contract failures.',
+    'First infer the current-turn intent from prompt, recentConversation, priorAttempts, artifacts, recentExecutionRefs, and workspace refs. SciForge is only the protocol/execution layer; you decide whether to answer, continue, repair, rerun, retrieve, or generate new workspace task code.',
     'Return exactly one JSON object, with no markdown before or after it.',
-    'If the user only needs an answer from existing context, return a valid BioAgent ToolPayload JSON directly, preserving useful existing artifacts/refs.',
+    'If the user only needs an answer from existing context, return a valid SciForge ToolPayload JSON directly, preserving useful existing artifacts/refs.',
     'If the user asks to continue, repair, rerun, retrieve, analyze files, or produce artifacts, return JSON matching AgentServerGenerationResponse: taskFiles, entrypoint, environmentRequirements, validationCommand, expectedArtifacts, and patchSummary.',
     'Hard contract: taskFiles MUST be an array of objects with path, language, and non-empty content unless the file was physically written in the workspace before returning. Never return taskFiles as string paths only.',
     'Hard contract: entrypoint.path MUST reference one of the returned taskFiles or a file that was physically written in the workspace before returning.',
     'If you physically write task files into the workspace, prefer a compact path-only taskFiles object (path + language, content may be omitted/empty) and return JSON immediately. Do not cat/read full generated source back into the final response just to inline it.',
-    'Final output must be only compact JSON: either AgentServerGenerationResponse or BioAgent ToolPayload.',
-    'When returning a BioAgent ToolPayload, use displayIntent to describe the user-visible view need, and objectReferences to cite key artifacts/files/runs that the user can click on demand.',
+    'Final output must be only compact JSON: either AgentServerGenerationResponse or SciForge ToolPayload.',
+    'When returning a SciForge ToolPayload, use displayIntent to describe the user-visible view need, and objectReferences to cite key artifacts/files/runs that the user can click on demand.',
     'objectReferences refs must use controlled prefixes: artifact:*, file:*, folder:*, run:*, execution-unit:*, scenario-package:*, or url:*.',
     request.strictTaskFilesReason
       ? `Strict retry reason: ${request.strictTaskFilesReason}`
       : '',
     'If a prior task already exists and the user asks to continue, repair, or rerun it, prefer returning taskFiles that reference that existing workspace task path or a minimal patched task instead of starting an unrelated fresh analysis.',
     'Generate fresh task code only when the current turn truly asks for new work or no prior executable artifact can satisfy the request.',
-    'Put generated task paths under .bioagent/tasks when possible. BioAgent will archive any returned taskFiles under .bioagent/tasks/<run-id>/ before execution.',
+    'Put generated task paths under .sciforge/tasks when possible. SciForge will archive any returned taskFiles under .sciforge/tasks/<run-id>/ before execution.',
     'Prefer installed or workspace tools when they genuinely fit, but write adapter code as needed so the run is reproducible from inputPath and outputPath.',
     'Large-file contract: uploaded PDFs, images, spreadsheets, binary blobs, extracted full text, and large logs must stay as workspace refs. Do not inline base64, do not print full extracted text to stdout/stderr, and do not paste full document text into final JSON.',
-    'For uploaded PDFs or long documents, generated tasks should read the file by path/dataRef, write any full extraction to .bioagent/artifacts or .bioagent/task-results, and return only bounded excerpts, section summaries, page/figure locators, hashes, and clickable file/artifact refs.',
+    'For uploaded PDFs or long documents, generated tasks should read the file by path/dataRef, write any full extraction to .sciforge/artifacts or .sciforge/task-results, and return only bounded excerpts, section summaries, page/figure locators, hashes, and clickable file/artifact refs.',
     'Bibliographic verification contract: never mark a PMID, DOI, trial id, citation, or paper record as corrected/verified unless the returned title, year, journal, and identifier correspond to the same work as the source claim.',
     'If an identifier lookup returns a title mismatch, topic mismatch, unrelated journal, or only a broad review when the source claim is a trial/cohort/paper, preserve the original claim and mark it needs-verification with the mismatch reason and search terms. Do not substitute the unrelated record as a correction.',
-    'For literature artifacts, keep original_title, verified_title, title_match, identifier_match, verification_status, and verification_notes fields when correcting references so BioAgent and users can audit the match.',
+    'For literature artifacts, keep original_title, verified_title, title_match, identifier_match, verification_status, and verification_notes fields when correcting references so SciForge and users can audit the match.',
     'Only treat expectedArtifactTypes as required when the list is non-empty. If it is empty, infer the minimal output from the raw user prompt and do not add scenario-default artifacts.',
     'If expectedArtifactTypes contains multiple artifacts, generate a coordinated Python task or small Python module set that emits every requested artifact type. A partial package skill result is not enough unless the missing artifact has a clear failed-with-reason ExecutionUnit.',
     'Use selectedComponentIds only when the current user turn explicitly requested those views; do not preserve default UI slots as output requirements.',
@@ -3768,7 +3768,7 @@ function buildAgentServerGenerationPrompt(request: {
 function summarizeSkillsForAgentServer(
   skills: SkillAvailability[],
   selectedSkill: SkillAvailability,
-  skillDomain: BioAgentSkillDomain,
+  skillDomain: SciForgeSkillDomain,
 ) {
   const selectedId = selectedSkill.id;
   const domainToken = `.${skillDomain}`;
@@ -3964,7 +3964,7 @@ function buildContextEnvelope(
     .map((entry) => clipForAgentServerPrompt(entry, mode === 'full' ? 900 : 700))
     .filter(Boolean);
   return {
-    version: 'bioagent.context-envelope.v1',
+    version: 'sciforge.context-envelope.v1',
     mode,
     createdAt: new Date().toISOString(),
     hashes: {
@@ -3974,42 +3974,42 @@ function buildContextEnvelope(
       priorAttempts: hashJson(params.priorAttempts ?? []),
     },
     projectFacts: mode === 'full' ? {
-      project: 'BioAgent',
+      project: 'SciForge',
       runtimeRole: 'scenario-first AI4Science workspace runtime',
       taskCodePolicy: 'Generate or repair task code in the active workspace; do not rely on fixed source-tree scientific task scripts.',
       toolPayloadContract: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'displayIntent', 'uiManifest', 'executionUnits', 'artifacts', 'objectReferences'],
     } : {
-      project: 'BioAgent',
-      taskCodePolicyRef: 'bioagent.generated-task.v1',
-      toolPayloadContractRef: 'bioagent.toolPayload.v1',
+      project: 'SciForge',
+      taskCodePolicyRef: 'sciforge.generated-task.v1',
+      toolPayloadContractRef: 'sciforge.toolPayload.v1',
     },
     orchestrationBoundary: {
       decisionOwner: 'AgentServer',
-      bioAgentRole: 'protocol validation, workspace execution, artifact/ref persistence, repair request dispatch, and UI display only',
+      sciForgeRole: 'protocol validation, workspace execution, artifact/ref persistence, repair request dispatch, and UI display only',
       currentUserRequestIsAuthoritative: true,
       agentId: params.agentId,
       agentServerCoreSnapshotAvailable: params.agentServerCoreSnapshotAvailable === true,
       contextModeReason: mode === 'delta'
-        ? 'BioAgent sent compact delta refs plus hashes for a multi-turn backend session.'
-        : 'BioAgent sent a full handoff because AgentServer Core context was unavailable or the turn had no reusable session refs.',
+        ? 'SciForge sent compact delta refs plus hashes for a multi-turn backend session.'
+        : 'SciForge sent a full handoff because AgentServer Core context was unavailable or the turn had no reusable session refs.',
     },
     workspaceFacts: mode === 'full' ? {
       workspacePath: params.workspace,
-      bioagentDir: '.bioagent',
-      taskDir: '.bioagent/tasks/',
-      taskResultDir: '.bioagent/task-results/',
-      logDir: '.bioagent/logs/',
-      artifactDir: '.bioagent/artifacts/',
+      sciforgeDir: '.sciforge',
+      taskDir: '.sciforge/tasks/',
+      taskResultDir: '.sciforge/task-results/',
+      logDir: '.sciforge/logs/',
+      artifactDir: '.sciforge/artifacts/',
       workspaceTreeSummary: mode === 'full' ? workspaceTree : undefined,
       workspaceTreeHash: hashJson(workspaceTree),
       workspaceTreeEntryCount: workspaceTree.length,
     } : {
       workspacePath: params.workspace,
       dirs: {
-        task: '.bioagent/tasks/',
-        result: '.bioagent/task-results/',
-        log: '.bioagent/logs/',
-        artifact: '.bioagent/artifacts/',
+        task: '.sciforge/tasks/',
+        result: '.sciforge/task-results/',
+        log: '.sciforge/logs/',
+        artifact: '.sciforge/artifacts/',
       },
       workspaceTreeHash: hashJson(workspaceTree),
       workspaceTreeEntryCount: workspaceTree.length,
@@ -4091,7 +4091,7 @@ async function workspaceTreeSummary(workspace: string) {
   return out;
 }
 
-function expectedArtifactSchema(request: GatewayRequest | BioAgentSkillDomain): Record<string, unknown> {
+function expectedArtifactSchema(request: GatewayRequest | SciForgeSkillDomain): Record<string, unknown> {
   const skillDomain = typeof request === 'string' ? request : request.skillDomain;
   const types = typeof request === 'string' ? [] : expectedArtifactTypesForRequest(request);
   if (types.length) return { types };
@@ -4282,7 +4282,7 @@ function splitCommandLine(command: string) {
 function extractEntrypointPath(value: unknown) {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) return undefined;
-  const token = text.match(/(?:^|\s)(\.?\/?\.bioagent\/tasks\/[^\s"'<>]+\.(?:py|R|r|sh))(?:\s|$)/)?.[1]
+  const token = text.match(/(?:^|\s)(\.?\/?\.sciforge\/tasks\/[^\s"'<>]+\.(?:py|R|r|sh))(?:\s|$)/)?.[1]
     ?? text.match(/(?:^|\s)([^\s"'<>]+\.(?:py|R|r|sh))(?:\s|$)/)?.[1];
   return token ? token.replace(/^\.\//, '') : undefined;
 }
@@ -4462,7 +4462,7 @@ function toolPayloadFromPlainAgentOutput(text: string, request: GatewayRequest):
       schemaVersion: '1',
       metadata: {
         source: 'agentserver-direct-text',
-        note: 'AgentServer returned a natural-language answer instead of taskFiles; BioAgent preserved it as a report artifact.',
+        note: 'AgentServer returned a natural-language answer instead of taskFiles; SciForge preserved it as a report artifact.',
       },
       data: {
         markdown: text,
@@ -4476,7 +4476,7 @@ function toolPayloadFromPlainAgentOutput(text: string, request: GatewayRequest):
     confidence: 0.72,
     claimType: 'evidence-summary',
     evidenceLevel: 'agentserver-direct',
-    reasoningTrace: 'AgentServer returned plain text; BioAgent converted it into a ToolPayload so the work remains visible and auditable.',
+    reasoningTrace: 'AgentServer returned plain text; SciForge converted it into a ToolPayload so the work remains visible and auditable.',
     claims: [{
       text: text.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, 240) || 'AgentServer completed the request.',
       type: 'inference',
@@ -4586,7 +4586,7 @@ function ensureDirectAnswerReportArtifact(payload: ToolPayload, request: Gateway
   };
 }
 
-function directAnswerReportArtifact(message: string, skillDomain: BioAgentSkillDomain, source: string): Record<string, unknown> {
+function directAnswerReportArtifact(message: string, skillDomain: SciForgeSkillDomain, source: string): Record<string, unknown> {
   return {
     id: 'research-report',
     type: 'research-report',
@@ -4594,7 +4594,7 @@ function directAnswerReportArtifact(message: string, skillDomain: BioAgentSkillD
     schemaVersion: '1',
     metadata: {
       source,
-      note: 'AgentServer returned a direct answer with user-visible content; BioAgent preserved the answer as a report artifact instead of adding a repair placeholder.',
+      note: 'AgentServer returned a direct answer with user-visible content; SciForge preserved the answer as a report artifact instead of adding a repair placeholder.',
     },
     data: {
       markdown: message,
@@ -4649,7 +4649,7 @@ function coerceStandaloneArtifactPayload(value: Record<string, unknown>): ToolPa
     confidence: typeof value.confidence === 'number' ? value.confidence : 0.72,
     claimType: String(value.claimType || 'artifact-generation'),
     evidenceLevel: String(value.evidenceLevel || 'workspace-artifact'),
-    reasoningTrace: 'Workspace task returned a standalone artifact JSON; BioAgent wrapped it into a ToolPayload for display, persistence, and follow-up reuse.',
+    reasoningTrace: 'Workspace task returned a standalone artifact JSON; SciForge wrapped it into a ToolPayload for display, persistence, and follow-up reuse.',
     claims: [{
       id: `${id}-claim`,
       text: message,
@@ -4725,7 +4725,7 @@ function normalizeAgentServerToolPayloadCandidate(value: unknown, depth = 0): un
     confidence: typeof value.confidence === 'number' ? value.confidence : 0.72,
     claimType: String(value.claimType || 'agentserver-answer'),
     evidenceLevel: String(value.evidenceLevel || 'agentserver'),
-    reasoningTrace: String(value.reasoningTrace || 'AgentServer returned structured answer JSON; BioAgent normalized it into a ToolPayload.'),
+    reasoningTrace: String(value.reasoningTrace || 'AgentServer returned structured answer JSON; SciForge normalized it into a ToolPayload.'),
     claims,
     uiManifest,
     executionUnits,
@@ -4953,7 +4953,7 @@ async function persistArtifactRefsForPayload(
     const id = safeArtifactId(String(artifact.id || artifact.type || 'artifact'));
     const type = safeArtifactId(String(artifact.type || artifact.id || 'artifact'));
     const artifactHash = sha1(JSON.stringify(clipForAgentServerJson(artifact, 4))).slice(0, 12);
-    const rel = `.bioagent/artifacts/${safeArtifactId(sessionId)}-${type}-${id}-${artifactHash}.json`;
+    const rel = `.sciforge/artifacts/${safeArtifactId(sessionId)}-${type}-${id}-${artifactHash}.json`;
     const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
     const record = {
       ...artifact,
@@ -5161,7 +5161,7 @@ function safeWorkspaceFilePath(value: unknown, workspace: string) {
 }
 
 function scanpyFigureFallbackPath(path: string, workspace: string) {
-  if (!path.replaceAll('\\', '/').includes('/.bioagent/task-results/figures/')) return undefined;
+  if (!path.replaceAll('\\', '/').includes('/.sciforge/task-results/figures/')) return undefined;
   const basename = path.split('/').pop();
   if (!basename) return undefined;
   const normalizedName = basename.replace(/^rank_genes_groups_/, '');
@@ -5271,7 +5271,7 @@ function repairNeededPayload(
 ): ToolPayload {
   const id = `EU-${request.skillDomain}-${sha1(`${request.prompt}:${reason}`).slice(0, 8)}`;
   return {
-    message: `BioAgent runtime gateway needs repair or AgentServer task generation: ${reason}`,
+    message: `SciForge runtime gateway needs repair or AgentServer task generation: ${reason}`,
     confidence: 0.2,
     claimType: 'fact',
     evidenceLevel: 'runtime',
@@ -5294,12 +5294,12 @@ function repairNeededPayload(
     ],
     executionUnits: [{
       id,
-      tool: 'bioagent.workspace-runtime-gateway',
+      tool: 'sciforge.workspace-runtime-gateway',
       params: JSON.stringify({ prompt: request.prompt, skillDomain: request.skillDomain, skillId: skill.id, reason }),
       status: 'repair-needed',
       hash: sha1(`${id}:${reason}`).slice(0, 12),
       time: new Date().toISOString(),
-      environment: 'BioAgent workspace runtime gateway',
+      environment: 'SciForge workspace runtime gateway',
       inputData: [request.prompt],
       outputArtifacts: [],
       artifacts: [],
@@ -5389,8 +5389,8 @@ function recoverActionsForRepair(reason: string) {
   }
   if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) {
     return [
-      'Open BioAgent settings and fill Model Provider, Model Base URL, Model Name, and API Key.',
-      'Save config.local.json, then retry the same prompt so BioAgent forwards the request-selected llmEndpoint.',
+      'Open SciForge settings and fill Model Provider, Model Base URL, Model Name, and API Key.',
+      'Save config.local.json, then retry the same prompt so SciForge forwards the request-selected llmEndpoint.',
       'Do not rely on AgentServer openteam.json defaults for generated workspace tasks.',
     ];
   }
@@ -5413,8 +5413,8 @@ function recoverActionsForRepair(reason: string) {
 }
 
 function nextStepForRepair(reason: string) {
-  if (/429|rate-limit|rate limit|retry budget|too many failed attempts|responseTooManyFailedAttempts|retry-after/i.test(reason)) return 'Wait for provider quota/reset, then rerun with compact workspace refs; BioAgent has already used its single automatic compact retry.';
-  if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) return 'Configure the user-side model endpoint in BioAgent settings, then retry the same prompt.';
+  if (/429|rate-limit|rate limit|retry budget|too many failed attempts|responseTooManyFailedAttempts|retry-after/i.test(reason)) return 'Wait for provider quota/reset, then rerun with compact workspace refs; SciForge has already used its single automatic compact retry.';
+  if (/User-side model configuration|llmEndpoint|openteam\.json defaults/i.test(reason)) return 'Configure the user-side model endpoint in SciForge settings, then retry the same prompt.';
   if (/AgentServer|base URL|fetch|ECONNREFUSED/i.test(reason)) return 'Start AgentServer or choose a local skill/runtime, then retry.';
   if (/schema|payload|parsed|validation/i.test(reason)) return 'Repair the task output contract and rerun validation.';
   return 'Review diagnostics, provide missing inputs, and rerun.';

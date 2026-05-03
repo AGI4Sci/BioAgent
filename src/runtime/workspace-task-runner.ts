@@ -11,10 +11,10 @@ const execFileAsync = promisify(execFile);
 
 export async function runWorkspaceTask(workspacePath: string, spec: WorkspaceTaskSpec): Promise<WorkspaceTaskRunResult> {
   const workspace = resolve(workspacePath || process.cwd());
-  const taskRel = spec.taskRel ?? `.bioagent/tasks/${safeId(spec.id)}.task`;
+  const taskRel = spec.taskRel ?? `.sciforge/tasks/${safeId(spec.id)}.task`;
   const concreteSpec = { ...spec, taskRel };
   const taskPath = join(workspace, taskRel);
-  const inputRel = `.bioagent/task-inputs/${safeId(spec.id)}.json`;
+  const inputRel = `.sciforge/task-inputs/${safeId(spec.id)}.json`;
   const inputPath = join(workspace, inputRel);
   const outputPath = join(workspace, spec.outputRel);
   const stdoutPath = join(workspace, spec.stdoutRel);
@@ -109,8 +109,8 @@ export function sha1(value: string | Buffer) {
 async function commandFor(workspace: string, language: WorkspaceTaskSpec['language'], entrypoint: string) {
   if (language === 'python') {
     const candidates = [
-      join(workspace, '.venv-bioagent', 'bin', 'python'),
-      join(workspace, '.venv-bioagent-omics', 'bin', 'python'),
+      join(workspace, '.venv-sciforge', 'bin', 'python'),
+      join(workspace, '.venv-sciforge-omics', 'bin', 'python'),
       join(workspace, '.venv', 'bin', 'python'),
       'python3',
     ];

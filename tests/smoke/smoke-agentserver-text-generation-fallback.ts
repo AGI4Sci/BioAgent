@@ -6,8 +6,8 @@ import { join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-text-generation-fallback-'));
-const taskRel = '.bioagent/tasks/text-fallback/generated-task.py';
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-text-generation-fallback-'));
+const taskRel = '.sciforge/tasks/text-fallback/generated-task.py';
 const taskCode = String.raw`
 import json
 import sys
@@ -46,8 +46,8 @@ const server = createServer(async (req, res) => {
           result: [
             '```json',
             '{',
-            '  "taskFiles": [".bioagent/tasks/text-fallback/generated-task.py"],',
-            '  "entrypoint": "python3 .bioagent/tasks/text-fallback/generated-task.py {inputPath} {outputPath}"',
+            '  "taskFiles": [".sciforge/tasks/text-fallback/generated-task.py"],',
+            '  "entrypoint": "python3 .sciforge/tasks/text-fallback/generated-task.py {inputPath} {outputPath}"',
             '}',
             '```',
             '',

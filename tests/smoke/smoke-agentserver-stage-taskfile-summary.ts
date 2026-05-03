@@ -6,8 +6,8 @@ import { dirname, join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-stage-summary-'));
-const taskRel = '.bioagent/tasks/stage-summary/run.py';
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-stage-summary-'));
+const taskRel = '.sciforge/tasks/stage-summary/run.py';
 const taskCode = [
   'import argparse, json, os',
   'parser = argparse.ArgumentParser()',

@@ -1,4 +1,4 @@
-# @bioagent-ui/molecule-viewer
+# @sciforge-ui/molecule-viewer
 
 ## Agent quick contract
 - componentId: `molecule-viewer`

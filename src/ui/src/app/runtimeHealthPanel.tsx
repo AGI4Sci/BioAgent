@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { modelHealth, type RuntimeHealthItem, type RuntimeHealthStatus } from '../runtimeHealth';
-import type { BioAgentConfig } from '../domain';
+import type { SciForgeConfig } from '../domain';
 import { Badge, cx } from './uiPrimitives';
 
 export type { RuntimeHealthItem };
 
-export function useRuntimeHealth(config: BioAgentConfig, libraryCount?: number) {
+export function useRuntimeHealth(config: SciForgeConfig, libraryCount?: number) {
   const [items, setItems] = useState<RuntimeHealthItem[]>(() => buildInitialHealth(config, libraryCount));
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function useRuntimeHealth(config: BioAgentConfig, libraryCount?: number) 
   return items;
 }
 
-function buildInitialHealth(config: BioAgentConfig, libraryCount?: number): RuntimeHealthItem[] {
+function buildInitialHealth(config: SciForgeConfig, libraryCount?: number): RuntimeHealthItem[] {
   return [
     { id: 'ui', label: 'Web UI', status: 'online', detail: '当前页面已加载' },
     { id: 'workspace', label: 'Workspace Writer', status: 'checking', detail: config.workspaceWriterBaseUrl },

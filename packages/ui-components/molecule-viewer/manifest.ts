@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/molecule-viewer',
+  packageName: '@sciforge-ui/molecule-viewer',
   moduleId: 'protein-structure-viewer',
   version: '1.0.0',
   title: 'Protein structure viewer',

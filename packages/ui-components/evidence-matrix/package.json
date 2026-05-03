@@ -1,5 +1,5 @@
 {
-  "name": "@bioagent-ui/evidence-matrix",
+  "name": "@sciforge-ui/evidence-matrix",
   "version": "1.0.0",
   "type": "module",
   "main": "./manifest.ts",

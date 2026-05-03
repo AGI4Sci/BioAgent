@@ -1,6 +1,6 @@
-# BioAgent Design System
+# SciForge Design System
 
-BioAgent design-system is the shared home for semantic theme tokens and low-level React primitives. It is intentionally small: pages keep their domain layout, while repeated controls and interaction states come from this package.
+SciForge design-system is the shared home for semantic theme tokens and low-level React primitives. It is intentionally small: pages keep their domain layout, while repeated controls and interaction states come from this package.
 
 ## Agent quick contract
 
@@ -23,4 +23,4 @@ The app should mount exactly one theme class, `theme-dark` or `theme-light`, on 
 
 The visual system should feel like a focused scientific workspace: dense enough for repeated work, calm enough for long sessions, and explicit about state. Cards are for individual repeated objects or compact tool panels, not page-sized decoration. Buttons should carry icons when the action is recognizable, and icon-only controls must keep accessible labels.
 
-When extending the system, add semantic tokens before page-local colors. Keep radii at 8px or below unless a component has a strong reason to be softer. New primitives should render without application data and should not import BioAgent runtime, session, or scenario types.
+When extending the system, add semantic tokens before page-local colors. Keep radii at 8px or below unless a component has a strong reason to be softer. New primitives should render without application data and should not import SciForge runtime, session, or scenario types.

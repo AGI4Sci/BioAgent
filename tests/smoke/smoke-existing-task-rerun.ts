@@ -6,8 +6,8 @@ import { dirname, join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-existing-task-rerun-'));
-const taskRel = '.bioagent/tasks/existing-rerun/run.py';
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-existing-task-rerun-'));
+const taskRel = '.sciforge/tasks/existing-rerun/run.py';
 const taskCode = [
   'import argparse, json, os',
   'parser = argparse.ArgumentParser()',
@@ -52,7 +52,7 @@ const server = createServer(async (req, res) => {
             taskFiles: [{ path: taskRel, language: 'python' }],
             entrypoint: { language: 'python', path: taskRel },
             environmentRequirements: { language: 'python' },
-            validationCommand: `python3 ${taskRel} --outputPath .bioagent/task-results/existing-rerun.json`,
+            validationCommand: `python3 ${taskRel} --outputPath .sciforge/task-results/existing-rerun.json`,
             expectedArtifacts: ['paper-list'],
             patchSummary: 'Backend chose to rerun the existing workspace task path.',
           },

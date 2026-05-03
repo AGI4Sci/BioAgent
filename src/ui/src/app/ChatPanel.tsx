@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, CircleStop, Clock, Copy, Download, FileUp, Mess
 import { scenarios, type ScenarioId } from '../data';
 import { SCENARIO_SPECS } from '../scenarioSpecs';
 import { compactAgentContext, sendAgentMessageStream, validateSemanticTurnAcceptance } from '../api/agentClient';
-import { sendBioAgentToolMessage } from '../api/bioagentToolsClient';
+import { sendSciForgeToolMessage } from '../api/sciforgeToolsClient';
 import { buildContextWindowMeterModel, estimateContextWindowState, latestContextWindowState, shouldStartContextCompaction } from '../contextWindow';
 import { buildContextCompactionFailureResult, buildContextCompactionOutcome } from '../contextCompaction';
 import { builtInScenarioPackageRef } from '../scenarioCompiler/scenarioPackage';
@@ -11,21 +11,21 @@ import { resetSession } from '../sessionStore';
 import { coalesceStreamEvents, formatAgentTokenUsage, latestRunningEvent, presentStreamEvent, streamEventCounts } from '../streamEventPresentation';
 import { acceptAndRepairAgentResponse, buildBackendAcceptanceRepairPrompt, buildUserGoalSnapshot, shouldRunBackendAcceptanceRepair } from '../turnAcceptance';
 import { expectedArtifactsForCurrentTurn, selectedComponentsForCurrentTurn } from '../artifactIntent';
-import { makeId, nowIso, type AgentContextWindowState, type AgentStreamEvent, type BioAgentConfig, type BioAgentMessage, type BioAgentReference, type BioAgentRun, type BioAgentSession, type NormalizedAgentResponse, type ObjectReference, type RuntimeArtifact, type RuntimeExecutionUnit, type ScenarioInstanceId, type ScenarioRuntimeOverride, type TimelineEventRecord } from '../domain';
+import { makeId, nowIso, type AgentContextWindowState, type AgentStreamEvent, type SciForgeConfig, type SciForgeMessage, type SciForgeReference, type SciForgeRun, type SciForgeSession, type NormalizedAgentResponse, type ObjectReference, type RuntimeArtifact, type RuntimeExecutionUnit, type ScenarioInstanceId, type ScenarioRuntimeOverride, type TimelineEventRecord } from '../domain';
 import { writeWorkspaceFile } from '../api/workspaceClient';
 import { exportJsonFile } from './exportUtils';
 import { ActionButton, Badge, ClaimTag, ConfidenceBar, EvidenceTag, IconButton, cx } from './uiPrimitives';
 import {
   appendReferenceMarkerToInput,
   artifactTypeForUploadedFileLike as artifactTypeForUploadedFile,
-  bioAgentReferenceAttribute,
+  sciForgeReferenceAttribute,
   mergeObjectReferences,
   objectReferenceChipModel,
   objectReferenceForArtifactSummary,
   objectReferenceForUploadedArtifact,
   objectReferenceIcon,
   objectReferenceKindLabel,
-  parseBioAgentReferenceAttribute,
+  parseSciForgeReferenceAttribute,
   previewKindForUploadedFileLike as previewKindForUploadedFile,
   referenceComposerMarker,
   referenceForMessage,
@@ -53,7 +53,7 @@ interface HandoffAutoRunRequest {
 interface ReferenceContextMenuState {
   x: number;
   y: number;
-  reference: BioAgentReference;
+  reference: SciForgeReference;
 }
 
 function isBuiltInScenarioId(value: string): value is ScenarioId {
@@ -109,16 +109,16 @@ export function ChatPanel({
 }: {
   scenarioId: ScenarioInstanceId;
   role: string;
-  config: BioAgentConfig;
-  session: BioAgentSession;
+  config: SciForgeConfig;
+  session: SciForgeSession;
   input: string;
   savedScrollTop: number;
   onInputChange: (value: string) => void;
   onScrollTopChange: (value: number) => void;
-  onSessionChange: (session: BioAgentSession) => void;
+  onSessionChange: (session: SciForgeSession) => void;
   onNewChat: () => void;
   onDeleteChat: () => void;
-  archivedSessions: BioAgentSession[];
+  archivedSessions: SciForgeSession[];
   onRestoreArchivedSession: (sessionId: string) => void;
   onDeleteArchivedSessions: (sessionIds: string[]) => void;
   onClearArchivedSessions: () => void;
@@ -128,13 +128,13 @@ export function ChatPanel({
   autoRunRequest?: HandoffAutoRunRequest;
   onAutoRunConsumed: (requestId: string) => void;
   scenarioOverride?: ScenarioRuntimeOverride;
-  onConfigChange: (patch: Partial<BioAgentConfig>) => void;
+  onConfigChange: (patch: Partial<SciForgeConfig>) => void;
   onTimelineEvent: (event: TimelineEventRecord) => void;
   activeRunId?: string;
   onActiveRunChange: (runId: string | undefined) => void;
   onMarkReusableRun: (runId: string) => void;
   onObjectFocus: (reference: ObjectReference) => void;
-  externalReferenceRequest?: { id: string; reference: BioAgentReference };
+  externalReferenceRequest?: { id: string; reference: SciForgeReference };
   onExternalReferenceConsumed?: (requestId: string) => void;
   availableComponentIds?: string[];
 }) {
@@ -150,7 +150,7 @@ export function ChatPanel({
   const [streamEvents, setStreamEvents] = useState<AgentStreamEvent[]>([]);
   const [guidanceQueue, setGuidanceQueue] = useState<string[]>([]);
   const [referencePickMode, setReferencePickMode] = useState(false);
-  const [pendingReferences, setPendingReferences] = useState<BioAgentReference[]>([]);
+  const [pendingReferences, setPendingReferences] = useState<SciForgeReference[]>([]);
   const [referenceContextMenu, setReferenceContextMenu] = useState<ReferenceContextMenuState | null>(null);
   const activeSessionRef = useRef(session);
   const inputRef = useRef(input);
@@ -204,16 +204,16 @@ export function ChatPanel({
   useEffect(() => {
     if (!referencePickMode) return undefined;
     let highlighted: HTMLElement | null = null;
-    document.body.classList.add('bioagent-reference-picking');
+    document.body.classList.add('sciforge-reference-picking');
     const clearHighlight = () => {
-      highlighted?.classList.remove('bioagent-reference-pick-hover');
+      highlighted?.classList.remove('sciforge-reference-pick-hover');
       highlighted = null;
     };
     const setHighlight = (element: HTMLElement | null) => {
       if (highlighted === element) return;
       clearHighlight();
       highlighted = element;
-      highlighted?.classList.add('bioagent-reference-pick-hover');
+      highlighted?.classList.add('sciforge-reference-pick-hover');
     };
     const handleMove = (event: MouseEvent) => {
       setHighlight(referenceTargetFromEvent(event)?.element ?? null);
@@ -235,7 +235,7 @@ export function ChatPanel({
     document.addEventListener('keydown', handleKeyDown, true);
     return () => {
       clearHighlight();
-      document.body.classList.remove('bioagent-reference-picking');
+      document.body.classList.remove('sciforge-reference-picking');
       document.removeEventListener('mousemove', handleMove, true);
       document.removeEventListener('click', handleClick, true);
       document.removeEventListener('keydown', handleKeyDown, true);
@@ -318,7 +318,7 @@ export function ChatPanel({
       const uploaded = await Promise.all(selectedFiles.map((file) => fileToUploadedArtifact(file, scenarioId, config, activeSessionRef.current.sessionId)));
       const references = uploaded.map((artifact) => referenceForUploadedArtifact(artifact));
       const now = nowIso();
-      const uploadMessage: BioAgentMessage = {
+      const uploadMessage: SciForgeMessage = {
         id: makeId('msg'),
         role: 'system',
         content: `已上传 ${uploaded.length} 个文件到证据矩阵：${uploaded.map((artifact) => artifact.metadata?.title ?? artifact.id).join('、')}`,
@@ -327,7 +327,7 @@ export function ChatPanel({
         references,
         objectReferences: uploaded.map((artifact) => objectReferenceForUploadedArtifact(artifact)),
       };
-      const nextSession: BioAgentSession = {
+      const nextSession: SciForgeSession = {
         ...activeSessionRef.current,
         messages: [...activeSessionRef.current.messages, uploadMessage],
         artifacts: mergeRuntimeArtifacts(uploaded, activeSessionRef.current.artifacts),
@@ -344,14 +344,14 @@ export function ChatPanel({
     }
   }
 
-  function addPendingReference(reference: BioAgentReference) {
+  function addPendingReference(reference: SciForgeReference) {
     setPendingReferences((current) => {
       if (current.some((item) => item.id === reference.id)) return current;
       return [...current, reference].slice(0, 8);
     });
   }
 
-  function addPendingReferenceToComposer(reference: BioAgentReference) {
+  function addPendingReferenceToComposer(reference: SciForgeReference) {
     const referenceWithMarker = withComposerMarker(reference, pendingReferences);
     addPendingReference(referenceWithMarker);
     const nextInput = appendReferenceMarkerToInput(inputRef.current, referenceWithMarker);
@@ -368,11 +368,11 @@ export function ChatPanel({
     onInputChange(nextInput);
   }
 
-  function focusPendingReference(reference: BioAgentReference) {
+  function focusPendingReference(reference: SciForgeReference) {
     highlightReferencedContent(reference);
   }
 
-  async function runPrompt(prompt: string, baseSession: BioAgentSession, references: BioAgentReference[] = []) {
+  async function runPrompt(prompt: string, baseSession: SciForgeSession, references: SciForgeReference[] = []) {
     const turnId = makeId('turn');
     const turnComponentHints = selectedComponentsForCurrentTurn(
       prompt,
@@ -395,7 +395,7 @@ export function ChatPanel({
       }),
       recentMessages: baseSession.messages.slice(-8).map((message) => ({ role: message.role, content: message.content })),
     });
-    const userMessage: BioAgentMessage = {
+    const userMessage: SciForgeMessage = {
       id: makeId('msg'),
       role: 'user',
       content: prompt,
@@ -404,7 +404,7 @@ export function ChatPanel({
       references,
       goalSnapshot,
     };
-    const optimisticSession: BioAgentSession = {
+    const optimisticSession: SciForgeSession = {
       ...baseSession,
       title: baseSession.runs.length || baseSession.messages.some((message) => message.id.startsWith('msg'))
         ? baseSession.title
@@ -524,7 +524,7 @@ export function ChatPanel({
       }
       let response: NormalizedAgentResponse;
       try {
-        response = await sendBioAgentToolMessage(request, {
+        response = await sendSciForgeToolMessage(request, {
           onEvent: handleStreamEvent,
         }, controller.signal);
       } catch (projectToolError) {
@@ -536,7 +536,7 @@ export function ChatPanel({
           id: makeId('evt'),
           type: 'project-tool-fallback',
           label: '项目工具',
-          detail: `BioAgent project tool unavailable, falling back to AgentServer: ${detail}`,
+          detail: `SciForge project tool unavailable, falling back to AgentServer: ${detail}`,
           createdAt: nowIso(),
           raw: { error: detail },
         }]);
@@ -656,14 +656,14 @@ export function ChatPanel({
 
   function handleRunningGuidance(prompt: string) {
     const now = nowIso();
-    const guidanceMessage: BioAgentMessage = {
+    const guidanceMessage: SciForgeMessage = {
       id: makeId('msg'),
       role: 'user',
       content: `运行中引导：${prompt}`,
       createdAt: now,
       status: 'running',
     };
-    const nextSession: BioAgentSession = {
+    const nextSession: SciForgeSession = {
       ...activeSessionRef.current,
       messages: [...activeSessionRef.current.messages, guidanceMessage],
       updatedAt: now,
@@ -754,16 +754,16 @@ export function ChatPanel({
     signal,
   }: {
     prompt: string;
-    references: BioAgentReference[];
+    references: SciForgeReference[];
     request: {
       artifacts?: NormalizedAgentResponse['artifacts'];
       executionUnits?: NormalizedAgentResponse['executionUnits'];
       runs?: NormalizedAgentResponse['run'][];
-      messages: BioAgentMessage[];
-    } & Parameters<typeof sendBioAgentToolMessage>[0];
+      messages: SciForgeMessage[];
+    } & Parameters<typeof sendSciForgeToolMessage>[0];
     acceptedResponse: NormalizedAgentResponse;
-    goalSnapshot: NonNullable<BioAgentMessage['goalSnapshot']>;
-    sessionBeforeMerge: BioAgentSession;
+    goalSnapshot: NonNullable<SciForgeMessage['goalSnapshot']>;
+    sessionBeforeMerge: SciForgeSession;
     onStreamEvent: (event: AgentStreamEvent) => void;
     signal: AbortSignal;
   }): Promise<NormalizedAgentResponse> {
@@ -789,7 +789,7 @@ export function ChatPanel({
     }]);
 
     try {
-      const repairResponse = await sendBioAgentToolMessage({
+      const repairResponse = await sendSciForgeToolMessage({
         ...request,
         prompt: repairPrompt,
         references,
@@ -863,7 +863,7 @@ export function ChatPanel({
     }
   }
 
-  function mergeAgentResponse(baseSession: BioAgentSession, response: NormalizedAgentResponse): BioAgentSession {
+  function mergeAgentResponse(baseSession: SciForgeSession, response: NormalizedAgentResponse): SciForgeSession {
     const versionedRun = {
       ...response.run,
       scenarioPackageRef: response.run.scenarioPackageRef ?? scenarioPackageRef,
@@ -901,7 +901,7 @@ export function ChatPanel({
     uiPlanRef,
   });
 
-  function beginEditMessage(message: BioAgentMessage) {
+  function beginEditMessage(message: SciForgeMessage) {
     setEditingMessageId(message.id);
     setEditingContent(message.content);
   }
@@ -989,7 +989,7 @@ export function ChatPanel({
             key={message.id}
             className={cx('message', message.role, activeRunId && messageRunId === activeRunId && 'active-run')}
             data-run-id={messageRunId}
-            data-bioagent-reference={bioAgentReferenceAttribute(referenceForMessage(message, messageRunId))}
+            data-sciforge-reference={sciForgeReferenceAttribute(referenceForMessage(message, messageRunId))}
           >
             <div className="message-body">
               <div className="message-meta">
@@ -1021,7 +1021,7 @@ export function ChatPanel({
                 <p>{message.content}</p>
               )}
               {message.references?.length ? (
-                <BioAgentReferenceChips references={message.references} />
+                <SciForgeReferenceChips references={message.references} />
               ) : null}
               {message.objectReferences?.length ? (
                 <ObjectReferenceChips
@@ -1102,7 +1102,7 @@ export function ChatPanel({
               className={cx(activeRunId === run.id && 'active')}
               onClick={() => onActiveRunChange(activeRunId === run.id ? undefined : run.id)}
               data-run-id={run.id}
-              data-bioagent-reference={bioAgentReferenceAttribute(referenceForRun(run))}
+              data-sciforge-reference={sciForgeReferenceAttribute(referenceForRun(run))}
             >
               {run.id.replace(/^run-/, '').slice(0, 8)}
               <em>{run.status}</em>
@@ -1216,13 +1216,13 @@ export function ChatPanel({
             onChange={(event) => void handleFileUpload(event.currentTarget.files)}
           />
           {pendingReferences.length ? (
-            <BioAgentReferenceChips
+            <SciForgeReferenceChips
               references={pendingReferences}
               onRemove={removePendingReference}
               onFocus={focusPendingReference}
             />
           ) : (
-            <span className="reference-hint">点选 BioAgent 可见对象作为上下文</span>
+            <span className="reference-hint">点选 SciForge 可见对象作为上下文</span>
           )}
         </div>
         {referencePickMode ? (
@@ -1324,7 +1324,7 @@ function failedAcceptanceRepairResponse(
 ): NormalizedAgentResponse {
   const failureUnit: RuntimeExecutionUnit = {
     id: makeId('EU-acceptance-repair'),
-    tool: 'bioagent.acceptance-repair-rerun',
+    tool: 'sciforge.acceptance-repair-rerun',
     params: `sourceRunId=${original.run.id}`,
     status: 'failed-with-reason',
     hash: original.run.id.slice(0, 10),
@@ -1390,7 +1390,7 @@ function failedAcceptanceRepairResponse(
   };
 }
 
-function requestPayloadForTurn(session: BioAgentSession, userMessage: BioAgentMessage, references: BioAgentReference[]) {
+function requestPayloadForTurn(session: SciForgeSession, userMessage: SciForgeMessage, references: SciForgeReference[]) {
   const hasExplicitReferences = references.length > 0;
   const priorMessages = session.messages.filter((message) => message.id !== userMessage.id);
   const hasRealPriorMessages = priorMessages.some((message) => !message.id.startsWith('seed'));
@@ -1438,11 +1438,11 @@ function mergeRuns(primary: NormalizedAgentResponse['run'][], secondary: Normali
   return Array.from(byId.values()).slice(-12);
 }
 
-async function fileToUploadedArtifact(file: File, scenarioId: ScenarioInstanceId, config: BioAgentConfig, sessionId: string): Promise<RuntimeArtifact> {
+async function fileToUploadedArtifact(file: File, scenarioId: ScenarioInstanceId, config: SciForgeConfig, sessionId: string): Promise<RuntimeArtifact> {
   const id = makeId('upload');
   const safeSessionId = safeWorkspaceSegment(sessionId || 'sessionless');
   const safeFileName = safeWorkspaceSegment(file.name) || `${id}.bin`;
-  const relativePath = `.bioagent/uploads/${safeSessionId}/${id}-${safeFileName}`;
+  const relativePath = `.sciforge/uploads/${safeSessionId}/${id}-${safeFileName}`;
   const workspaceRoot = config.workspacePath.replace(/\/+$/, '');
   if (!workspaceRoot) throw new Error('上传文件需要先配置 workspacePath。');
   const absolutePath = `${workspaceRoot}/${relativePath}`;
@@ -1564,7 +1564,7 @@ function runReadiness({
 }: {
   input: string;
   isSending: boolean;
-  config: BioAgentConfig;
+  config: SciForgeConfig;
   scenarioPackageRef: RuntimeExecutionUnit['scenarioPackageRef'];
   skillPlanRef: string;
   uiPlanRef: string;
@@ -1598,10 +1598,10 @@ function runReadiness({
 }
 
 function runIdForMessage(
-  message: BioAgentMessage,
+  message: SciForgeMessage,
   index: number,
-  messages: BioAgentMessage[],
-  runs: BioAgentRun[],
+  messages: SciForgeMessage[],
+  runs: SciForgeRun[],
 ) {
   if (!runs.length || message.id.startsWith('seed')) return undefined;
   if (message.role === 'user') {
@@ -1640,7 +1640,7 @@ function ObjectReferenceChips({
           onClick={() => onFocus(reference)}
           title={reference.summary || reference.ref}
           data-tooltip={`${objectReferenceKindLabel(reference.kind)} · ${reference.ref}`}
-          data-bioagent-reference={bioAgentReferenceAttribute(referenceForObjectReference(reference))}
+          data-sciforge-reference={sciForgeReferenceAttribute(referenceForObjectReference(reference))}
         >
           <span>{objectReferenceIcon(reference.kind)}</span>
           <strong>{reference.title}</strong>
@@ -1669,7 +1669,7 @@ function RunKeyInfo({
   onObjectFocus,
 }: {
   runId: string;
-  session: BioAgentSession;
+  session: SciForgeSession;
   onObjectFocus?: (reference: ObjectReference) => void;
 }) {
   const run = session.runs.find((item) => item.id === runId);
@@ -1731,7 +1731,7 @@ function artifactTitle(artifact: RuntimeArtifact) {
 function TurnAcceptanceNotice({
   acceptance,
 }: {
-  acceptance: NonNullable<BioAgentMessage['acceptance']>;
+  acceptance: NonNullable<SciForgeMessage['acceptance']>;
 }) {
   return (
     <div className="turn-acceptance-notice">
@@ -1741,23 +1741,23 @@ function TurnAcceptanceNotice({
   );
 }
 
-function BioAgentReferenceChips({
+function SciForgeReferenceChips({
   references,
   onRemove,
   onFocus,
 }: {
-  references: BioAgentReference[];
+  references: SciForgeReference[];
   onRemove?: (referenceId: string) => void;
-  onFocus?: (reference: BioAgentReference) => void;
+  onFocus?: (reference: SciForgeReference) => void;
 }) {
   return (
-    <div className="bioagent-reference-strip" aria-label="用户引用的上下文">
+    <div className="sciforge-reference-strip" aria-label="用户引用的上下文">
       {references.slice(0, 8).map((reference) => (
         <span
           role="button"
           tabIndex={0}
           key={reference.id}
-          className={cx('bioagent-reference-chip', `kind-${reference.kind}`)}
+          className={cx('sciforge-reference-chip', `kind-${reference.kind}`)}
           title={reference.summary || reference.ref}
           onClick={() => onFocus?.(reference)}
           onKeyDown={(event) => {
@@ -1793,18 +1793,18 @@ function BioAgentReferenceChips({
   );
 }
 
-function highlightReferencedContent(reference: BioAgentReference) {
-  const element = elementForBioAgentReference(reference);
+function highlightReferencedContent(reference: SciForgeReference) {
+  const element = elementForSciForgeReference(reference);
   if (!element) return;
   element.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  element.classList.add('bioagent-reference-focus');
-  window.setTimeout(() => element.classList.remove('bioagent-reference-focus'), 2200);
+  element.classList.add('sciforge-reference-focus');
+  window.setTimeout(() => element.classList.remove('sciforge-reference-focus'), 2200);
   const payload = isRecord(reference.payload) ? reference.payload : undefined;
   const selectedText = typeof payload?.selectedText === 'string' ? payload.selectedText : '';
   if (selectedText) selectTextInElement(element, selectedText);
 }
 
-function elementForBioAgentReference(reference: BioAgentReference) {
+function elementForSciForgeReference(reference: SciForgeReference) {
   const payload = isRecord(reference.payload) ? reference.payload : undefined;
   const sourceRef = typeof payload?.sourceRef === 'string' ? payload.sourceRef : reference.ref;
   const uiRef = sourceRef.replace(/^ui-text:/, '').replace(/#[^#]*$/, '');
@@ -1817,8 +1817,8 @@ function elementForBioAgentReference(reference: BioAgentReference) {
       // Ignore invalid selectors from legacy references and fall back to attribute matching.
     }
   }
-  for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-bioagent-reference]'))) {
-    const parsed = parseBioAgentReferenceAttribute(element.dataset.bioagentReference);
+  for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-sciforge-reference]'))) {
+    const parsed = parseSciForgeReferenceAttribute(element.dataset.sciforgeReference);
     if (parsed?.id === reference.id || parsed?.ref === sourceRef || parsed?.ref === reference.ref) return element;
   }
   return undefined;
@@ -1849,7 +1849,7 @@ function rangeForTextInElement(element: HTMLElement, text: string) {
   return undefined;
 }
 
-function textSelectionReferenceTarget(event?: MouseEvent): { element: HTMLElement; reference: BioAgentReference } | undefined {
+function textSelectionReferenceTarget(event?: MouseEvent): { element: HTMLElement; reference: SciForgeReference } | undefined {
   const rawTarget = event?.target instanceof Element ? event.target : undefined;
   if (rawTarget?.closest('.composer, .reference-pick-banner, .settings-dialog, .reference-context-menu')) return undefined;
   const selection = window.getSelection();
@@ -1859,10 +1859,10 @@ function textSelectionReferenceTarget(event?: MouseEvent): { element: HTMLElemen
   const ancestor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
     ? range.commonAncestorContainer as Element
     : range.commonAncestorContainer.parentElement;
-  const element = ancestor?.closest<HTMLElement>('[data-bioagent-reference], .message, .registry-slot, .card, .data-preview-table, table, section');
+  const element = ancestor?.closest<HTMLElement>('[data-sciforge-reference], .message, .registry-slot, .card, .data-preview-table, table, section');
   if (!element || element.closest('.composer, .reference-pick-banner, .settings-dialog')) return undefined;
   if (rawTarget && !element.contains(rawTarget) && !rawTarget.contains(element)) return undefined;
-  const sourceReference = parseBioAgentReferenceAttribute(element.dataset.bioagentReference) ?? referenceForUiElement(element);
+  const sourceReference = parseSciForgeReferenceAttribute(element.dataset.sciforgeReference) ?? referenceForUiElement(element);
   const reference = referenceForTextSelection({ sourceReference, selectedText });
   if (!reference) return undefined;
   return {
@@ -1871,12 +1871,12 @@ function textSelectionReferenceTarget(event?: MouseEvent): { element: HTMLElemen
   };
 }
 
-function referenceTargetFromEvent(event: MouseEvent): { element: HTMLElement; reference: BioAgentReference } | undefined {
+function referenceTargetFromEvent(event: MouseEvent): { element: HTMLElement; reference: SciForgeReference } | undefined {
   const rawTarget = event.target instanceof Element ? event.target : undefined;
   if (!rawTarget || rawTarget.closest('.composer, .reference-pick-banner, .settings-dialog')) return undefined;
-  const explicit = rawTarget.closest<HTMLElement>('[data-bioagent-reference]');
+  const explicit = rawTarget.closest<HTMLElement>('[data-sciforge-reference]');
   if (explicit) {
-    const reference = parseBioAgentReferenceAttribute(explicit.dataset.bioagentReference);
+    const reference = parseSciForgeReferenceAttribute(explicit.dataset.sciforgeReference);
     if (reference) return { element: explicit, reference };
   }
   const implicit = rawTarget.closest<HTMLElement>('button, [role="button"], .registry-slot, .card, .message, .data-preview-table, table, canvas, svg, section');
@@ -1892,7 +1892,7 @@ function latestTokenUsage(events: AgentStreamEvent[]) {
   return [...events].reverse().find((event) => event.usage)?.usage;
 }
 
-export function mergeRunTimelineEvents(events: TimelineEventRecord[], previousSession: BioAgentSession | undefined, nextSession: BioAgentSession) {
+export function mergeRunTimelineEvents(events: TimelineEventRecord[], previousSession: SciForgeSession | undefined, nextSession: SciForgeSession) {
   const previousRunIds = new Set(previousSession?.runs.map((run) => run.id) ?? []);
   const existingEventIds = new Set(events.map((event) => event.id));
   const newEvents = nextSession.runs
@@ -1902,7 +1902,7 @@ export function mergeRunTimelineEvents(events: TimelineEventRecord[], previousSe
   return [...newEvents, ...events].slice(0, 200);
 }
 
-function timelineEventFromStoredRun(session: BioAgentSession, run: BioAgentSession['runs'][number]): TimelineEventRecord {
+function timelineEventFromStoredRun(session: SciForgeSession, run: SciForgeSession['runs'][number]): TimelineEventRecord {
   const runArtifactRefs = session.artifacts
     .filter((artifact) => artifact.producerScenario === session.scenarioId)
     .slice(0, 8)
@@ -1917,7 +1917,7 @@ function timelineEventFromStoredRun(session: BioAgentSession, run: BioAgentSessi
   const failureSummary = run.status === 'failed' && run.response ? ` · ${run.response.slice(0, 120)}` : '';
   return {
     id: `timeline-${run.id}`,
-    actor: 'BioAgent Runtime',
+    actor: 'SciForge Runtime',
     action: `run.${run.status}`,
     subject: `${session.scenarioId}:${run.id}${promptSummary}${failureSummary}`,
     artifactRefs: runArtifactRefs,
@@ -1937,8 +1937,8 @@ function SessionHistoryPanel({
   onDelete,
   onClear,
 }: {
-  currentSession: BioAgentSession;
-  archivedSessions: BioAgentSession[];
+  currentSession: SciForgeSession;
+  archivedSessions: SciForgeSession[];
   onRestore: (sessionId: string) => void;
   onDelete: (sessionIds: string[]) => void;
   onClear: () => void;
@@ -2018,25 +2018,25 @@ function SessionHistoryPanel({
   );
 }
 
-function sessionHistoryStats(session: BioAgentSession) {
+function sessionHistoryStats(session: SciForgeSession) {
   const userMessages = session.messages.filter((message) => !message.id.startsWith('seed')).length;
   return `${userMessages} messages · ${session.artifacts.length} artifacts · ${session.executionUnits.length} units`;
 }
 
-function sessionHistoryPackageLabel(session: BioAgentSession) {
+function sessionHistoryPackageLabel(session: SciForgeSession) {
   const lastRun = session.runs.at(-1);
   const ref = lastRun?.scenarioPackageRef;
   if (!ref) return undefined;
   return `${ref.id}@${ref.version}`;
 }
 
-function sessionHistoryLastRunLabel(session: BioAgentSession) {
+function sessionHistoryLastRunLabel(session: SciForgeSession) {
   const lastRun = session.runs.at(-1);
   if (!lastRun) return undefined;
   return `last run ${lastRun.status}`;
 }
 
-function sessionHistoryLastRunVariant(session: BioAgentSession): 'info' | 'success' | 'warning' | 'danger' | 'muted' {
+function sessionHistoryLastRunVariant(session: SciForgeSession): 'info' | 'success' | 'warning' | 'danger' | 'muted' {
   const status = session.runs.at(-1)?.status;
   if (status === 'completed') return 'success';
   if (status === 'failed') return 'danger';

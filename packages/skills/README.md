@@ -1,4 +1,4 @@
-# @bioagent-skill/packages
+# @sciforge-skill/packages
 
 ## Agent quick contract
 - A skill is the agent-selectable work strategy: when to act, what inputs matter, what outputs to produce, and what failure modes to handle.

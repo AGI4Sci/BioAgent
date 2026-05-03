@@ -4,19 +4,19 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { BioAgentSession } from '../../src/ui/src/domain';
+import type { SciForgeSession } from '../../src/ui/src/domain';
 import { buildExecutionBundle, evaluateExecutionBundleExport } from '../../src/ui/src/exportPolicy';
 import { runScenarioRuntimeSmoke } from '../../src/ui/src/scenarioCompiler/runtimeSmoke';
 import { buildBuiltInScenarioPackage } from '../../src/ui/src/scenarioCompiler/scenarioPackage';
 
-const sourceWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-bundle-source-'));
-const targetWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-bundle-target-'));
+const sourceWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-bundle-source-'));
+const targetWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-bundle-target-'));
 const port = 20080 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
-    BIOAGENT_WORKSPACE_PORT: String(port),
+    SCIFORGE_WORKSPACE_PORT: String(port),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -29,19 +29,19 @@ try {
   const decision = evaluateExecutionBundleExport(session);
   const bundle = buildExecutionBundle(session, decision);
 
-  await writeFile(join(sourceWorkspace, 'bioagent-execution-bundle.json'), JSON.stringify({
+  await writeFile(join(sourceWorkspace, 'sciforge-execution-bundle.json'), JSON.stringify({
     package: pkg,
     executionBundle: bundle,
   }, null, 2));
 
-  let response = await fetch(`${baseUrl}/api/bioagent/scenarios/save`, {
+  let response = await fetch(`${baseUrl}/api/sciforge/scenarios/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: targetWorkspace, package: pkg }),
   });
   await assertOk(response);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/get?workspacePath=${encodeURIComponent(targetWorkspace)}&id=${encodeURIComponent(pkg.id)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/get?workspacePath=${encodeURIComponent(targetWorkspace)}&id=${encodeURIComponent(pkg.id)}`);
   await assertOk(response);
   const loaded = await response.json() as { package: typeof pkg };
   assert.equal(loaded.package.id, pkg.id);
@@ -56,7 +56,7 @@ try {
   child.kill('SIGTERM');
 }
 
-function bundleFixtureSession(): BioAgentSession {
+function bundleFixtureSession(): SciForgeSession {
   return {
     schemaVersion: 2,
     sessionId: 'session-bundle-import',

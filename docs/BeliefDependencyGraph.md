@@ -1,6 +1,6 @@
 # Belief Dependency Graph
 
-BioAgent separates evidence from conclusions. A claim can depend on papers, runtime artifacts, assumptions, decisions, and opposing evidence.
+SciForge separates evidence from conclusions. A claim can depend on papers, runtime artifacts, assumptions, decisions, and opposing evidence.
 
 Node kinds:
 

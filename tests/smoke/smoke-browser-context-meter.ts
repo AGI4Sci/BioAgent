@@ -7,16 +7,16 @@ import { join } from 'node:path';
 
 import { chromium, type Browser, type Page } from 'playwright-core';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-context-meter-smoke-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-context-meter-smoke-'));
 const workspacePort = 24080 + Math.floor(Math.random() * 1000);
 const uiPort = 25080 + Math.floor(Math.random() * 1000);
 const children: ChildProcess[] = [];
 
 try {
-  await mkdir(join(workspace, '.bioagent', 'artifacts'), { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'task-results'), { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'scenarios'), { recursive: true });
-  await writeFile(join(workspace, '.bioagent', 'workspace-state.json'), JSON.stringify({
+  await mkdir(join(workspace, '.sciforge', 'artifacts'), { recursive: true });
+  await mkdir(join(workspace, '.sciforge', 'task-results'), { recursive: true });
+  await mkdir(join(workspace, '.sciforge', 'scenarios'), { recursive: true });
+  await writeFile(join(workspace, '.sciforge', 'workspace-state.json'), JSON.stringify({
     schemaVersion: 2,
     workspacePath: workspace,
     sessionsByScenario: {},
@@ -25,8 +25,8 @@ try {
     updatedAt: new Date().toISOString(),
   }, null, 2));
 
-  children.push(start('workspace', ['npm', 'run', 'workspace:server'], { BIOAGENT_WORKSPACE_PORT: String(workspacePort) }));
-  children.push(start('ui', ['npm', 'run', 'dev:ui', '--', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], { BIOAGENT_UI_PORT: String(uiPort) }));
+  children.push(start('workspace', ['npm', 'run', 'workspace:server'], { SCIFORGE_WORKSPACE_PORT: String(workspacePort) }));
+  children.push(start('ui', ['npm', 'run', 'dev:ui', '--', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], { SCIFORGE_UI_PORT: String(uiPort) }));
   await waitForHttp(`http://127.0.0.1:${workspacePort}/health`);
   await waitForHttp(`http://127.0.0.1:${uiPort}/`);
 
@@ -46,7 +46,7 @@ try {
       resolveThirdRunStarted = resolve;
     });
 
-    await page.route(`http://127.0.0.1:${workspacePort}/api/bioagent/tools/run/stream`, async (route, request) => {
+    await page.route(`http://127.0.0.1:${workspacePort}/api/sciforge/tools/run/stream`, async (route, request) => {
       runRequests.push(request.postDataJSON() as Record<string, unknown>);
       runCount += 1;
       if (runCount === 3) {
@@ -113,7 +113,7 @@ try {
     await page.getByText('Context smoke response 3').first().waitFor({ timeout: 15_000 });
     assert.equal(runRequests.length, 3, 'running pending marker should not enqueue an extra turn');
     assert.equal(compactRequests.length, 0, 'compact preflight should stay in AgentServer across active turn');
-    assert.deepEqual((page as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], 'context meter workflow should not emit page errors');
+    assert.deepEqual((page as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors ?? [], [], 'context meter workflow should not emit page errors');
     await page.close();
   } finally {
     await browser.close();
@@ -144,14 +144,14 @@ async function newContextMeterPage(browser: Browser) {
     requestTimeoutMs: 5_000,
     updatedAt: new Date().toISOString(),
   };
-  await fetch(`http://127.0.0.1:${workspacePort}/api/bioagent/config`, {
+  await fetch(`http://127.0.0.1:${workspacePort}/api/sciforge/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ config }),
   });
   await page.addInitScript(({ config }) => {
-    window.localStorage.setItem('bioagent.config.v1', JSON.stringify(config));
-    window.localStorage.setItem('bioagent.workspace.v2', JSON.stringify({
+    window.localStorage.setItem('sciforge.config.v1', JSON.stringify(config));
+    window.localStorage.setItem('sciforge.workspace.v2', JSON.stringify({
       schemaVersion: 2,
       workspacePath: config.workspacePath,
       sessionsByScenario: {},
@@ -160,7 +160,7 @@ async function newContextMeterPage(browser: Browser) {
       updatedAt: new Date().toISOString(),
     }));
   }, { config });
-  (page as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors = pageErrors;
+  (page as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors = pageErrors;
   return page;
 }
 
@@ -264,7 +264,7 @@ async function waitForCondition(predicate: () => boolean, label: string, timeout
 
 function browserExecutablePath() {
   const candidates = [
-    process.env.BIOAGENT_BROWSER_EXECUTABLE,
+    process.env.SCIFORGE_BROWSER_EXECUTABLE,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -273,5 +273,5 @@ function browserExecutablePath() {
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
-  throw new Error('No Chromium-compatible browser found. Set BIOAGENT_BROWSER_EXECUTABLE to run browser smoke.');
+  throw new Error('No Chromium-compatible browser found. Set SCIFORGE_BROWSER_EXECUTABLE to run browser smoke.');
 }

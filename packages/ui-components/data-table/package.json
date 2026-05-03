@@ -1,5 +1,5 @@
 {
-  "name": "@bioagent-ui/data-table",
+  "name": "@sciforge-ui/data-table",
   "version": "1.0.0",
   "type": "module",
   "main": "./manifest.ts",

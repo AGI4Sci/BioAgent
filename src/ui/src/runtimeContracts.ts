@@ -92,7 +92,7 @@ export const turnAcceptanceSeverities = [
 
 export const runtimeContractSchemas = {
   uiModulePackage: {
-    $id: 'bioagent.ui-module-package.schema.json',
+    $id: 'sciforge.ui-module-package.schema.json',
     type: 'object',
     required: ['module', 'artifactSchema', 'viewSchema', 'interactions', 'renderer', 'fixtures', 'tests', 'preview'],
     properties: {
@@ -107,7 +107,7 @@ export const runtimeContractSchemas = {
     },
   },
   displayIntent: {
-    $id: 'bioagent.display-intent.schema.json',
+    $id: 'sciforge.display-intent.schema.json',
     type: 'object',
     required: ['primaryGoal'],
     properties: {
@@ -120,11 +120,11 @@ export const runtimeContractSchemas = {
     },
   },
   resolvedViewPlan: {
-    $id: 'bioagent.resolved-view-plan.schema.json',
+    $id: 'sciforge.resolved-view-plan.schema.json',
     type: 'object',
     required: ['displayIntent', 'sections', 'diagnostics'],
     properties: {
-      displayIntent: { $ref: 'bioagent.display-intent.schema.json' },
+      displayIntent: { $ref: 'sciforge.display-intent.schema.json' },
       sections: {
         type: 'object',
         required: ['primary', 'supporting', 'provenance', 'raw'],
@@ -134,7 +134,7 @@ export const runtimeContractSchemas = {
     },
   },
   objectReference: {
-    $id: 'bioagent.object-reference.schema.json',
+    $id: 'sciforge.object-reference.schema.json',
     type: 'object',
     required: ['id', 'title', 'kind', 'ref'],
     properties: {
@@ -153,7 +153,7 @@ export const runtimeContractSchemas = {
     },
   },
   previewDescriptor: {
-    $id: 'bioagent.preview-descriptor.schema.json',
+    $id: 'sciforge.preview-descriptor.schema.json',
     type: 'object',
     required: ['kind', 'source', 'ref', 'inlinePolicy', 'actions'],
     properties: {
@@ -189,7 +189,7 @@ export const runtimeContractSchemas = {
     },
   },
   userGoalSnapshot: {
-    $id: 'bioagent.user-goal-snapshot.schema.json',
+    $id: 'sciforge.user-goal-snapshot.schema.json',
     type: 'object',
     required: ['turnId', 'rawPrompt', 'goalType', 'requiredFormats', 'requiredArtifacts', 'requiredReferences', 'uiExpectations', 'acceptanceCriteria'],
     properties: {
@@ -205,7 +205,7 @@ export const runtimeContractSchemas = {
     },
   },
   turnAcceptance: {
-    $id: 'bioagent.turn-acceptance.schema.json',
+    $id: 'sciforge.turn-acceptance.schema.json',
     type: 'object',
     required: ['pass', 'severity', 'checkedAt', 'failures', 'objectReferences'],
     properties: {
@@ -213,7 +213,7 @@ export const runtimeContractSchemas = {
       severity: { enum: turnAcceptanceSeverities },
       checkedAt: { type: 'string' },
       failures: { type: 'array', items: { type: 'object' } },
-      objectReferences: { type: 'array', items: { $ref: 'bioagent.object-reference.schema.json' } },
+      objectReferences: { type: 'array', items: { $ref: 'sciforge.object-reference.schema.json' } },
       repairPrompt: { type: 'string' },
       repairAttempt: { type: 'number' },
       semantic: {

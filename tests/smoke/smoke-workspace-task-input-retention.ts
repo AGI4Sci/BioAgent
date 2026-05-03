@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pruneTaskInputRetention } from '../../src/runtime/workspace-retention.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-task-input-retention-'));
-const inputDir = join(workspace, '.bioagent', 'task-inputs');
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-task-input-retention-'));
+const inputDir = join(workspace, '.sciforge', 'task-inputs');
 await mkdir(inputDir, { recursive: true });
 
 const baseSeconds = Math.floor(Date.now() / 1000) - 1000;
@@ -18,7 +18,7 @@ for (let index = 0; index < 5; index += 1) {
 const byCount = await pruneTaskInputRetention(workspace, {
   maxFiles: 3,
   maxBytes: 1_000_000,
-  protectedRels: ['.bioagent/task-inputs/input-0.json'],
+  protectedRels: ['.sciforge/task-inputs/input-0.json'],
 });
 assert.equal(byCount.deletedFiles, 2);
 assert.deepEqual((await readdir(inputDir)).sort(), [
@@ -35,7 +35,7 @@ await utimes(join(inputDir, 'large-new.json'), baseSeconds + 10, baseSeconds + 1
 const byBytes = await pruneTaskInputRetention(workspace, {
   maxFiles: 10,
   maxBytes: 900,
-  protectedRels: ['.bioagent/task-inputs/input-0.json'],
+  protectedRels: ['.sciforge/task-inputs/input-0.json'],
 });
 assert.ok(byBytes.deletedFiles >= 1);
 const remaining = (await readdir(inputDir)).sort();
@@ -44,18 +44,18 @@ assert.ok(remaining.includes('large-new.json'));
 assert.ok(!remaining.includes('large-old.json'));
 
 const originalCwd = process.cwd();
-const originalMaxFiles = process.env.BIOAGENT_TASK_INPUT_MAX_FILES;
-const originalMaxBytes = process.env.BIOAGENT_TASK_INPUT_MAX_BYTES;
+const originalMaxFiles = process.env.SCIFORGE_TASK_INPUT_MAX_FILES;
+const originalMaxBytes = process.env.SCIFORGE_TASK_INPUT_MAX_BYTES;
 try {
-  delete process.env.BIOAGENT_TASK_INPUT_MAX_FILES;
-  delete process.env.BIOAGENT_TASK_INPUT_MAX_BYTES;
-  const configRoot = await mkdtemp(join(tmpdir(), 'bioagent-retention-config-'));
+  delete process.env.SCIFORGE_TASK_INPUT_MAX_FILES;
+  delete process.env.SCIFORGE_TASK_INPUT_MAX_BYTES;
+  const configRoot = await mkdtemp(join(tmpdir(), 'sciforge-retention-config-'));
   process.chdir(configRoot);
   await writeFile(join(configRoot, 'config.local.json'), JSON.stringify({
-    bioagent: { taskInputRetention: { maxFiles: 2, maxBytes: 1_000_000 } },
+    sciforge: { taskInputRetention: { maxFiles: 2, maxBytes: 1_000_000 } },
   }, null, 2));
-  const configuredWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-task-input-configured-'));
-  const configuredInputDir = join(configuredWorkspace, '.bioagent', 'task-inputs');
+  const configuredWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-task-input-configured-'));
+  const configuredInputDir = join(configuredWorkspace, '.sciforge', 'task-inputs');
   await mkdir(configuredInputDir, { recursive: true });
   for (let index = 0; index < 4; index += 1) {
     const path = join(configuredInputDir, `configured-${index}.json`);
@@ -69,10 +69,10 @@ try {
   ]);
 } finally {
   process.chdir(originalCwd);
-  if (originalMaxFiles === undefined) delete process.env.BIOAGENT_TASK_INPUT_MAX_FILES;
-  else process.env.BIOAGENT_TASK_INPUT_MAX_FILES = originalMaxFiles;
-  if (originalMaxBytes === undefined) delete process.env.BIOAGENT_TASK_INPUT_MAX_BYTES;
-  else process.env.BIOAGENT_TASK_INPUT_MAX_BYTES = originalMaxBytes;
+  if (originalMaxFiles === undefined) delete process.env.SCIFORGE_TASK_INPUT_MAX_FILES;
+  else process.env.SCIFORGE_TASK_INPUT_MAX_FILES = originalMaxFiles;
+  if (originalMaxBytes === undefined) delete process.env.SCIFORGE_TASK_INPUT_MAX_BYTES;
+  else process.env.SCIFORGE_TASK_INPUT_MAX_BYTES = originalMaxBytes;
 }
 
 console.log('[ok] workspace task input retention prunes old files while preserving protected inputs');

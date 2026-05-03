@@ -1,4 +1,4 @@
-# @bioagent-ui/umap-viewer
+# @sciforge-ui/umap-viewer
 
 ## Agent quick contract
 - componentId: `umap-viewer`

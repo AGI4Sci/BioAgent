@@ -29,8 +29,8 @@ test('report-viewer package renders empty state through shell helper', () => {
 
 test('coerceReportPayload extracts markdown refs from backend payload text', () => {
   const report = coerceReportPayload({
-    markdown: '```json\n{"artifacts":[{"id":"research-report","type":"research-report","data":{"markdownRef":".bioagent/run/report.md"}}]}\n```',
+    markdown: '```json\n{"artifacts":[{"id":"research-report","type":"research-report","data":{"markdownRef":".sciforge/run/report.md"}}]}\n```',
   });
-  assert.equal(report.reportRef, '.bioagent/run/report.md');
+  assert.equal(report.reportRef, '.sciforge/run/report.md');
   assert.match(report.markdown ?? '', /Markdown report/);
 });

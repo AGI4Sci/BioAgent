@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_BACKEND_HANDOFF_BUDGET, normalizeBackendHandoff } from '../../src/runtime/workspace-task-input.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-handoff-budget-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-handoff-budget-'));
 const hugeText = 'STDOUT-LINE '.repeat(80_000);
 const hugeJson = {
   rows: Array.from({ length: 12_000 }, (_, index) => ({
@@ -19,8 +19,8 @@ const priorAttempts = Array.from({ length: 40 }, (_, index) => ({
   id: `attempt-${index}`,
   attempt: index,
   status: 'failed-with-reason',
-  stdoutRef: `.bioagent/logs/attempt-${index}.stdout.log`,
-  stderrRef: `.bioagent/logs/attempt-${index}.stderr.log`,
+  stdoutRef: `.sciforge/logs/attempt-${index}.stdout.log`,
+  stderrRef: `.sciforge/logs/attempt-${index}.stderr.log`,
   stdout: hugeText,
   stderr: `${hugeText} stderr ${index}`,
   failureReason: `failure ${index} ${hugeText}`,
@@ -28,7 +28,7 @@ const priorAttempts = Array.from({ length: 40 }, (_, index) => ({
 }));
 
 const result = await normalizeBackendHandoff({
-  agent: { id: 'bioagent-test', backend: 'test' },
+  agent: { id: 'sciforge-test', backend: 'test' },
   input: {
     text: `Generate a task from compact context\n${hugeText}`,
     metadata: { purpose: 'contract-test' },
@@ -39,14 +39,14 @@ const result = await normalizeBackendHandoff({
     {
       id: 'large-json',
       type: 'research-report',
-      dataRef: '.bioagent/artifacts/large-json.json',
+      dataRef: '.sciforge/artifacts/large-json.json',
       data: hugeJson,
     },
     {
       id: 'binary-image',
       type: 'image-preview',
       mimeType: 'image/png',
-      dataRef: '.bioagent/artifacts/image.png',
+      dataRef: '.sciforge/artifacts/image.png',
       data: pngDataUrl,
     },
   ],
@@ -63,7 +63,7 @@ assert.ok(!serialized.includes(hugeText.slice(0, 50_000)), 'large stdout leaked 
 assert.ok(!serialized.includes(pngDataUrl.slice(0, 50_000)), 'binary image leaked inline');
 
 const payload = result.payload as Record<string, unknown>;
-const manifest = payload._bioagentHandoffManifest as Record<string, unknown>;
+const manifest = payload._sciforgeHandoffManifest as Record<string, unknown>;
 assert.equal(manifest.rawRef, result.rawRef);
 assert.equal(typeof manifest.rawSha1, 'string');
 assert.ok(result.auditRefs.includes(result.rawRef), 'handoff audit refs should include raw ref');
@@ -85,9 +85,9 @@ assert.ok(raw.includes(pngDataUrl.slice(0, 50_000)), 'raw handoff ref should con
 
 const artifacts = payload.artifacts as Array<Record<string, unknown>>;
 assert.equal(artifacts[0].dataOmitted, true);
-assert.equal(artifacts[0].dataRef, '.bioagent/artifacts/large-json.json');
+assert.equal(artifacts[0].dataRef, '.sciforge/artifacts/large-json.json');
 assert.equal(artifacts[1].dataOmitted, true);
-assert.equal(artifacts[1].dataRef, '.bioagent/artifacts/image.png');
+assert.equal(artifacts[1].dataRef, '.sciforge/artifacts/image.png');
 assert.ok(isRecord(artifacts[1].dataSummary));
 assert.equal((artifacts[1].dataSummary as Record<string, unknown>).reason, 'binary-artifact-data');
 
@@ -98,7 +98,7 @@ assert.ok((attempts.attempts as unknown[]).length <= DEFAULT_BACKEND_HANDOFF_BUD
 
 const retryResult = await normalizeBackendHandoff({
   retryAudit: {
-    schemaVersion: 'bioagent.agentserver-generation-retry.v1',
+    schemaVersion: 'sciforge.agentserver-generation-retry.v1',
     attempt: 2,
     maxAttempts: 2,
     trigger: {
@@ -116,7 +116,7 @@ const retryResult = await normalizeBackendHandoff({
     contextPolicy: { mode: 'delta', handoff: 'slimmed', compactBeforeRetry: true, maxRetryCount: 1 },
     priorHandoff: { rawRef: result.rawRef, rawBytes: result.rawBytes, normalizedBytes: result.normalizedBytes },
   },
-  agent: { id: 'bioagent-test', backend: 'test' },
+  agent: { id: 'sciforge-test', backend: 'test' },
   input: {
     text: `Retry after 429 with compact context\n${hugeText}`,
     metadata: { purpose: 'rate-limit-retry' },
@@ -141,7 +141,7 @@ const retryResult = await normalizeBackendHandoff({
 
 const retrySerialized = JSON.stringify(retryResult.payload);
 assert.ok(retryResult.normalizedBytes <= 96_000, `retry handoff exceeded compact retry budget: ${retryResult.normalizedBytes}`);
-assert.ok(retrySerialized.includes('bioagent.agentserver-generation-retry.v1'), 'retry audit should survive handoff slimming');
+assert.ok(retrySerialized.includes('sciforge.agentserver-generation-retry.v1'), 'retry audit should survive handoff slimming');
 assert.ok(!retrySerialized.includes(hugeText.slice(0, 50_000)), 'retry handoff should not re-inline large prior context');
 
 console.log('[ok] backend handoff budget keeps large artifacts, binary images, stdout, prior attempts, and rate-limit retry handoffs compact with raw refs');

@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/network-graph',
+  packageName: '@sciforge-ui/network-graph',
   moduleId: 'knowledge-network-graph',
   version: '1.0.0',
   title: 'Knowledge network graph',

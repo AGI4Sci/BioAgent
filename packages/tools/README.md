@@ -1,4 +1,4 @@
-# @bioagent-tool/packages
+# @sciforge-tool/packages
 
 ## Agent quick contract
 - A tool is an execution resource a skill may call: database, runner, connector, MCP server, LLM backend, or visual runtime.

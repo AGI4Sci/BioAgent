@@ -72,13 +72,13 @@ const server = createServer(async (req, res) => {
           output: {
             result: {
               taskFiles: [{
-                path: `.bioagent/tasks/${backend}-round-${round}.py`,
+                path: `.sciforge/tasks/${backend}-round-${round}.py`,
                 language: 'python',
                 content: generatedTask(backend, round),
               }],
-              entrypoint: { language: 'python', path: `.bioagent/tasks/${backend}-round-${round}.py` },
+              entrypoint: { language: 'python', path: `.sciforge/tasks/${backend}-round-${round}.py` },
               environmentRequirements: { language: 'python' },
-              validationCommand: `python .bioagent/tasks/${backend}-round-${round}.py <input> <output>`,
+              validationCommand: `python .sciforge/tasks/${backend}-round-${round}.py <input> <output>`,
               expectedArtifacts,
               patchSummary: `${backend} generated complex round ${round} task.`,
             },
@@ -115,7 +115,7 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 try {
   for (const backend of AGENT_BACKENDS) {
     activeBackend = backend;
-    const workspace = await mkdtemp(join(tmpdir(), `bioagent-backend-matrix-${backend}-`));
+    const workspace = await mkdtemp(join(tmpdir(), `sciforge-backend-matrix-${backend}-`));
     const sessionId = `backend-matrix-${backend}`;
     const round1 = await runWorkspaceRuntimeGateway({
       skillDomain: 'literature',

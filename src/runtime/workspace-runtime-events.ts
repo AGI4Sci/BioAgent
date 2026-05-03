@@ -10,6 +10,6 @@ export function emitWorkspaceRuntimeEvent(callbacks: WorkspaceRuntimeCallbacks |
 
 export function throwIfRuntimeAborted(callbacks?: WorkspaceRuntimeCallbacks) {
   if (callbacks?.signal?.aborted) {
-    throw new Error('BioAgent run cancelled by user before the workspace task satisfied the request.');
+    throw new Error('SciForge run cancelled by user before the workspace task satisfied the request.');
   }
 }

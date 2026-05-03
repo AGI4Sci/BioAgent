@@ -8,7 +8,7 @@ export async function appendTaskAttempt(workspacePath: string, record: TaskAttem
   const normalizedRecord = record.status === 'done'
     ? { ...record, failureReason: undefined }
     : record;
-  const path = join(workspace, '.bioagent', 'task-attempts', `${safeName(record.id)}.json`);
+  const path = join(workspace, '.sciforge', 'task-attempts', `${safeName(record.id)}.json`);
   await mkdir(dirname(path), { recursive: true });
   const previous = await readAttempts(path);
   const attempts = [
@@ -31,7 +31,7 @@ export async function appendTaskAttempt(workspacePath: string, record: TaskAttem
 
 export async function readTaskAttempts(workspacePath: string, id: string): Promise<TaskAttemptRecord[]> {
   const workspace = resolve(workspacePath || process.cwd());
-  return readAttempts(join(workspace, '.bioagent', 'task-attempts', `${safeName(id)}.json`));
+  return readAttempts(join(workspace, '.sciforge', 'task-attempts', `${safeName(id)}.json`));
 }
 
 export async function readRecentTaskAttempts(
@@ -41,7 +41,7 @@ export async function readRecentTaskAttempts(
   scope: { scenarioPackageId?: string; skillPlanRef?: string; prompt?: string } = {},
 ): Promise<TaskAttemptRecord[]> {
   const workspace = resolve(workspacePath || process.cwd());
-  const dir = join(workspace, '.bioagent', 'task-attempts');
+  const dir = join(workspace, '.sciforge', 'task-attempts');
   if (!await fileExists(dir)) return [];
   let files: string[];
   try {

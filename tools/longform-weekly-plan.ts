@@ -198,7 +198,7 @@ Options:
   --scripts-dir <dir>       Longform script root. Defaults to tests/longform/scenarios.
   --now <iso>               Override current time for weekly selection.
   --weekly-required <n>     Required passed real runs per week. Defaults to 2.
-  --app-url <url>           BioAgent app URL for generated prepare commands.
+  --app-url <url>           SciForge app URL for generated prepare commands.
   --workspace-path <path>   Workspace path for generated prepare commands.
   --backend <name>          Backend label for generated prepare commands.
   --model-name <name>       Model label for generated prepare commands.

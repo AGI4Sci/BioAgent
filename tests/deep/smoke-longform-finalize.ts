@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { finalizeLongformRegression, prepareLongformRegression, validateLongformRunManifest } from '../../tools/longform-regression';
 
-const outRoot = await mkdtemp(join(tmpdir(), 'bioagent-longform-finalize-'));
+const outRoot = await mkdtemp(join(tmpdir(), 'sciforge-longform-finalize-'));
 const [prepared] = await prepareLongformRegression({
   scenario: 'longform-literature-evidence-report',
   outRoot,

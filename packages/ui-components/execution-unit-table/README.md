@@ -1,4 +1,4 @@
-# @bioagent-ui/execution-unit-table
+# @sciforge-ui/execution-unit-table
 
 ## Agent quick contract
 - componentId: `execution-unit-table`

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-omics-runner-smoke-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-omics-runner-smoke-'));
 await mkdir(join(workspace, 'data'), { recursive: true });
 await writeFile(join(workspace, 'data', 'matrix.csv'), [
   'gene,c1,c2,t1,t2',
@@ -89,10 +89,10 @@ const server = createServer(async (req, res) => {
           status: 'completed',
           output: {
             result: {
-              taskFiles: [{ path: '.bioagent/tasks/omics-runner.py', language: 'python', content: generatedTask }],
-              entrypoint: { language: 'python', path: '.bioagent/tasks/omics-runner.py' },
+              taskFiles: [{ path: '.sciforge/tasks/omics-runner.py', language: 'python', content: generatedTask }],
+              entrypoint: { language: 'python', path: '.sciforge/tasks/omics-runner.py' },
               environmentRequirements: { language: 'python' },
-              validationCommand: 'python .bioagent/tasks/omics-runner.py <input> <output>',
+              validationCommand: 'python .sciforge/tasks/omics-runner.py <input> <output>',
               expectedArtifacts: ['omics-differential-expression'],
               patchSummary: 'Generated omics runner task.',
             },

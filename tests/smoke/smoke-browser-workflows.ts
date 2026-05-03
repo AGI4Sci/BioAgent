@@ -8,10 +8,10 @@ import { join, resolve } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright-core';
 import { buildBuiltInScenarioPackage } from '../../src/ui/src/scenarioCompiler/scenarioPackage';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-browser-smoke-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-browser-smoke-'));
 const artifactsDir = resolve('docs', 'test-artifacts');
 const importPackagePath = join(workspace, 'browser-smoke-imported.scenario-package.json');
-const referencePreviewPath = join(workspace, '.bioagent', 'artifacts', 'reference-followup-report.md');
+const referencePreviewPath = join(workspace, '.sciforge', 'artifacts', 'reference-followup-report.md');
 const workspacePort = 21080 + Math.floor(Math.random() * 1000);
 const uiPort = 22080 + Math.floor(Math.random() * 1000);
 const children: ChildProcess[] = [];
@@ -20,10 +20,10 @@ const originalConfigLocal = await readFile(configLocalPath, 'utf8').catch(() => 
 
 try {
   await mkdir(artifactsDir, { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'artifacts'), { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'task-results'), { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'scenarios'), { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'task-results'), { recursive: true });
+  await mkdir(join(workspace, '.sciforge', 'artifacts'), { recursive: true });
+  await mkdir(join(workspace, '.sciforge', 'task-results'), { recursive: true });
+  await mkdir(join(workspace, '.sciforge', 'scenarios'), { recursive: true });
+  await mkdir(join(workspace, '.sciforge', 'task-results'), { recursive: true });
   await writeFile(importPackagePath, JSON.stringify(browserSmokeScenarioPackage(), null, 2));
   await writeFile(referencePreviewPath, [
     '# Browser smoke reference follow-up',
@@ -34,9 +34,9 @@ try {
     '| --- | --- |',
     '| message/chart/table/file references | preserved |',
   ].join('\n'));
-  await writeFile(join(workspace, '.bioagent', 'workspace-state.json'), JSON.stringify(browserSmokeWorkspaceState(workspace), null, 2));
-  children.push(start('workspace', ['npm', 'run', 'workspace:server'], { BIOAGENT_WORKSPACE_PORT: String(workspacePort) }));
-  children.push(start('ui', ['npm', 'run', 'dev:ui', '--', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], { BIOAGENT_UI_PORT: String(uiPort) }));
+  await writeFile(join(workspace, '.sciforge', 'workspace-state.json'), JSON.stringify(browserSmokeWorkspaceState(workspace), null, 2));
+  children.push(start('workspace', ['npm', 'run', 'workspace:server'], { SCIFORGE_WORKSPACE_PORT: String(workspacePort) }));
+  children.push(start('ui', ['npm', 'run', 'dev:ui', '--', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], { SCIFORGE_UI_PORT: String(uiPort) }));
   await waitForHttp(`http://127.0.0.1:${workspacePort}/health`);
   await waitForHttp(`http://127.0.0.1:${uiPort}/`);
 
@@ -61,22 +61,22 @@ try {
     await assertActiveElementInteractive(page, 'first tab stop');
     await page.getByLabel('设置').focus();
     await page.keyboard.press('Enter');
-    await page.getByRole('dialog', { name: 'BioAgent 设置' }).waitFor({ timeout: 15_000 });
+    await page.getByRole('dialog', { name: 'SciForge 设置' }).waitFor({ timeout: 15_000 });
     await page.keyboard.press('Escape');
-    await page.getByRole('dialog', { name: 'BioAgent 设置' }).waitFor({ state: 'hidden', timeout: 15_000 });
+    await page.getByRole('dialog', { name: 'SciForge 设置' }).waitFor({ state: 'hidden', timeout: 15_000 });
     await assertNoRechartsSizeWarnings(page, 'first-visit');
     logStep('settings modal opens and exposes connection diagnostics');
     await page.getByLabel('设置').click();
-    await page.getByRole('dialog', { name: 'BioAgent 设置' }).waitFor({ timeout: 15_000 });
+    await page.getByRole('dialog', { name: 'SciForge 设置' }).waitFor({ timeout: 15_000 });
     await page.getByText('Workspace Writer').first().waitFor();
     await page.getByText('AgentServer').first().waitFor();
     await page.getByLabel('关闭设置').click();
-    logStep('workspace sidebar opens, explains current path, and lists .bioagent resources');
+    logStep('workspace sidebar opens, explains current path, and lists .sciforge resources');
     await page.getByLabel(/工作目录|资源管理器/).click();
     await page.getByLabel('工作区文件树').waitFor({ timeout: 15_000 });
     await page.getByLabel('刷新').click();
-    await page.getByText(/workspace-state\.json|scenarios|\.bioagent|未找到|Workspace Writer/).first().waitFor({ timeout: 15_000 });
-    await page.getByText('.bioagent').first().waitFor({ timeout: 15_000 });
+    await page.getByText(/workspace-state\.json|scenarios|\.sciforge|未找到|Workspace Writer/).first().waitFor({ timeout: 15_000 });
+    await page.getByText('.sciforge').first().waitFor({ timeout: 15_000 });
     await page.getByRole('status').filter({ hasText: /已加载|当前目录为空/ }).first().waitFor({ timeout: 15_000 });
     logStep('workbench composer is available and timeline stays searchable');
     await openNavigationPanel(page);
@@ -192,7 +192,7 @@ try {
     await assertNoUnexplainedDisabledPrimaryButtons(page, 'mobile-workbench');
     await assertNoRechartsSizeWarnings(page, 'mobile-workbench');
     await captureSmokeScreenshot(page, join(artifactsDir, 'browser-smoke-mobile.png'));
-    assert.deepEqual((page as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], 'builder workflow should not emit page errors');
+    assert.deepEqual((page as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors ?? [], [], 'builder workflow should not emit page errors');
     await page.close();
 
     const offlineHealthPage = await newConfiguredPage(browser, { width: 1280, height: 900 }, false, {
@@ -242,14 +242,14 @@ try {
     await assertNoRawJsonErrors(structurePage, 'structure-workflow');
     await assertNoUnexplainedDisabledPrimaryButtons(structurePage, 'structure-workflow');
     await assertNoRechartsSizeWarnings(structurePage, 'structure-workflow');
-    assert.deepEqual((structurePage as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], 'structure workflow should not emit page errors');
+    assert.deepEqual((structurePage as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors ?? [], [], 'structure workflow should not emit page errors');
     await structurePage.close();
 
-    await writeFile(join(workspace, '.bioagent', 'workspace-state.json'), JSON.stringify(referenceWorkspaceState(workspace), null, 2));
+    await writeFile(join(workspace, '.sciforge', 'workspace-state.json'), JSON.stringify(referenceWorkspaceState(workspace), null, 2));
     await writeReferenceScenarioPackage();
     const referencePage = await newConfiguredPage(browser, { width: 1360, height: 980 }, 'references');
     const referenceRequests: Array<Record<string, unknown>> = [];
-    await referencePage.route(`http://127.0.0.1:${workspacePort}/api/bioagent/tools/run/stream`, async (route, request) => {
+    await referencePage.route(`http://127.0.0.1:${workspacePort}/api/sciforge/tools/run/stream`, async (route, request) => {
       const body = request.postDataJSON() as Record<string, unknown>;
       referenceRequests.push(body);
       const result = browserSmokeReferenceToolResult();
@@ -293,13 +293,13 @@ try {
       if (button instanceof HTMLElement) button.click();
     });
     await referencePage.waitForFunction(() => {
-      const text = Array.from(document.querySelectorAll('[aria-label="用户引用的上下文"] .bioagent-reference-chip'))
+      const text = Array.from(document.querySelectorAll('[aria-label="用户引用的上下文"] .sciforge-reference-chip'))
         .map((element) => element.textContent ?? '')
         .join('\n');
       const input = document.querySelector<HTMLTextAreaElement>('.chat-panel .composer textarea')?.value ?? '';
       return text.includes('选中文本') && input.includes('※1');
     }, null, { timeout: 15_000 });
-    await referencePage.locator('.bioagent-reference-chip', { hasText: '选中文本' }).click();
+    await referencePage.locator('.sciforge-reference-chip', { hasText: '选中文本' }).click();
     await referencePage.waitForFunction((phrase) => window.getSelection()?.toString().includes(String(phrase)), selectedPhrase, { timeout: 15_000 });
     logStep('point-select captures historical message, chart, table, and file-like object refs for a follow-up');
     await referencePage.getByRole('button', { name: '点选' }).click();
@@ -310,7 +310,7 @@ try {
     await referencePage.locator('.object-reference-chip', { hasText: 'Browser smoke DE table' }).click();
     await referencePage.getByRole('button', { name: '点选' }).click();
     await referencePage.locator('.object-reference-chip', { hasText: 'Reference follow-up report' }).click();
-    await referencePage.waitForFunction(() => document.querySelectorAll('[aria-label="用户引用的上下文"] .bioagent-reference-chip').length >= 5, null, { timeout: 15_000 });
+    await referencePage.waitForFunction(() => document.querySelectorAll('[aria-label="用户引用的上下文"] .sciforge-reference-chip').length >= 5, null, { timeout: 15_000 });
     const markerPrompt = await referencePage.getByPlaceholder(/输入研究问题/).inputValue();
     await referencePage.getByPlaceholder(/输入研究问题/).fill(`${markerPrompt} 基于右键文本、点选的历史消息、图表、表格和文件继续追问，并打开报告预览`);
     await referencePage.locator('.chat-panel .composer').getByRole('button', { name: '发送' }).click();
@@ -332,7 +332,7 @@ try {
     await assertNoRawJsonErrors(referencePage, 'reference-followup');
     await assertNoUnexplainedDisabledPrimaryButtons(referencePage, 'reference-followup');
     await assertNoRechartsSizeWarnings(referencePage, 'reference-followup');
-    assert.deepEqual((referencePage as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], 'reference follow-up workflow should not emit page errors');
+    assert.deepEqual((referencePage as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors ?? [], [], 'reference follow-up workflow should not emit page errors');
     await referencePage.close();
 
     const contextPage = await newConfiguredPage(browser, { width: 1360, height: 980 }, false);
@@ -344,7 +344,7 @@ try {
     const thirdContextRunStarted = new Promise<void>((resolveThirdRun) => {
       resolveThirdContextRunStarted = resolveThirdRun;
     });
-    await contextPage.route(`http://127.0.0.1:${workspacePort}/api/bioagent/tools/run/stream`, async (route, request) => {
+    await contextPage.route(`http://127.0.0.1:${workspacePort}/api/sciforge/tools/run/stream`, async (route, request) => {
       const body = request.postDataJSON() as Record<string, unknown>;
       contextRunRequests.push(body);
       contextRunCount += 1;
@@ -423,7 +423,7 @@ try {
     await assertNoRawJsonErrors(contextPage, 'context-meter');
     await assertNoUnexplainedDisabledPrimaryButtons(contextPage, 'context-meter');
     await assertNoRechartsSizeWarnings(contextPage, 'context-meter');
-    assert.deepEqual((contextPage as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], 'context meter workflow should not emit page errors');
+    assert.deepEqual((contextPage as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors ?? [], [], 'context meter workflow should not emit page errors');
     await contextPage.close();
   } finally {
     await browser.close();
@@ -468,22 +468,22 @@ async function newConfiguredPage(
     requestTimeoutMs: 5_000,
     updatedAt: new Date().toISOString(),
   };
-  await fetch(`http://127.0.0.1:${workspacePort}/api/bioagent/config`, {
+  await fetch(`http://127.0.0.1:${workspacePort}/api/sciforge/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ config }),
   });
   await page.addInitScript(({ config, structureState, referenceState, defaultWorkspaceState }) => {
-    window.localStorage.setItem('bioagent.config.v1', JSON.stringify(config));
-    window.localStorage.setItem('bioagent.workspace.v2', JSON.stringify(structureState ?? referenceState ?? defaultWorkspaceState));
+    window.localStorage.setItem('sciforge.config.v1', JSON.stringify(config));
+    window.localStorage.setItem('sciforge.workspace.v2', JSON.stringify(structureState ?? referenceState ?? defaultWorkspaceState));
   }, {
     config,
     structureState: withStructureState ? structureWorkspaceState(configuredWorkspacePath) : undefined,
     referenceState: withReferenceState ? referenceWorkspaceState(configuredWorkspacePath) : undefined,
     defaultWorkspaceState: browserSmokeWorkspaceState(configuredWorkspacePath),
   });
-  (page as Page & { __bioagentPageErrors?: string[]; __bioagentConsoleWarnings?: string[] }).__bioagentPageErrors = pageErrors;
-  (page as Page & { __bioagentPageErrors?: string[]; __bioagentConsoleWarnings?: string[] }).__bioagentConsoleWarnings = consoleWarnings;
+  (page as Page & { __sciforgePageErrors?: string[]; __sciforgeConsoleWarnings?: string[] }).__sciforgePageErrors = pageErrors;
+  (page as Page & { __sciforgePageErrors?: string[]; __sciforgeConsoleWarnings?: string[] }).__sciforgeConsoleWarnings = consoleWarnings;
   return page;
 }
 
@@ -694,7 +694,7 @@ function referenceWorkspaceState(workspacePath: string) {
       params: 'fixture=true',
       status: 'done',
       hash: 'reference-smoke',
-      outputRef: '.bioagent/artifacts/reference-followup-report.md',
+      outputRef: '.sciforge/artifacts/reference-followup-report.md',
     }],
     artifacts: [
       {
@@ -702,7 +702,7 @@ function referenceWorkspaceState(workspacePath: string) {
         type: 'umap-plot',
         producerScenario: 'omics-differential-exploration',
         schemaVersion: '1',
-        metadata: { title: 'Browser smoke UMAP', path: '.bioagent/artifacts/reference-umap.json' },
+        metadata: { title: 'Browser smoke UMAP', path: '.sciforge/artifacts/reference-umap.json' },
         data: {
           points: [
             { x: -1.2, y: 0.1, cluster: 'T cell', label: 'cell-a' },
@@ -718,7 +718,7 @@ function referenceWorkspaceState(workspacePath: string) {
         type: 'differential-expression-table',
         producerScenario: 'omics-differential-exploration',
         schemaVersion: '1',
-        metadata: { title: 'Browser smoke DE table', path: '.bioagent/artifacts/reference-de-table.csv' },
+        metadata: { title: 'Browser smoke DE table', path: '.sciforge/artifacts/reference-de-table.csv' },
         data: {
           rows: [
             { gene: 'IL7R', logFC: 1.7, pValue: 0.001, cluster: 'T cell' },
@@ -787,7 +787,7 @@ function browserSmokeReferenceToolResult() {
       params: 'references=message,chart,table,file',
       status: 'done',
       hash: 'reference-followup',
-      outputRef: '.bioagent/artifacts/reference-followup-report.md',
+      outputRef: '.sciforge/artifacts/reference-followup-report.md',
       time: now,
     }],
     claims: [{
@@ -796,7 +796,7 @@ function browserSmokeReferenceToolResult() {
       type: 'fact',
       confidence: 0.91,
       evidenceLevel: 'database',
-      supportingRefs: ['message:msg-reference-seed-agent', 'artifact:browser-smoke-umap', 'artifact:browser-smoke-table', 'file:.bioagent/artifacts/reference-followup-report.md'],
+      supportingRefs: ['message:msg-reference-seed-agent', 'artifact:browser-smoke-umap', 'artifact:browser-smoke-table', 'file:.sciforge/artifacts/reference-followup-report.md'],
     }],
   };
 }
@@ -916,7 +916,7 @@ async function writeReferenceScenarioPackage() {
     ...buildBuiltInScenarioPackage('omics-differential-exploration', '2026-05-02T00:00:00.000Z'),
     status: 'published',
   };
-  const scenarioDir = join(workspace, '.bioagent', 'scenarios', 'omics-differential-exploration');
+  const scenarioDir = join(workspace, '.sciforge', 'scenarios', 'omics-differential-exploration');
   await mkdir(scenarioDir, { recursive: true });
   await writeFile(join(scenarioDir, 'package.json'), JSON.stringify(pkg, null, 2));
 }
@@ -999,7 +999,7 @@ async function assertActiveElementInteractive(page: Page, label: string) {
 
 async function assertNoRechartsSizeWarnings(page: Page, label: string) {
   await page.waitForTimeout(150);
-  const warnings = (page as Page & { __bioagentConsoleWarnings?: string[] }).__bioagentConsoleWarnings ?? [];
+  const warnings = (page as Page & { __sciforgeConsoleWarnings?: string[] }).__sciforgeConsoleWarnings ?? [];
   const offenders = warnings.filter((warning) => /width\(-1\)|height\(-1\)|width.*height.*greater than 0/i.test(warning));
   assert.deepEqual(offenders, [], `${label} should not emit Recharts negative-size warnings`);
 }
@@ -1050,7 +1050,7 @@ async function waitForCondition(predicate: () => boolean, label: string, timeout
 
 function browserExecutablePath() {
   const candidates = [
-    process.env.BIOAGENT_BROWSER_EXECUTABLE,
+    process.env.SCIFORGE_BROWSER_EXECUTABLE,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -1059,5 +1059,5 @@ function browserExecutablePath() {
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
-  throw new Error('No Chromium-compatible browser found. Set BIOAGENT_BROWSER_EXECUTABLE to run browser smoke.');
+  throw new Error('No Chromium-compatible browser found. Set SCIFORGE_BROWSER_EXECUTABLE to run browser smoke.');
 }

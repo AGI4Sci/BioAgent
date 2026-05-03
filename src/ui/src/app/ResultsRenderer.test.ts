@@ -17,7 +17,7 @@ test('coerceReportPayload extracts report refs from backend ToolPayload text ins
     '    "id": "research-report",',
     '    "type": "research-report",',
     '    "data": {',
-    '      "markdownRef": ".bioagent/tasks/generated-literature/report/arxiv-agent-reading-report.md"',
+    '      "markdownRef": ".sciforge/tasks/generated-literature/report/arxiv-agent-reading-report.md"',
     '    }',
     '  }]',
     '}',
@@ -33,7 +33,7 @@ test('coerceReportPayload extracts report refs from backend ToolPayload text ins
 
   const report = coerceReportPayload({ markdown: payloadText }, artifact);
 
-  assert.equal(report.reportRef, '.bioagent/tasks/generated-literature/report/arxiv-agent-reading-report.md');
+  assert.equal(report.reportRef, '.sciforge/tasks/generated-literature/report/arxiv-agent-reading-report.md');
   assert.match(report.markdown ?? '', /Markdown report/);
   assert.doesNotMatch(report.markdown ?? '', /"uiManifest"/);
 });

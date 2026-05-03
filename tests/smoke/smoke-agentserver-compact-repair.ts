@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-compact-repair-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-compact-repair-'));
 let generationRequests = 0;
 let repairRequests = 0;
 let repairBodyLength = 0;
@@ -88,13 +88,13 @@ const server = createServer(async (req, res) => {
     assert.ok(repairBodyLength < 220_000, `repair request should be compact, got ${repairBodyLength} bytes`);
     assert.equal(metadata.contextMode, 'compact-repair');
     assert.equal(metadata.contextEnvelopeBytes, undefined);
-    assert.equal(metadata.repairContextVersion, 'bioagent.repair-context.v1');
+    assert.equal(metadata.repairContextVersion, 'sciforge.repair-context.v1');
     const text = isRecord(parsed.input) ? String(parsed.input.text || '') : '';
     assert.match(text, /repairContext/);
     assert.match(text, /intentional compact repair failure/);
     assert.doesNotMatch(text, /x{50000}/, 'repair prompt should not include the full huge user prompt');
     const codeRef = String(metadata.codeRef || '');
-    assert.match(codeRef, /^\.bioagent\/tasks\/generated-literature-/);
+    assert.match(codeRef, /^\.sciforge\/tasks\/generated-literature-/);
     await writeFile(join(workspace, codeRef), fixedTask);
     const result = {
       ok: true,
@@ -121,16 +121,16 @@ const server = createServer(async (req, res) => {
         output: {
           result: {
             taskFiles: [{
-              path: '.bioagent/tasks/compact-repair-syntax-bug.py',
+              path: '.sciforge/tasks/compact-repair-syntax-bug.py',
               language: 'python',
               content: badTask,
             }],
             entrypoint: {
               language: 'python',
-              path: '.bioagent/tasks/compact-repair-syntax-bug.py',
+              path: '.sciforge/tasks/compact-repair-syntax-bug.py',
             },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/compact-repair-syntax-bug.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/compact-repair-syntax-bug.py <input> <output>',
             expectedArtifacts: ['research-report'],
             patchSummary: 'Generated a task with an intentional syntax bug.',
           },
@@ -175,10 +175,10 @@ try {
   assert.equal(result.executionUnits[0]?.status, 'self-healed');
   assert.ok(result.artifacts.some((artifact) => artifact.id === 'artifact.compact_repair'));
 
-  const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
+  const attemptFiles = await readdir(join(workspace, '.sciforge', 'task-attempts'));
   const generatedAttemptFile = attemptFiles.find((file) => file.startsWith('generated-literature-'));
   assert.ok(generatedAttemptFile);
-  const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', generatedAttemptFile), 'utf8'));
+  const attemptHistory = JSON.parse(await readFile(join(workspace, '.sciforge', 'task-attempts', generatedAttemptFile), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 2);
   assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
   assert.match(attemptHistory.attempts[0].failureReason, /RuntimeError|intentional compact repair failure|schema validation|missing executionUnits/);

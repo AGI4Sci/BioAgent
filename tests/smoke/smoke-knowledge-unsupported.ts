@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-knowledge-unsupported-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-knowledge-unsupported-'));
 const result = await runWorkspaceRuntimeGateway({
   skillDomain: 'knowledge',
   prompt: 'melanoma disease OpenTargets connector status',

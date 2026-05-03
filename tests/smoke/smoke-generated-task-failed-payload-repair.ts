@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-failed-payload-repair-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-failed-payload-repair-'));
 let generationRequests = 0;
 let repairRequests = 0;
 
@@ -92,7 +92,7 @@ const server = createServer(async (req, res) => {
   if (metadata.purpose === 'workspace-task-repair') {
     repairRequests += 1;
     const codeRef = String(metadata.codeRef || '');
-    assert.match(codeRef, /^\.bioagent\/tasks\/generated-literature-/);
+    assert.match(codeRef, /^\.sciforge\/tasks\/generated-literature-/);
     await writeFile(join(workspace, codeRef), repairRequests === 1 ? stillBrokenRepairTask : fixedTask);
     const result = {
       ok: true,
@@ -121,16 +121,16 @@ const server = createServer(async (req, res) => {
         output: {
           result: {
             taskFiles: [{
-              path: '.bioagent/tasks/generic-failing-task.py',
+              path: '.sciforge/tasks/generic-failing-task.py',
               language: 'python',
               content: badTask,
             }],
             entrypoint: {
               language: 'python',
-              path: '.bioagent/tasks/generic-failing-task.py',
+              path: '.sciforge/tasks/generic-failing-task.py',
             },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/generic-failing-task.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/generic-failing-task.py <input> <output>',
             expectedArtifacts: ['research-report'],
             patchSummary: 'Generated a task that intentionally fails once.',
           },
@@ -173,10 +173,10 @@ try {
   assert.equal(result.executionUnits[0]?.attempt, 3);
   assert.ok(result.artifacts.some((artifact) => artifact.id === 'artifact.repaired'));
 
-  const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
+  const attemptFiles = await readdir(join(workspace, '.sciforge', 'task-attempts'));
   const generatedAttemptFile = attemptFiles.find((file) => file.startsWith('generated-literature-'));
   assert.ok(generatedAttemptFile);
-  const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', generatedAttemptFile), 'utf8'));
+  const attemptHistory = JSON.parse(await readFile(join(workspace, '.sciforge', 'task-attempts', generatedAttemptFile), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 3);
   assert.equal(attemptHistory.attempts[0].status, 'repair-needed');
   assert.match(attemptHistory.attempts[0].failureReason, /failed payload|Intentional transient bug/);

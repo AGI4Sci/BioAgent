@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getLongformNextRound, loadLongformScenarioScripts, prepareLongformRegression, recordLongformRoundObservation } from '../../tools/longform-regression';
 
-const outRoot = await mkdtemp(join(tmpdir(), 'bioagent-longform-next-round-'));
+const outRoot = await mkdtemp(join(tmpdir(), 'sciforge-longform-next-round-'));
 const [prepared] = await prepareLongformRegression({
   scenario: 'longform-context-pressure-compact',
   outRoot,

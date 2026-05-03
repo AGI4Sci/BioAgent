@@ -1,4 +1,4 @@
-# @bioagent-ui/network-graph
+# @sciforge-ui/network-graph
 
 ## Agent quick contract
 - componentId: `network-graph`

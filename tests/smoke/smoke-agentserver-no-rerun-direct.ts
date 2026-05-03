@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-no-rerun-direct-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-no-rerun-direct-'));
 let sawAgentServerOwnsNoRerunDecision = false;
 let sawContinuationHasNoKeywordExecutionFlags = false;
 
@@ -95,11 +95,11 @@ const server = createServer(async (req, res) => {
   const answer = [
     '基于上一轮已有 refs 直接回答，不重新运行。',
     'entity: KRAS G12D; timeline steps: 4.',
-    'task code: .bioagent/tasks/generated-knowledge-prev/notebook_timeline_task.py',
-    'output: .bioagent/task-results/generated-knowledge-prev.json',
-    'stdout: .bioagent/logs/generated-knowledge-prev.stdout.log',
-    'stderr: .bioagent/logs/generated-knowledge-prev.stderr.log',
-    'Even if this answer mentions taskFiles: [{"path": ".bioagent/tasks/generated-knowledge-prev/notebook_timeline_task.py"}], it is a reference, not a new task request.',
+    'task code: .sciforge/tasks/generated-knowledge-prev/notebook_timeline_task.py',
+    'output: .sciforge/task-results/generated-knowledge-prev.json',
+    'stdout: .sciforge/logs/generated-knowledge-prev.stdout.log',
+    'stderr: .sciforge/logs/generated-knowledge-prev.stderr.log',
+    'Even if this answer mentions taskFiles: [{"path": ".sciforge/tasks/generated-knowledge-prev/notebook_timeline_task.py"}], it is a reference, not a new task request.',
   ].join('\n');
   const result = {
     ok: true,
@@ -137,7 +137,7 @@ try {
         timeline: [{ step: 1 }, { step: 2 }, { step: 3 }, { step: 4 }],
       },
       metadata: {
-        outputRef: '.bioagent/task-results/generated-knowledge-prev.json',
+        outputRef: '.sciforge/task-results/generated-knowledge-prev.json',
       },
     }],
     uiState: {
@@ -145,10 +145,10 @@ try {
       recentExecutionRefs: [{
         id: 'generated-knowledge-prev',
         status: 'done',
-        codeRef: '.bioagent/tasks/generated-knowledge-prev/notebook_timeline_task.py',
-        outputRef: '.bioagent/task-results/generated-knowledge-prev.json',
-        stdoutRef: '.bioagent/logs/generated-knowledge-prev.stdout.log',
-        stderrRef: '.bioagent/logs/generated-knowledge-prev.stderr.log',
+        codeRef: '.sciforge/tasks/generated-knowledge-prev/notebook_timeline_task.py',
+        outputRef: '.sciforge/task-results/generated-knowledge-prev.json',
+        stdoutRef: '.sciforge/logs/generated-knowledge-prev.stdout.log',
+        stderrRef: '.sciforge/logs/generated-knowledge-prev.stderr.log',
       }],
     },
   });
@@ -157,7 +157,7 @@ try {
   assert.match(result.message, /KRAS G12D/);
   assert.match(result.message, /generated-knowledge-prev/);
   assert.equal(result.executionUnits[0].tool, 'agentserver.direct-text');
-  const attempts = await readdir(join(workspace, '.bioagent', 'task-attempts')).catch(() => []);
+  const attempts = await readdir(join(workspace, '.sciforge', 'task-attempts')).catch(() => []);
   assert.equal(attempts.length, 0);
 
   const continuation = await runWorkspaceRuntimeGateway({
@@ -176,10 +176,10 @@ try {
       recentExecutionRefs: [{
         id: 'generated-literature-prev',
         status: 'done',
-        codeRef: '.bioagent/tasks/generated-literature-prev/run.py',
-        outputRef: '.bioagent/task-results/generated-literature-prev.json',
-        stdoutRef: '.bioagent/logs/generated-literature-prev.stdout.log',
-        stderrRef: '.bioagent/logs/generated-literature-prev.stderr.log',
+        codeRef: '.sciforge/tasks/generated-literature-prev/run.py',
+        outputRef: '.sciforge/task-results/generated-literature-prev.json',
+        stdoutRef: '.sciforge/logs/generated-literature-prev.stdout.log',
+        stderrRef: '.sciforge/logs/generated-literature-prev.stderr.log',
       }],
     },
   });
@@ -187,7 +187,7 @@ try {
   assert.equal(sawContinuationHasNoKeywordExecutionFlags, true);
   assert.match(continuation.message, /supplemental task/);
   assert.ok(continuation.artifacts.some((artifact) => artifact.type === 'evidence-matrix'));
-  console.log('[ok] no-rerun and continuation follow-ups leave execution decisions to AgentServer without BioAgent keyword flags');
+  console.log('[ok] no-rerun and continuation follow-ups leave execution decisions to AgentServer without SciForge keyword flags');
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

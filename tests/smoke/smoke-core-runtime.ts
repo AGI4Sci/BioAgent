@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain } from '../../src/runtime/runtime-types.js';
+import type { SciForgeSkillDomain } from '../../src/runtime/runtime-types.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-skill-md-capability-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-skill-md-capability-'));
 
 const cases: Array<{
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   prompt: string;
   skillId: string;
   expectedArtifactType: string;

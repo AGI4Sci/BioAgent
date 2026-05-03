@@ -59,18 +59,18 @@ import type { ScenarioLibraryItem } from '../scenarioCompiler/scenarioLibrary';
 import { compileSlotsForScenario } from '../scenarioCompiler/uiPlanCompiler';
 import { timeline } from '../demoData';
 import { sendAgentMessageStream } from '../api/agentClient';
-import { sendBioAgentToolMessage } from '../api/bioagentToolsClient';
+import { sendSciForgeToolMessage } from '../api/sciforgeToolsClient';
 import { buildExecutionBundle, evaluateExecutionBundleExport } from '../exportPolicy';
 import {
   makeId,
   nowIso,
   type AlignmentContractRecord,
-  type BioAgentMessage,
-  type BioAgentReference,
-  type BioAgentRun,
-  type BioAgentSession,
-  type BioAgentWorkspaceState,
-  type BioAgentConfig,
+  type SciForgeMessage,
+  type SciForgeReference,
+  type SciForgeRun,
+  type SciForgeSession,
+  type SciForgeWorkspaceState,
+  type SciForgeConfig,
   type AgentStreamEvent,
   type DisplayIntent,
   type EvidenceClaim,
@@ -96,7 +96,7 @@ import {
 import { uiModuleRegistry, type PresentationDedupeScope, type RuntimeUIModule } from '../uiModuleRegistry';
 import type { VolcanoPoint } from '../charts';
 import { compactWorkspaceStateForStorage, createSession, loadWorkspaceState, resetSession, saveWorkspaceState, sessionActivityScore, shouldUsePersistedWorkspaceState, versionSession } from '../sessionStore';
-import { loadBioAgentConfig, normalizeWorkspaceRootPath, saveBioAgentConfig, updateConfig } from '../config';
+import { loadSciForgeConfig, normalizeWorkspaceRootPath, saveSciForgeConfig, updateConfig } from '../config';
 import {
   acceptSkillPromotionProposal,
   archiveSkillPromotionProposal,
@@ -104,7 +104,7 @@ import {
   deleteWorkspaceScenario,
   listSkillPromotionProposals,
   listWorkspace,
-  loadFileBackedBioAgentConfig,
+  loadFileBackedSciForgeConfig,
   loadPersistedWorkspaceState,
   loadScenarioLibrary,
   loadWorkspaceScenario,
@@ -114,7 +114,7 @@ import {
   publishWorkspaceScenario,
   rejectSkillPromotionProposal,
   restoreWorkspaceScenario,
-  saveFileBackedBioAgentConfig,
+  saveFileBackedSciForgeConfig,
   saveWorkspaceScenario,
   validateAcceptedSkillPromotionProposal,
   readWorkspaceFile,
@@ -188,7 +188,7 @@ function titleFromPrompt(prompt: string) {
   return title || '新聊天';
 }
 
-const FEEDBACK_AUTHOR_KEY = 'bioagent.feedback.author.v1';
+const FEEDBACK_AUTHOR_KEY = 'sciforge.feedback.author.v1';
 const APP_BUILD_ID = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? 'local-dev';
 
 function loadFeedbackAuthor() {
@@ -219,7 +219,7 @@ function saveFeedbackAuthor(author: { authorId: string; authorName: string }) {
 }
 
 
-function hasUsableModelConfig(config: BioAgentConfig) {
+function hasUsableModelConfig(config: SciForgeConfig) {
   const provider = config.modelProvider.trim() || 'native';
   if (provider === 'native') {
     return Boolean(config.modelName.trim() || config.modelBaseUrl.trim() || config.apiKey.trim());
@@ -227,7 +227,7 @@ function hasUsableModelConfig(config: BioAgentConfig) {
   return Boolean(config.modelBaseUrl.trim() && config.apiKey.trim());
 }
 
-function explorerWorkspaceRoot(config: BioAgentConfig): string {
+function explorerWorkspaceRoot(config: SciForgeConfig): string {
   return (config.workspacePath || '').replace(/\/+$/, '');
 }
 
@@ -282,7 +282,7 @@ function Sidebar({
   setPage: (page: PageId) => void;
   scenarioId: ScenarioInstanceId;
   setScenarioId: (id: ScenarioId) => void;
-  config: BioAgentConfig;
+  config: SciForgeConfig;
   workspaceStatus: string;
   onWorkspacePathChange: (value: string) => void;
   deferWorkbenchFilePreview?: boolean;
@@ -519,14 +519,14 @@ function Sidebar({
     }
     try {
       setWorkspaceError('');
-      setWorkspaceNotice('正在创建 BioAgent workspace...');
+      setWorkspaceNotice('正在创建 SciForge workspace...');
       await mutateWorkspaceFile(config, 'create-folder', { path: root });
-      await mutateWorkspaceFile(config, 'create-folder', { path: `${root.replace(/\/+$/, '')}/.bioagent` });
+      await mutateWorkspaceFile(config, 'create-folder', { path: `${root.replace(/\/+$/, '')}/.sciforge` });
       for (const resource of ['tasks', 'logs', 'task-results', 'scenarios', 'exports', 'artifacts', 'sessions', 'versions']) {
-        await mutateWorkspaceFile(config, 'create-folder', { path: `${root.replace(/\/+$/, '')}/.bioagent/${resource}` });
+        await mutateWorkspaceFile(config, 'create-folder', { path: `${root.replace(/\/+$/, '')}/.sciforge/${resource}` });
       }
       await refreshExplorer();
-      setWorkspaceNotice('BioAgent workspace 已创建；可以导入 package 或运行场景。');
+      setWorkspaceNotice('SciForge workspace 已创建；可以导入 package 或运行场景。');
     } catch (err) {
       setWorkspaceError(workspaceOnboardingError(err));
       setWorkspaceNotice('');
@@ -831,10 +831,10 @@ function Sidebar({
               >
                 {workspaceNeedsOnboarding(config.workspacePath, workspaceError, workspaceStatus) ? (
                   <div className="workspace-onboarding">
-                    <strong>{config.workspacePath.trim() ? '初始化 BioAgent workspace' : '设置 workspace path'}</strong>
+                    <strong>{config.workspacePath.trim() ? '初始化 SciForge workspace' : '设置 workspace path'}</strong>
                     <p>{workspaceOnboardingReason(config.workspacePath, workspaceError, workspaceStatus)}</p>
                     <button type="button" onClick={() => void initializeWorkspacePath()}>
-                      创建 .bioagent 工作区
+                      创建 .sciforge 工作区
                     </button>
                   </div>
                 ) : null}
@@ -1015,7 +1015,7 @@ function workspaceNeedsOnboarding(path: string, workspaceError: string, workspac
 }
 
 function workspaceOnboardingReason(path: string, workspaceError: string, workspaceStatus: string) {
-  if (!path.trim()) return '当前还没有 workspace path；填写一个本机目录后可以创建 .bioagent 资源结构。';
+  if (!path.trim()) return '当前还没有 workspace path；填写一个本机目录后可以创建 .sciforge 资源结构。';
   const combined = `${workspaceError} ${workspaceStatus}`;
   if (/EACCES|EPERM|permission|权限/i.test(combined)) {
     return '当前路径权限不足；请选择可写目录，或修复目录权限后再创建。';
@@ -1023,7 +1023,7 @@ function workspaceOnboardingReason(path: string, workspaceError: string, workspa
   if (/Workspace Writer 未连接|Failed to fetch|无法访问|connection/i.test(combined)) {
     return 'Workspace Writer 当前不可用；请启动 npm run workspace:server 后再创建。';
   }
-  return `未找到 ${path}/.bioagent/workspace-state.json；可以创建标准 .bioagent 目录结构作为新工作区。`;
+  return `未找到 ${path}/.sciforge/workspace-state.json；可以创建标准 .sciforge 目录结构作为新工作区。`;
 }
 
 function workspaceOnboardingError(error: unknown) {
@@ -1055,7 +1055,7 @@ function TopBar({
 }: {
   onSearch: (query: string) => void;
   onSettingsOpen: () => void;
-  theme: BioAgentConfig['theme'];
+  theme: SciForgeConfig['theme'];
   onThemeToggle: () => void;
   healthItems: RuntimeHealthItem[];
 }) {
@@ -1089,8 +1089,8 @@ function SettingsDialog({
   onSave,
   onClose,
 }: {
-  config: BioAgentConfig;
-  onChange: (patch: Partial<BioAgentConfig>) => void;
+  config: SciForgeConfig;
+  onChange: (patch: Partial<SciForgeConfig>) => void;
   saveState: ConfigSaveState;
   onSave: () => void;
   onClose: () => void;
@@ -1105,7 +1105,7 @@ function SettingsDialog({
   }, [onClose]);
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-label="BioAgent 设置" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="settings-dialog" role="dialog" aria-modal="true" aria-label="SciForge 设置" onMouseDown={(event) => event.stopPropagation()}>
         <div className="settings-head">
           <div>
             <h2>设置</h2>
@@ -1223,7 +1223,7 @@ function settingsSaveStateText(state: ConfigSaveState) {
     const time = state.savedAt ? new Date(state.savedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '';
     return time ? `已保存到 config.local.json（${time}）` : '已保存到 config.local.json';
   }
-  return '修改后点击“保存并生效”，BioAgent 会写入 config.local.json。';
+  return '修改后点击“保存并生效”，SciForge 会写入 config.local.json。';
 }
 
 function formatSessionTime(value: string) {
@@ -1265,16 +1265,16 @@ function Workbench({
   availableComponentIds,
 }: {
   scenarioId: ScenarioInstanceId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
+  config: SciForgeConfig;
+  session: SciForgeSession;
   draft: string;
   savedScrollTop: number;
   onDraftChange: (scenarioId: ScenarioInstanceId, value: string) => void;
   onScrollTopChange: (scenarioId: ScenarioInstanceId, value: number) => void;
-  onSessionChange: (session: BioAgentSession) => void;
+  onSessionChange: (session: SciForgeSession) => void;
   onNewChat: (scenarioId: ScenarioInstanceId) => void;
   onDeleteChat: (scenarioId: ScenarioInstanceId) => void;
-  archivedSessions: BioAgentSession[];
+  archivedSessions: SciForgeSession[];
   onRestoreArchivedSession: (scenarioId: ScenarioInstanceId, sessionId: string) => void;
   onDeleteArchivedSessions: (scenarioId: ScenarioInstanceId, sessionIds: string[]) => void;
   onClearArchivedSessions: (scenarioId: ScenarioInstanceId) => void;
@@ -1286,12 +1286,12 @@ function Workbench({
   onAutoRunConsumed: (requestId: string) => void;
   scenarioOverride?: ScenarioRuntimeOverride;
   onScenarioOverrideChange: (scenarioId: ScenarioInstanceId, override: ScenarioRuntimeOverride) => void;
-  onConfigChange: (patch: Partial<BioAgentConfig>) => void;
+  onConfigChange: (patch: Partial<SciForgeConfig>) => void;
   onTimelineEvent: (event: TimelineEventRecord) => void;
   onMarkReusableRun: (scenarioId: ScenarioInstanceId, runId: string) => void;
   workspaceFileEditor: { file: WorkspaceFileContent; draft: string } | null;
   onWorkspaceFileEditorChange: (next: { file: WorkspaceFileContent; draft: string } | null) => void;
-  externalReferenceRequest?: { id: string; reference: BioAgentReference };
+  externalReferenceRequest?: { id: string; reference: SciForgeReference };
   onExternalReferenceConsumed: (requestId: string) => void;
   availableComponentIds: string[];
 }) {
@@ -1487,13 +1487,13 @@ function FeedbackCaptureLayer({
 }: {
   page: PageId;
   scenarioId: ScenarioInstanceId;
-  session: BioAgentSession;
+  session: SciForgeSession;
   author: { authorId: string; authorName: string };
   onAuthorChange: (author: { authorId: string; authorName: string }) => void;
   onSubmit: (comment: FeedbackCommentRecord) => void;
-  onReference: (reference: BioAgentReference) => void;
+  onReference: (reference: SciForgeReference) => void;
 }) {
-  const [contextTarget, setContextTarget] = useState<{ x: number; y: number; target: FeedbackTargetSnapshot; selectedText: string; objectReference?: BioAgentReference; mode: 'menu' | 'comment' } | null>(null);
+  const [contextTarget, setContextTarget] = useState<{ x: number; y: number; target: FeedbackTargetSnapshot; selectedText: string; objectReference?: SciForgeReference; mode: 'menu' | 'comment' } | null>(null);
   const [comment, setComment] = useState('');
   const [priority, setPriority] = useState<FeedbackPriority>('normal');
   const [tags, setTags] = useState('');
@@ -1509,7 +1509,7 @@ function FeedbackCaptureLayer({
         y: Math.min(event.clientY, window.innerHeight - 160),
         target: feedbackTargetSnapshot(element),
         selectedText: currentSelectedText(),
-        objectReference: bioAgentReferenceFromElement(element),
+        objectReference: sciForgeReferenceFromElement(element),
         mode: 'menu',
       });
     }
@@ -1661,7 +1661,7 @@ function FeedbackInboxPage({
   onCreateRequest,
 }: {
   comments: FeedbackCommentRecord[];
-  requests: NonNullable<BioAgentWorkspaceState['feedbackRequests']>;
+  requests: NonNullable<SciForgeWorkspaceState['feedbackRequests']>;
   onStatusChange: (ids: string[], status: FeedbackCommentStatus) => void;
   onDelete: (ids: string[]) => void;
   onCreateRequest: (ids: string[], title: string) => void;
@@ -1720,7 +1720,7 @@ function FeedbackInboxPage({
         <button type="button" className="danger" onClick={() => deleteSelected(selectedIds)} disabled={!selectedIds.length}>删除选中</button>
         <button type="button" className="danger" onClick={() => deleteSelected(visibleIds)} disabled={!visibleIds.length}>删除当前列表</button>
         <button type="button" onClick={() => onCreateRequest(selectedIds, requestTitleFromFeedback(selectedComments))} disabled={!selectedIds.length}>生成 Request</button>
-        <button type="button" onClick={() => exportJsonFile(`bioagent-feedback-${nowIso().slice(0, 10)}.json`, bundle)}>导出 Bundle</button>
+        <button type="button" onClick={() => exportJsonFile(`sciforge-feedback-${nowIso().slice(0, 10)}.json`, bundle)}>导出 Bundle</button>
         <button type="button" onClick={() => void navigator.clipboard?.writeText(JSON.stringify(bundle, null, 2))}>复制 Bundle</button>
       </section>
       {!visibleComments.length ? (
@@ -1764,7 +1764,7 @@ function feedbackRuntimeSnapshot({
 }: {
   page: PageId;
   scenarioId: ScenarioInstanceId;
-  session: BioAgentSession;
+  session: SciForgeSession;
 }): FeedbackRuntimeSnapshot {
   const activeRun = session.runs.at(-1);
   return {
@@ -1814,20 +1814,20 @@ function currentSelectedText() {
   return text.length > 2400 ? `${text.slice(0, 2400)}...` : text;
 }
 
-function bioAgentReferenceFromElement(element: Element): BioAgentReference | undefined {
-  const referenceElement = element.closest<HTMLElement>('[data-bioagent-reference]');
-  const raw = referenceElement?.dataset.bioagentReference;
+function sciForgeReferenceFromElement(element: Element): SciForgeReference | undefined {
+  const referenceElement = element.closest<HTMLElement>('[data-sciforge-reference]');
+  const raw = referenceElement?.dataset.sciforgeReference;
   if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw) as Partial<BioAgentReference>;
+    const parsed = JSON.parse(raw) as Partial<SciForgeReference>;
     if (!parsed.id || !parsed.kind || !parsed.title || !parsed.ref) return undefined;
-    return parsed as BioAgentReference;
+    return parsed as SciForgeReference;
   } catch {
     return undefined;
   }
 }
 
-function referenceForFeedbackTarget(target: FeedbackTargetSnapshot, selectedText: string, mode: 'object' | 'selection'): BioAgentReference {
+function referenceForFeedbackTarget(target: FeedbackTargetSnapshot, selectedText: string, mode: 'object' | 'selection'): SciForgeReference {
   const sourceRef = `ui:${target.selector}`;
   if (mode === 'selection' && selectedText) {
     const textHash = feedbackHash(`${sourceRef}:${selectedText}`);
@@ -1909,7 +1909,7 @@ function compactFeedbackText(text: string) {
   return text.replace(/\s+/g, ' ').trim().slice(0, 240);
 }
 
-function feedbackBundle(comments: FeedbackCommentRecord[], requests: NonNullable<BioAgentWorkspaceState['feedbackRequests']>) {
+function feedbackBundle(comments: FeedbackCommentRecord[], requests: NonNullable<SciForgeWorkspaceState['feedbackRequests']>) {
   return {
     schemaVersion: 1,
     exportedAt: nowIso(),
@@ -1922,7 +1922,7 @@ function feedbackBundle(comments: FeedbackCommentRecord[], requests: NonNullable
 
 function requestTitleFromFeedback(comments: FeedbackCommentRecord[]) {
   const first = comments[0]?.comment.trim();
-  return first ? first.slice(0, 48) : 'BioAgent feedback request';
+  return first ? first.slice(0, 48) : 'SciForge feedback request';
 }
 
 function feedbackStatusVariant(status: FeedbackCommentStatus): 'info' | 'success' | 'warning' | 'danger' | 'muted' {
@@ -1937,15 +1937,15 @@ function scenarioLabelForInstance(scenarioId: ScenarioInstanceId) {
   return scenarios.find((item) => item.id === scenarioId)?.name ?? String(scenarioId);
 }
 
-export function BioAgentApp() {
+export function SciForgeApp() {
   const [page, setPage] = useState<PageId>('dashboard');
   const [scenarioId, setScenarioId] = useState<ScenarioInstanceId>('literature-evidence-review');
-  const [config, setConfig] = useState<BioAgentConfig>(() => loadBioAgentConfig());
+  const [config, setConfig] = useState<SciForgeConfig>(() => loadSciForgeConfig());
   const [configFileHydrated, setConfigFileHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [workspaceState, setWorkspaceState] = useState<BioAgentWorkspaceState>(() => {
+  const [workspaceState, setWorkspaceState] = useState<SciForgeWorkspaceState>(() => {
     const state = loadWorkspaceState();
-    const loadedConfig = loadBioAgentConfig();
+    const loadedConfig = loadSciForgeConfig();
     return { ...state, workspacePath: normalizeWorkspaceRootPath(loadedConfig.workspacePath || state.workspacePath) };
   });
   const [workspaceStatus, setWorkspaceStatus] = useState('');
@@ -1954,7 +1954,7 @@ export function BioAgentApp() {
   const [workbenchWorkspaceFileEditor, setWorkbenchWorkspaceFileEditor] = useState<{ file: WorkspaceFileContent; draft: string } | null>(null);
   const [feedbackAuthor, setFeedbackAuthor] = useState(() => loadFeedbackAuthor());
   const [configSaveState, setConfigSaveState] = useState<ConfigSaveState>({ status: 'idle' });
-  const [externalReferenceRequest, setExternalReferenceRequest] = useState<{ id: string; scenarioId: ScenarioInstanceId; reference: BioAgentReference } | undefined>();
+  const [externalReferenceRequest, setExternalReferenceRequest] = useState<{ id: string; scenarioId: ScenarioInstanceId; reference: SciForgeReference } | undefined>();
   const [scenarioOverrides, setScenarioOverrides] = useState<Partial<Record<ScenarioInstanceId, ScenarioRuntimeOverride>>>({});
   const [selectedRuntimeComponentIds, setSelectedRuntimeComponentIds] = useState<string[]>(() => (
     Array.from(new Set(uiModuleRegistry.filter((module) => module.lifecycle === 'published').map((module) => module.componentId))).sort()
@@ -1979,7 +1979,7 @@ export function BioAgentApp() {
       .filter((session) => session.scenarioId === scenario.id)
       .sort((left, right) => Date.parse(right.updatedAt || right.createdAt) - Date.parse(left.updatedAt || left.createdAt));
       return memo;
-    }, {} as Record<ScenarioInstanceId, BioAgentSession[]>);
+    }, {} as Record<ScenarioInstanceId, SciForgeSession[]>);
     for (const session of workspaceState.archivedSessions) {
       if (acc[session.scenarioId]) continue;
       acc[session.scenarioId] = workspaceState.archivedSessions
@@ -1994,7 +1994,7 @@ export function BioAgentApp() {
 
   useEffect(() => {
     let cancelled = false;
-    loadFileBackedBioAgentConfig(config)
+    loadFileBackedSciForgeConfig(config)
       .then((fileConfig) => {
         if (cancelled) return;
         if (fileConfig) {
@@ -2009,7 +2009,7 @@ export function BioAgentApp() {
                 apiKey: current.apiKey,
               })
               : fileConfig;
-            saveBioAgentConfig(next);
+            saveSciForgeConfig(next);
             return next;
           });
           setWorkspaceState((current) => ({
@@ -2030,7 +2030,7 @@ export function BioAgentApp() {
     };
   }, []);
 
-  async function hydrateWorkspaceSnapshot(path: string, runtimeConfig: BioAgentConfig, mode: 'prefer-newer' | 'force' = 'prefer-newer') {
+  async function hydrateWorkspaceSnapshot(path: string, runtimeConfig: SciForgeConfig, mode: 'prefer-newer' | 'force' = 'prefer-newer') {
     const requestedPath = normalizeWorkspaceRootPath(path);
     setWorkspaceHydrated(false);
     try {
@@ -2045,13 +2045,13 @@ export function BioAgentApp() {
           setConfig((current) => {
             if (current.workspacePath === restoredPath) return current;
             const next = updateConfig(current, { workspacePath: restoredPath });
-            saveBioAgentConfig(next);
+            saveSciForgeConfig(next);
             return next;
           });
         }
-        setWorkspaceStatus(`已从 ${restoredPath || '最近工作区'}/.bioagent 恢复工作区`);
+        setWorkspaceStatus(`已从 ${restoredPath || '最近工作区'}/.sciforge 恢复工作区`);
       } else {
-        setWorkspaceStatus(requestedPath ? `未找到 ${requestedPath}/.bioagent/workspace-state.json` : '未找到最近工作区快照');
+        setWorkspaceStatus(requestedPath ? `未找到 ${requestedPath}/.sciforge/workspace-state.json` : '未找到最近工作区快照');
       }
     } catch (err) {
       setWorkspaceStatus(`Workspace snapshot 未加载：${err instanceof Error ? err.message : String(err)}`);
@@ -2078,12 +2078,12 @@ export function BioAgentApp() {
           setConfig((current) => {
             if (current.workspacePath === restoredPath) return current;
             const next = updateConfig(current, { workspacePath: restoredPath });
-            saveBioAgentConfig(next);
+            saveSciForgeConfig(next);
             return next;
           });
-          setWorkspaceStatus(`已从 ${restoredPath}/.bioagent 恢复工作区`);
+          setWorkspaceStatus(`已从 ${restoredPath}/.sciforge 恢复工作区`);
         } else {
-          setWorkspaceStatus(workspacePath ? `未找到 ${workspacePath}/.bioagent/workspace-state.json` : '未找到最近工作区快照');
+          setWorkspaceStatus(workspacePath ? `未找到 ${workspacePath}/.sciforge/workspace-state.json` : '未找到最近工作区快照');
         }
       })
       .catch((err) => {
@@ -2104,16 +2104,16 @@ export function BioAgentApp() {
     saveWorkspaceState(workspaceState);
     if (workspaceState.workspacePath.trim()) {
       persistWorkspaceState(compactWorkspaceStateForStorage(workspaceState), config)
-        .then(() => setWorkspaceStatus(`已同步到 ${workspaceState.workspacePath}/.bioagent`))
+        .then(() => setWorkspaceStatus(`已同步到 ${workspaceState.workspacePath}/.sciforge`))
         .catch((err) => setWorkspaceStatus(`Workspace writer 未连接：${err instanceof Error ? err.message : String(err)}`));
     }
   }, [workspaceState, config, workspaceHydrated]);
 
   useEffect(() => {
     if (!configFileHydrated) return;
-    saveBioAgentConfig(config);
+    saveSciForgeConfig(config);
     setConfigSaveState({ status: 'saving' });
-    saveFileBackedBioAgentConfig(config)
+    saveFileBackedSciForgeConfig(config)
       .then(() => {
         const savedAt = nowIso();
         setConfigSaveState({ status: 'saved', savedAt });
@@ -2134,14 +2134,14 @@ export function BioAgentApp() {
     saveFeedbackAuthor(feedbackAuthor);
   }, [feedbackAuthor]);
 
-  function updateWorkspace(mutator: (state: BioAgentWorkspaceState) => BioAgentWorkspaceState) {
+  function updateWorkspace(mutator: (state: SciForgeWorkspaceState) => SciForgeWorkspaceState) {
     setWorkspaceState((current) => ({
       ...mutator(current),
       updatedAt: nowIso(),
     }));
   }
 
-  function updateSession(nextSession: BioAgentSession, reason = 'session update') {
+  function updateSession(nextSession: SciForgeSession, reason = 'session update') {
     updateWorkspace((current) => ({
       ...current,
       sessionsByScenario: {
@@ -2166,7 +2166,7 @@ export function BioAgentApp() {
     }));
   }
 
-  function addContextReference(reference: BioAgentReference) {
+  function addContextReference(reference: SciForgeReference) {
     const requestId = makeId('context-ref');
     setExternalReferenceRequest({ id: requestId, scenarioId, reference });
     setPage('workbench');
@@ -2201,7 +2201,7 @@ export function BioAgentApp() {
     const now = nowIso();
     const requestId = makeId('request');
     updateWorkspace((current) => {
-      const request: NonNullable<BioAgentWorkspaceState['feedbackRequests']>[number] = {
+      const request: NonNullable<SciForgeWorkspaceState['feedbackRequests']>[number] = {
         id: requestId,
         schemaVersion: 1,
         title,
@@ -2229,15 +2229,15 @@ export function BioAgentApp() {
     const workspacePath = normalizeWorkspaceRootPath(value);
     const nextConfig = updateConfig(config, { workspacePath });
     setConfig(nextConfig);
-    saveBioAgentConfig(nextConfig);
+    saveSciForgeConfig(nextConfig);
     updateWorkspace((current) => ({ ...current, workspacePath }));
     void hydrateWorkspaceSnapshot(workspacePath, nextConfig, 'force');
   }
 
-  function updateRuntimeConfig(patch: Partial<BioAgentConfig>) {
+  function updateRuntimeConfig(patch: Partial<SciForgeConfig>) {
     setConfig((current) => {
       const next = updateConfig(current, patch);
-      saveBioAgentConfig(next);
+      saveSciForgeConfig(next);
       if ('workspacePath' in patch) {
         updateWorkspace((state) => ({ ...state, workspacePath: next.workspacePath }));
         void hydrateWorkspaceSnapshot(next.workspacePath, next, 'force');
@@ -2248,9 +2248,9 @@ export function BioAgentApp() {
 
   function saveRuntimeConfigNow() {
     const next = updateConfig(config, {});
-    saveBioAgentConfig(next);
+    saveSciForgeConfig(next);
     setConfigSaveState({ status: 'saving' });
-    saveFileBackedBioAgentConfig(next)
+    saveFileBackedSciForgeConfig(next)
       .then(() => {
         const savedAt = nowIso();
         setConfigSaveState({ status: 'saved', savedAt });
@@ -2275,7 +2275,7 @@ export function BioAgentApp() {
     setScenarioOverrides((current) => ({ ...current, [nextScenarioId]: override }));
   }
 
-  function activeSessionFor(state: BioAgentWorkspaceState, nextScenarioId: ScenarioInstanceId) {
+  function activeSessionFor(state: SciForgeWorkspaceState, nextScenarioId: ScenarioInstanceId) {
     return state.sessionsByScenario[nextScenarioId] ?? createSession(nextScenarioId, `${scenarioLabelForInstance(nextScenarioId)} 新聊天`);
   }
 
@@ -2348,9 +2348,9 @@ export function BioAgentApp() {
 
   function editMessage(nextScenarioId: ScenarioInstanceId, messageId: string, content: string) {
     const session = workspaceState.sessionsByScenario[nextScenarioId] ?? createSession(nextScenarioId);
-    const nextSession: BioAgentSession = {
+    const nextSession: SciForgeSession = {
       ...session,
-      messages: session.messages.map((message) => message.id === messageId ? { ...message, content, updatedAt: nowIso() } as BioAgentMessage : message),
+      messages: session.messages.map((message) => message.id === messageId ? { ...message, content, updatedAt: nowIso() } as SciForgeMessage : message),
       updatedAt: nowIso(),
     };
     updateSession(nextSession, `edit message ${messageId}`);
@@ -2358,7 +2358,7 @@ export function BioAgentApp() {
 
   function deleteMessage(nextScenarioId: ScenarioInstanceId, messageId: string) {
     const session = workspaceState.sessionsByScenario[nextScenarioId] ?? createSession(nextScenarioId);
-    const nextSession: BioAgentSession = {
+    const nextSession: SciForgeSession = {
       ...session,
       messages: session.messages.filter((message) => message.id !== messageId),
       updatedAt: nowIso(),
@@ -2389,7 +2389,7 @@ export function BioAgentApp() {
         reusableTaskCandidates: [candidate, ...existing.filter((item) => item.id !== candidate.id)].slice(0, 80),
         timelineEvents: [({
           id: makeId('timeline'),
-          actor: 'BioAgent Library',
+          actor: 'SciForge Library',
           action: 'package.reusable-candidate',
           subject: `${candidate.scenarioPackageRef?.id ?? nextScenarioId}:${run.id}`,
           artifactRefs: [],
@@ -2434,7 +2434,7 @@ export function BioAgentApp() {
     const target = scenarios.find((item) => item.id === targetScenario);
     const now = nowIso();
     const autoRunPrompt = handoffAutoRunPrompt(targetScenario, artifact, sourceScenario?.name ?? artifact.producerScenario, target?.name ?? targetScenario);
-    const handoffMessage: BioAgentMessage = {
+    const handoffMessage: SciForgeMessage = {
       id: makeId('handoff'),
       role: 'user',
       content: [
@@ -2472,7 +2472,7 @@ export function BioAgentApp() {
         ...current,
         timelineEvents: [({
           id: makeId('timeline'),
-          actor: 'BioAgent Handoff',
+          actor: 'SciForge Handoff',
           action: 'artifact.handoff',
           subject: `${artifact.producerScenario}:${artifact.id} -> ${targetScenario}`,
           artifactRefs: [artifact.id],

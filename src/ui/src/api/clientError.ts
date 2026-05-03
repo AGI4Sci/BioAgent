@@ -1,4 +1,4 @@
-export interface BioAgentClientErrorShape {
+export interface SciForgeClientErrorShape {
   title: string;
   reason: string;
   recoverActions: string[];
@@ -6,15 +6,15 @@ export interface BioAgentClientErrorShape {
   cause?: unknown;
 }
 
-export class BioAgentClientError extends Error {
+export class SciForgeClientError extends Error {
   title: string;
   reason: string;
   recoverActions: string[];
   diagnosticRef: string;
 
-  constructor(shape: BioAgentClientErrorShape) {
+  constructor(shape: SciForgeClientErrorShape) {
     super(formatClientErrorMessage(shape));
-    this.name = 'BioAgentClientError';
+    this.name = 'SciForgeClientError';
     this.title = shape.title;
     this.reason = shape.reason;
     this.recoverActions = shape.recoverActions;
@@ -23,7 +23,7 @@ export class BioAgentClientError extends Error {
   }
 }
 
-export function formatClientErrorMessage(shape: BioAgentClientErrorShape) {
+export function formatClientErrorMessage(shape: SciForgeClientErrorShape) {
   const actions = shape.recoverActions.length ? ` 下一步：${shape.recoverActions.join('；')}` : '';
   return `${shape.title}：${shape.reason}${actions} [${shape.diagnosticRef}]`;
 }

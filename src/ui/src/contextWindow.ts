@@ -1,4 +1,4 @@
-import type { AgentContextWindowState, AgentStreamEvent, BioAgentConfig, BioAgentSession } from './domain';
+import type { AgentContextWindowState, AgentStreamEvent, SciForgeConfig, SciForgeSession } from './domain';
 
 export function buildContextWindowMeterModel(state: AgentContextWindowState, running: boolean) {
   const ratio = state.ratio ?? 0;
@@ -79,7 +79,7 @@ export function latestContextWindowState(events: AgentStreamEvent[]) {
   };
 }
 
-export function estimateContextWindowState(session: BioAgentSession, config: BioAgentConfig, events: AgentStreamEvent[]): AgentContextWindowState {
+export function estimateContextWindowState(session: SciForgeSession, config: SciForgeConfig, events: AgentStreamEvent[]): AgentContextWindowState {
   const modelWindow = config.maxContextWindowTokens || estimateModelContextWindow(config.modelName);
   const latestTelemetry = latestContextWindowState(events);
   if (latestTelemetry && latestTelemetry.source !== 'provider-usage') {
@@ -121,7 +121,7 @@ export function estimateContextWindowState(session: BioAgentSession, config: Bio
 function withFallbackContextWindow(
   state: AgentContextWindowState,
   modelWindow: number | undefined,
-  config: BioAgentConfig,
+  config: SciForgeConfig,
 ): AgentContextWindowState {
   const windowTokens = state.windowTokens ?? state.window ?? modelWindow;
   const ratio = state.ratio ?? (

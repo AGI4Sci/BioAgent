@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { defaultBioAgentConfig, loadBioAgentConfig, normalizeWorkspaceRootPath, saveBioAgentConfig, updateConfig } from './config';
+import { defaultSciForgeConfig, loadSciForgeConfig, normalizeWorkspaceRootPath, saveSciForgeConfig, updateConfig } from './config';
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -23,7 +23,7 @@ class MemoryStorage {
   }
 }
 
-describe('BioAgent config persistence', () => {
+describe('SciForge config persistence', () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, 'window');
   });
@@ -34,7 +34,7 @@ describe('BioAgent config persistence', () => {
       value: { localStorage: new MemoryStorage() },
     });
 
-    const saved = updateConfig(defaultBioAgentConfig, {
+    const saved = updateConfig(defaultSciForgeConfig, {
       modelProvider: 'openrouter',
       modelBaseUrl: 'https://openrouter.ai/api/v1/',
       modelName: 'qwen/qwen3.6-plus:free',
@@ -42,8 +42,8 @@ describe('BioAgent config persistence', () => {
       maxContextWindowTokens: 128000,
     });
 
-    saveBioAgentConfig(saved);
-    const loaded = loadBioAgentConfig();
+    saveSciForgeConfig(saved);
+    const loaded = loadSciForgeConfig();
 
     assert.equal(loaded.modelProvider, 'openrouter');
     assert.equal(loaded.modelBaseUrl, 'https://openrouter.ai/api/v1');
@@ -52,22 +52,22 @@ describe('BioAgent config persistence', () => {
     assert.equal(loaded.maxContextWindowTokens, 128000);
   });
 
-  it('normalizes accidental .bioagent internal paths back to the workspace root', () => {
-    const root = '/Applications/workspace/ailab/research/app/BioAgent/workspace';
+  it('normalizes accidental .sciforge internal paths back to the workspace root', () => {
+    const root = '/Applications/workspace/ailab/research/app/SciForge/workspace';
 
-    assert.equal(normalizeWorkspaceRootPath(`${root}/.bioagent/tasks/.bioagent/logs`), root);
-    assert.equal(normalizeWorkspaceRootPath(`${root}/.bioagent`), root);
-    assert.equal(updateConfig(defaultBioAgentConfig, { workspacePath: `${root}/.bioagent/tasks/run-1` }).workspacePath, root);
+    assert.equal(normalizeWorkspaceRootPath(`${root}/.sciforge/tasks/.sciforge/logs`), root);
+    assert.equal(normalizeWorkspaceRootPath(`${root}/.sciforge`), root);
+    assert.equal(updateConfig(defaultSciForgeConfig, { workspacePath: `${root}/.sciforge/tasks/run-1` }).workspacePath, root);
   });
 
   it('preserves gemini as a selectable AgentBackend', () => {
-    const config = updateConfig(defaultBioAgentConfig, { agentBackend: 'gemini' });
+    const config = updateConfig(defaultSciForgeConfig, { agentBackend: 'gemini' });
 
     assert.equal(config.agentBackend, 'gemini');
   });
 
   it('normalizes user context window limits', () => {
-    assert.equal(updateConfig(defaultBioAgentConfig, { maxContextWindowTokens: 64000 }).maxContextWindowTokens, 64000);
-    assert.equal(updateConfig(defaultBioAgentConfig, { maxContextWindowTokens: 12 }).maxContextWindowTokens, 1000);
+    assert.equal(updateConfig(defaultSciForgeConfig, { maxContextWindowTokens: 64000 }).maxContextWindowTokens, 64000);
+    assert.equal(updateConfig(defaultSciForgeConfig, { maxContextWindowTokens: 12 }).maxContextWindowTokens, 1000);
   });
 });

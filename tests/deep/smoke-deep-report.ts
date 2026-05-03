@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateDeepTestReport, validateDeepRunManifest, type DeepRunManifest } from '../../tools/deep-test-manifest';
 
-const tempRoot = join(tmpdir(), `bioagent-deep-report-${Date.now()}`);
+const tempRoot = join(tmpdir(), `sciforge-deep-report-${Date.now()}`);
 const deepRoot = join(tempRoot, 'deep-scenarios');
 const rootDir = join(deepRoot, 'demo-scenario');
 await mkdir(rootDir, { recursive: true });
@@ -113,7 +113,7 @@ const filtered = await generateDeepTestReport({ rootDir: deepRoot, scenario: 'mi
 assert.equal(filtered.manifests.length, 0);
 
 const html = await readFile(allReport.htmlPath, 'utf8');
-assert.match(html, /BioAgent Deep Test Artifacts/);
+assert.match(html, /SciForge Deep Test Artifacts/);
 assert.match(html, /manifest\.json/);
 
 console.log('[ok] deep manifest validation and report generation smoke passed');

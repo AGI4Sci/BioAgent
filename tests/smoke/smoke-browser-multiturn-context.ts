@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 
 import { chromium, type Browser, type Page } from 'playwright-core';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-browser-multiturn-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-browser-multiturn-'));
 const artifactsDir = resolve('docs', 'test-artifacts');
 const workspacePort = 23080 + Math.floor(Math.random() * 1000);
 const uiPort = 24080 + Math.floor(Math.random() * 1000);
@@ -15,9 +15,9 @@ const children: ChildProcess[] = [];
 
 try {
   await mkdir(artifactsDir, { recursive: true });
-  await mkdir(join(workspace, '.bioagent', 'artifacts'), { recursive: true });
-  children.push(start('workspace', ['npm', 'run', 'workspace:server'], { BIOAGENT_WORKSPACE_PORT: String(workspacePort) }));
-  children.push(start('ui', ['npm', 'run', 'dev:ui', '--', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], { BIOAGENT_UI_PORT: String(uiPort) }));
+  await mkdir(join(workspace, '.sciforge', 'artifacts'), { recursive: true });
+  children.push(start('workspace', ['npm', 'run', 'workspace:server'], { SCIFORGE_WORKSPACE_PORT: String(workspacePort) }));
+  children.push(start('ui', ['npm', 'run', 'dev:ui', '--', '--host', '127.0.0.1', '--port', String(uiPort), '--strictPort'], { SCIFORGE_UI_PORT: String(uiPort) }));
   await waitForHttp(`http://127.0.0.1:${workspacePort}/health`);
   await waitForHttp(`http://127.0.0.1:${uiPort}/`);
 
@@ -29,7 +29,7 @@ try {
   try {
     const page = await newConfiguredPage(browser);
     const runRequests: Array<Record<string, unknown>> = [];
-    await page.route(`http://127.0.0.1:${workspacePort}/api/bioagent/tools/run/stream`, async (route, request) => {
+    await page.route(`http://127.0.0.1:${workspacePort}/api/sciforge/tools/run/stream`, async (route, request) => {
       const body = request.postDataJSON() as Record<string, unknown>;
       runRequests.push(body);
       const round = runRequests.length;
@@ -80,7 +80,7 @@ try {
     assert.ok(isNonDecreasing(serializedRequestBytes), 'request bytes should grow predictably with append-only context, not reset unpredictably');
 
     await page.screenshot({ path: join(artifactsDir, 'browser-smoke-multiturn-context.png'), fullPage: true });
-    assert.deepEqual((page as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors ?? [], [], '24-turn browser workflow should not emit page errors');
+    assert.deepEqual((page as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors ?? [], [], '24-turn browser workflow should not emit page errors');
     console.log(`[ok] browser 24-turn context smoke verified ledger reuse, bounded recent window, two visible compactions, compaction-aware meter, and request size ceiling; screenshot in ${artifactsDir}`);
   } finally {
     await browser.close();
@@ -111,15 +111,15 @@ async function newConfiguredPage(browser: Browser) {
     maxContextWindowTokens: 200_000,
     updatedAt: new Date().toISOString(),
   };
-  await fetch(`http://127.0.0.1:${workspacePort}/api/bioagent/config`, {
+  await fetch(`http://127.0.0.1:${workspacePort}/api/sciforge/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ config }),
   });
   await page.addInitScript(({ config }) => {
-    window.localStorage.setItem('bioagent.config.v1', JSON.stringify(config));
+    window.localStorage.setItem('sciforge.config.v1', JSON.stringify(config));
   }, { config });
-  (page as Page & { __bioagentPageErrors?: string[] }).__bioagentPageErrors = pageErrors;
+  (page as Page & { __sciforgePageErrors?: string[] }).__sciforgePageErrors = pageErrors;
   return page;
 }
 
@@ -213,13 +213,13 @@ function browserMultiturnToolStreamBody(round: number) {
           params: `round=${round}`,
           status: 'done',
           hash: `browser-multiturn-${round}`,
-          outputRef: `.bioagent/task-results/browser-multiturn-${round}.json`,
+          outputRef: `.sciforge/task-results/browser-multiturn-${round}.json`,
         }],
         artifacts: [{
           id: `browser-multiturn-report-${round}`,
           type: 'research-report',
           schemaVersion: '1',
-          dataRef: `.bioagent/artifacts/browser-multiturn-report-${round}.json`,
+          dataRef: `.sciforge/artifacts/browser-multiturn-report-${round}.json`,
           metadata: { runId: `browser-multiturn-${round}`, status: 'done' },
           data: { markdown: `# Browser reply ${round}\\n\\nThis mocked report validates generic multi-turn context reuse.` },
         }],
@@ -300,7 +300,7 @@ async function waitForHttp(url: string) {
 
 function browserExecutablePath() {
   const candidates = [
-    process.env.BIOAGENT_BROWSER_EXECUTABLE,
+    process.env.SCIFORGE_BROWSER_EXECUTABLE,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -309,5 +309,5 @@ function browserExecutablePath() {
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
-  throw new Error('No Chromium-compatible browser found. Set BIOAGENT_BROWSER_EXECUTABLE to run browser smoke.');
+  throw new Error('No Chromium-compatible browser found. Set SCIFORGE_BROWSER_EXECUTABLE to run browser smoke.');
 }

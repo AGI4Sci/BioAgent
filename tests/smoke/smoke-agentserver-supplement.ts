@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-supplement-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-supplement-'));
 await writeFile(join(workspace, 'matrix.csv'), [
   'gene,c1,c2,t1,t2',
   'EGFR,10,11,40,42',
@@ -139,10 +139,10 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: `.bioagent/tasks/${taskName}`, language: 'python', content: taskContent }],
-            entrypoint: { language: 'python', path: `.bioagent/tasks/${taskName}` },
+            taskFiles: [{ path: `.sciforge/tasks/${taskName}`, language: 'python', content: taskContent }],
+            entrypoint: { language: 'python', path: `.sciforge/tasks/${taskName}` },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/supplement-report.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/supplement-report.py <input> <output>',
             expectedArtifacts: ['research-report'],
             patchSummary: 'Generated missing research-report artifact.',
           },

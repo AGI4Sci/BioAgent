@@ -65,7 +65,7 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
     })),
     runtimeProfile: {
       appUrl: 'http://localhost:5173/',
-      workspacePath: '/tmp/bioagent-longform-workspace',
+      workspacePath: '/tmp/sciforge-longform-workspace',
       agentBackend: 'codex',
       modelProvider: 'native',
       modelName: 'fixture-model',
@@ -76,22 +76,22 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
     artifacts: [{
       id: 'final-report',
       type: 'research-report',
-      path: '.bioagent/reports/final.md',
+      path: '.sciforge/reports/final.md',
       round: 6,
       status: 'produced',
       summary: 'Final report explains how ※1, ※2, and ※3 changed the limitations and evidence ranking.',
     }, {
       id: 'final-evidence-table',
       type: 'evidence-table',
-      path: '.bioagent/reports/final.csv',
+      path: '.sciforge/reports/final.csv',
       round: 6,
       status: 'produced',
     }],
     executionUnits: [{
       id: 'EU-longform',
-      tool: 'bioagent.longform',
+      tool: 'sciforge.longform',
       status: 'done',
-      logRef: '.bioagent/logs/longform.log',
+      logRef: '.sciforge/logs/longform.log',
       artifactRefs: ['final-report'],
     }],
     failurePoints: status === 'passed' ? [] : [{
@@ -118,6 +118,6 @@ function fixtureManifest(status: DeepRunManifest['status']): DeepRunManifest {
         ? 'Reference impact: ※1 changed limitation severity, ※2 changed evidence ranking, ※3 changed confidence and repair notes.'
         : 'Pending.',
     },
-    notes: 'Browser evidence, Computer Use right-click selected limitation evidence, and workspace .bioagent artifact refs recorded. Reference impact: ※1/※2/※3 changed final report.',
+    notes: 'Browser evidence, Computer Use right-click selected limitation evidence, and workspace .sciforge artifact refs recorded. Reference impact: ※1/※2/※3 changed final report.',
   };
 }

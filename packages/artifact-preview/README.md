@@ -1,7 +1,7 @@
-# @bioagent-ui/artifact-preview
+# @sciforge-ui/artifact-preview
 
 ## Agent quick contract
-- Use this package to normalize BioAgent artifact/file references into `PreviewDescriptor` objects before rendering previews.
+- Use this package to normalize SciForge artifact/file references into `PreviewDescriptor` objects before rendering previews.
 - `normalizeArtifactPreviewDescriptor` preserves explicit artifact descriptors and infers stable fallback previews from path, dataRef, metadata, and artifact type.
 - PDF/image previews prefer streamable inline descriptors; text/table/json/html previews prefer extract descriptors; office/structure/binary previews keep system-open/copy-ref fallbacks.
 - Do not inline large file contents into chat context; use descriptor derivatives and locator hints instead.

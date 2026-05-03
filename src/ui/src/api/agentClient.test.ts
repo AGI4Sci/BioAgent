@@ -174,7 +174,7 @@ describe('normalizeAgentResponse', () => {
                 id: 'paper-list',
                 type: 'paper-list',
                 schemaVersion: '1',
-                path: '.bioagent/task-results/papers.json',
+                path: '.sciforge/task-results/papers.json',
                 data: [{ title: 'Paper A' }, { title: 'Paper B' }],
               }],
             }),
@@ -190,7 +190,7 @@ describe('normalizeAgentResponse', () => {
     });
     assert.ok(Array.isArray(response.artifacts[1].data));
     assert.equal((response.artifacts[1].data as unknown[]).length, 2);
-    assert.equal(response.artifacts[1].path, '.bioagent/task-results/papers.json');
+    assert.equal(response.artifacts[1].path, '.sciforge/task-results/papers.json');
   });
 
   it('preserves every skillDomain default artifact contract through normalization', () => {
@@ -254,17 +254,17 @@ describe('normalizeAgentResponse', () => {
               executionUnits: [
                 {
                   id: 'EU-repair',
-                  tool: 'bioagent.workspace-runtime-gateway',
+                  tool: 'sciforge.workspace-runtime-gateway',
                   params: { reason: 'missing matrixRef' },
                   status: 'repair-needed',
                   hash: 'repair-hash',
-                  codeRef: '.bioagent/tasks/omics.py',
-                  stderrRef: '.bioagent/logs/omics.stderr.log',
+                  codeRef: '.sciforge/tasks/omics.py',
+                  stderrRef: '.sciforge/logs/omics.stderr.log',
                   failureReason: 'matrixRef and metadataRef are required',
                 },
                 {
                   id: 'EU-healed',
-                  tool: 'bioagent.workspace-runtime-gateway',
+                  tool: 'sciforge.workspace-runtime-gateway',
                   params: {},
                   status: 'self-healed',
                   hash: 'healed-hash',
@@ -272,11 +272,11 @@ describe('normalizeAgentResponse', () => {
                   parentAttempt: 1,
                   selfHealReason: 'schema validation failed',
                   patchSummary: 'Added missing artifacts field.',
-                  diffRef: '.bioagent/diffs/attempt-2.patch',
+                  diffRef: '.sciforge/diffs/attempt-2.patch',
                 },
                 {
                   id: 'EU-failed-reason',
-                  tool: 'bioagent.workspace-runtime-gateway',
+                  tool: 'sciforge.workspace-runtime-gateway',
                   params: {},
                   status: 'failed-with-reason',
                   hash: 'failed-reason-hash',
@@ -503,7 +503,7 @@ function compactInput(): SendAgentMessageInput {
       schemaVersion: 1,
       agentServerBaseUrl: 'http://127.0.0.1:18080',
       workspaceWriterBaseUrl: 'http://127.0.0.1:5174',
-      workspacePath: '/tmp/bioagent-test-workspace',
+      workspacePath: '/tmp/sciforge-test-workspace',
       agentBackend: 'codex',
       modelProvider: 'native',
       modelBaseUrl: '',

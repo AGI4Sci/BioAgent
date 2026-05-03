@@ -1,11 +1,11 @@
-import type { BioAgentSkillDomain, GatewayRequest, LlmEndpointConfig } from '../runtime-types.js';
+import type { SciForgeSkillDomain, GatewayRequest, LlmEndpointConfig } from '../runtime-types.js';
 import { cleanUrl, isRecord, toStringList, uniqueStrings } from '../gateway-utils.js';
 
-const SKILL_DOMAIN_SET = new Set<BioAgentSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
+const SKILL_DOMAIN_SET = new Set<SciForgeSkillDomain>(['literature', 'structure', 'omics', 'knowledge']);
 
 export function normalizeGatewayRequest(body: Record<string, unknown>): GatewayRequest {
-  const skillDomain = String(body.skillDomain || '') as BioAgentSkillDomain;
-  if (!SKILL_DOMAIN_SET.has(skillDomain)) throw new Error(`Unsupported BioAgent skill domain: ${String(body.skillDomain || '')}`);
+  const skillDomain = String(body.skillDomain || '') as SciForgeSkillDomain;
+  if (!SKILL_DOMAIN_SET.has(skillDomain)) throw new Error(`Unsupported SciForge skill domain: ${String(body.skillDomain || '')}`);
   return {
     skillDomain,
     prompt: String(body.prompt || ''),

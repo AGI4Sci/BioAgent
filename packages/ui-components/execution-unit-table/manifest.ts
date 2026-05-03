@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/execution-unit-table',
+  packageName: '@sciforge-ui/execution-unit-table',
   moduleId: 'execution-provenance-table',
   version: '1.0.0',
   title: 'Execution provenance',

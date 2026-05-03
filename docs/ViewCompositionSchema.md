@@ -1,6 +1,6 @@
 # View Composition Schema
 
-View Composition lets BioAgent change presentation without generating new UI code. A UIManifest slot can include these optional fields:
+View Composition lets SciForge change presentation without generating new UI code. A UIManifest slot can include these optional fields:
 
 ```json
 {

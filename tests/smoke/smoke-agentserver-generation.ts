@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 import { appendTaskAttempt } from '../../src/runtime/task-attempt-history.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-generation-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-generation-'));
 let sawGenerationRequest = false;
 let sawPriorAttempt = false;
 let sawScopeSummary = false;
@@ -64,7 +64,7 @@ payload = {
             "type": "paper-list",
             "items": [
                 {
-                    "title": "Generated BioAgent task smoke",
+                    "title": "Generated SciForge task smoke",
                     "year": 2026,
                     "source": "mock-agentserver"
                 }
@@ -108,9 +108,9 @@ const server = createServer(async (req, res) => {
   assert.equal(metadata.purpose, 'workspace-task-generation');
   assert.equal(metadata.skillDomain, 'literature');
   assert.equal(metadata.skillId, 'agentserver.generate.literature');
-  assert.equal(metadata.contextEnvelopeVersion, 'bioagent.context-envelope.v1');
+  assert.equal(metadata.contextEnvelopeVersion, 'sciforge.context-envelope.v1');
   const agentId = String(isRecord(body.agent) ? body.agent.id : '');
-  assert.match(agentId, /^bioagent-literature-[a-f0-9]{12}$/);
+  assert.match(agentId, /^sciforge-literature-[a-f0-9]{12}$/);
   agentIds.push(agentId);
   const promptText = isRecord(body.input) && typeof body.input.text === 'string' ? body.input.text : '';
   promptLengths.push(promptText.length);
@@ -118,7 +118,7 @@ const server = createServer(async (req, res) => {
   requestCount += 1;
   sawPriorAttempt = promptText.includes('prior-generation-failure');
   sawScopeSummary = promptText.includes('scopeCheck') && promptText.includes('handoffTargets');
-  sawContextEnvelope = promptText.includes('"version": "bioagent.context-envelope.v1"')
+  sawContextEnvelope = promptText.includes('"version": "sciforge.context-envelope.v1"')
     && promptText.includes('"workspaceFacts"')
     && promptText.includes('"longTermRefs"');
   if (requestCount === 2) {
@@ -142,11 +142,11 @@ const server = createServer(async (req, res) => {
           status: 'completed',
           output: {
             result: {
-              message: 'The generated task code is under .bioagent/tasks/generated-literature.py and the executed archive/output/log refs are listed in recentExecutionRefs.',
+              message: 'The generated task code is under .sciforge/tasks/generated-literature.py and the executed archive/output/log refs are listed in recentExecutionRefs.',
               confidence: 0.9,
               claimType: 'context-answer',
               evidenceLevel: 'agentserver-context',
-              reasoningTrace: 'AgentServer generation endpoint answered from existing context without a separate BioAgent intent route.',
+              reasoningTrace: 'AgentServer generation endpoint answered from existing context without a separate SciForge intent route.',
               claims: [],
               uiManifest: [{ componentId: 'report-viewer', artifactRef: 'research-report', priority: 1 }],
               executionUnits: [{
@@ -159,7 +159,7 @@ const server = createServer(async (req, res) => {
                 type: 'research-report',
                 schemaVersion: '1',
                 data: {
-                  markdown: 'The generated task code is under .bioagent/tasks/generated-literature.py and the executed archive/output/log refs are listed in recentExecutionRefs.',
+                  markdown: 'The generated task code is under .sciforge/tasks/generated-literature.py and the executed archive/output/log refs are listed in recentExecutionRefs.',
                 },
               }],
             },
@@ -191,7 +191,7 @@ const server = createServer(async (req, res) => {
           status: 'completed',
           output: {
             result: {
-              message: 'Continued from full BioAgent handoff after AgentServer Core context was unavailable.',
+              message: 'Continued from full SciForge handoff after AgentServer Core context was unavailable.',
               confidence: 0.91,
               claimType: 'context-answer',
               evidenceLevel: 'agentserver-full-handoff',
@@ -208,7 +208,7 @@ const server = createServer(async (req, res) => {
                 type: 'research-report',
                 schemaVersion: '1',
                 data: {
-                  markdown: 'Full BioAgent context handoff preserved prior refs while AgentServer Core context was unavailable.',
+                  markdown: 'Full SciForge context handoff preserved prior refs while AgentServer Core context was unavailable.',
                 },
               }],
             },
@@ -237,19 +237,19 @@ const server = createServer(async (req, res) => {
           result: {
             taskFiles: [
               {
-                path: '.bioagent/tasks/generated-literature.py',
+                path: '.sciforge/tasks/generated-literature.py',
                 language: 'python',
                 content: generatedTask,
               },
             ],
             entrypoint: {
               language: 'python',
-              path: '.bioagent/tasks/generated-literature.py',
+              path: '.sciforge/tasks/generated-literature.py',
             },
             environmentRequirements: {
               language: 'python',
             },
-            validationCommand: 'python .bioagent/tasks/generated-literature.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/generated-literature.py <input> <output>',
             expectedArtifacts: ['paper-list'],
             patchSummary: 'Generated a literature fallback task for smoke validation.',
           },
@@ -307,7 +307,7 @@ try {
   assert.equal(result.artifacts.length, 1);
   assert.equal(result.artifacts[0].type, 'paper-list');
   const generatedArtifactMetadata = isRecord(result.artifacts[0].metadata) ? result.artifacts[0].metadata : {};
-  assert.match(String(generatedArtifactMetadata.artifactRef), /^\.bioagent\/artifacts\/session-smoke-context-paper-list-/);
+  assert.match(String(generatedArtifactMetadata.artifactRef), /^\.sciforge\/artifacts\/session-smoke-context-paper-list-/);
   assert.equal(typeof generatedArtifactMetadata.outputRef, 'string');
   assert.equal(result.executionUnits.length, 1);
   assert.equal(result.executionUnits[0].status, 'done');
@@ -316,17 +316,17 @@ try {
   assert.match(String(result.reasoningTrace), /AgentServer generation run/);
   assert.match(String(result.reasoningTrace), /Generated a literature fallback task/);
 
-  const attemptFiles = await readdir(join(workspace, '.bioagent', 'task-attempts'));
-  const artifactFiles = await readdir(join(workspace, '.bioagent', 'artifacts'));
+  const attemptFiles = await readdir(join(workspace, '.sciforge', 'task-attempts'));
+  const artifactFiles = await readdir(join(workspace, '.sciforge', 'artifacts'));
   assert.ok(artifactFiles.some((file) => file.includes('session-smoke-context-paper-list')));
   assert.equal(attemptFiles.length, 2);
   const generatedAttemptFile = attemptFiles.find((file) => file.startsWith('generated-literature-'));
   assert.ok(generatedAttemptFile);
-  const attemptHistory = JSON.parse(await readFile(join(workspace, '.bioagent', 'task-attempts', generatedAttemptFile), 'utf8'));
+  const attemptHistory = JSON.parse(await readFile(join(workspace, '.sciforge', 'task-attempts', generatedAttemptFile), 'utf8'));
   assert.equal(attemptHistory.attempts.length, 1);
   assert.equal(attemptHistory.attempts[0].status, 'done');
-  assert.match(attemptHistory.attempts[0].codeRef, /^\.bioagent\/tasks\/generated-literature-[a-f0-9]+\/generated-literature\.py$/);
-  assert.equal(await readFile(join(workspace, '.bioagent', 'tasks', 'generated-literature.py'), 'utf8'), generatedTask);
+  assert.match(attemptHistory.attempts[0].codeRef, /^\.sciforge\/tasks\/generated-literature-[a-f0-9]+\/generated-literature\.py$/);
+  assert.equal(await readFile(join(workspace, '.sciforge', 'tasks', 'generated-literature.py'), 'utf8'), generatedTask);
   assert.equal(await readFile(join(workspace, attemptHistory.attempts[0].codeRef), 'utf8'), generatedTask);
 
   const continuation = await runWorkspaceRuntimeGateway({
@@ -349,7 +349,7 @@ try {
     },
   });
 
-  assert.notEqual(continuation.executionUnits[0].tool, 'bioagent.context-ref-inspector');
+  assert.notEqual(continuation.executionUnits[0].tool, 'sciforge.context-ref-inspector');
   assert.equal(continuation.executionUnits[0].status, 'done');
   assert.match(continuation.message, /generated-literature/);
   assert.equal(requestCount, 2);

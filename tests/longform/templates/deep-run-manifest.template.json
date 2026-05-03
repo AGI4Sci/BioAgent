@@ -14,7 +14,7 @@
   },
   "prompt": {
     "initial": "<round 1 prompt>",
-    "expectedOutcome": "Complete 6+ real BioAgent turns with at least two reference operation types and reproducible artifacts."
+    "expectedOutcome": "Complete 6+ real SciForge turns with at least two reference operation types and reproducible artifacts."
   },
   "rounds": [
     {

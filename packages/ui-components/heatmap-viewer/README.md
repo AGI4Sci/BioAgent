@@ -1,4 +1,4 @@
-# @bioagent-ui/heatmap-viewer
+# @sciforge-ui/heatmap-viewer
 
 ## Agent quick contract
 - componentId: `heatmap-viewer`

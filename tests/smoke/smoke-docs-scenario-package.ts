@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const requiredDocs = [
-  'docs/BioAgent_Project_Document.md',
+  'docs/SciForge_Project_Document.md',
   'docs/ScenarioPackageAuthoring.md',
   'docs/DependencyRiskRegister.md',
   'README.md',
@@ -16,22 +16,22 @@ for (const path of requiredDocs) {
   assert.ok(text.length > 200, `${path} should not be empty`);
 }
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-docs-scenario-'));
-await cp('docs/examples/workspace-scenario', join(workspace, '.bioagent', 'scenarios', 'example-literature-service'), { recursive: true });
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-docs-scenario-'));
+await cp('docs/examples/workspace-scenario', join(workspace, '.sciforge', 'scenarios', 'example-literature-service'), { recursive: true });
 
 const port = 20080 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
-    BIOAGENT_WORKSPACE_PORT: String(port),
+    SCIFORGE_WORKSPACE_PORT: String(port),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
 try {
   await waitForHealth(port);
-  const response = await fetch(`http://127.0.0.1:${port}/api/bioagent/scenarios/get?workspacePath=${encodeURIComponent(workspace)}&id=example-literature-service`);
+  const response = await fetch(`http://127.0.0.1:${port}/api/sciforge/scenarios/get?workspacePath=${encodeURIComponent(workspace)}&id=example-literature-service`);
   const text = await response.text();
   assert.equal(response.status, 200, text);
   const json = JSON.parse(text) as { package: { id: string; qualityReport?: { ok: boolean } } };

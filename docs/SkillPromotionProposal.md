@@ -1,6 +1,6 @@
 # Skill Promotion Proposal
 
-BioAgent promotes a repeated successful workspace task into an installed skill only after a user review step. A proposal is a draft record, not an executable skill.
+SciForge promotes a repeated successful workspace task into an installed skill only after a user review step. A proposal is a draft record, not an executable skill.
 
 Required shape:
 
@@ -11,11 +11,11 @@ Required shape:
   "createdAt": "ISO-8601",
   "source": {
     "workspacePath": "/absolute/workspace",
-    "taskCodeRef": ".bioagent/tasks/example.py",
-    "inputRef": ".bioagent/task-inputs/example.json",
-    "outputRef": ".bioagent/task-results/example.json",
-    "stdoutRef": ".bioagent/logs/example.stdout.log",
-    "stderrRef": ".bioagent/logs/example.stderr.log",
+    "taskCodeRef": ".sciforge/tasks/example.py",
+    "inputRef": ".sciforge/task-inputs/example.json",
+    "outputRef": ".sciforge/task-results/example.json",
+    "stdoutRef": ".sciforge/logs/example.stdout.log",
+    "stderrRef": ".sciforge/logs/example.stderr.log",
     "successfulExecutionUnitRefs": ["EU-..."]
   },
   "proposedManifest": {

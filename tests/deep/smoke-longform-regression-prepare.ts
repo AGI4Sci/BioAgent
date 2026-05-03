@@ -5,13 +5,13 @@ import { join } from 'node:path';
 import { prepareLongformRegression } from '../../tools/longform-regression';
 import { validateDeepRunManifest } from '../../tools/deep-test-manifest';
 
-const outRoot = await mkdtemp(join(tmpdir(), 'bioagent-longform-prepare-'));
+const outRoot = await mkdtemp(join(tmpdir(), 'sciforge-longform-prepare-'));
 const prepared = await prepareLongformRegression({
   scenario: 'longform-literature-evidence-report',
   outRoot,
   runId: 'longform-fixture-run',
   appUrl: 'http://localhost:5173/',
-  workspacePath: '/tmp/bioagent-longform-workspace',
+  workspacePath: '/tmp/sciforge-longform-workspace',
   backend: 'codex',
   modelProvider: 'native',
   modelName: 'fixture-model',
@@ -26,7 +26,7 @@ assert.equal((await stat(item.evidenceDirectory)).isDirectory(), true);
 const manifest = JSON.parse(await readFile(item.manifestPath, 'utf8')) as unknown;
 assert.deepEqual(validateDeepRunManifest(manifest), []);
 assert.equal((manifest as { run: { id: string } }).run.id, 'longform-fixture-run');
-assert.equal((manifest as { runtimeProfile: { workspacePath: string } }).runtimeProfile.workspacePath, '/tmp/bioagent-longform-workspace');
+assert.equal((manifest as { runtimeProfile: { workspacePath: string } }).runtimeProfile.workspacePath, '/tmp/sciforge-longform-workspace');
 assert.equal((manifest as { rounds: unknown[] }).rounds.length, 6);
 
 const checklist = await readFile(item.checklistPath, 'utf8');

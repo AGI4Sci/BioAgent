@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-supplement-scoped-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-supplement-scoped-'));
 let generationCalls = 0;
 let sawPaperListSupplement = false;
 
@@ -68,10 +68,10 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: '.bioagent/tasks/followup-report.py', language: 'python', content: reportOnlyTask }],
-            entrypoint: { language: 'python', path: '.bioagent/tasks/followup-report.py' },
+            taskFiles: [{ path: '.sciforge/tasks/followup-report.py', language: 'python', content: reportOnlyTask }],
+            entrypoint: { language: 'python', path: '.sciforge/tasks/followup-report.py' },
             environmentRequirements: { language: 'python' },
-            validationCommand: 'python .bioagent/tasks/followup-report.py <input> <output>',
+            validationCommand: 'python .sciforge/tasks/followup-report.py <input> <output>',
             expectedArtifacts: ['research-report'],
             patchSummary: 'Generated only the follow-up research-report artifact.',
           },

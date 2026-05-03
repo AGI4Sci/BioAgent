@@ -1,8 +1,8 @@
-# @bioagent/scenario-core
+# @sciforge/scenario-core
 
 ## Agent quick contract
 
-`@bioagent/scenario-core` is the UI-independent compiler for BioAgent scenario packages. It accepts package manifests and scenario selections, then emits stable runtime contracts:
+`@sciforge/scenario-core` is the UI-independent compiler for SciForge scenario packages. It accepts package manifests and scenario selections, then emits stable runtime contracts:
 
 - inputs: skill manifests from `packages/skills`, tool manifests from `packages/tools`, UI component manifests from `packages/ui-components`, built-in scenario specs, and user draft or selection objects
 - outputs: `ScenarioPackage`, `ScenarioIR`, `SkillPlan`, `UIPlan`, `ValidationReport`, `ScenarioQualityReport`, and `ElementRegistry`
@@ -11,7 +11,7 @@
 Node callers can import the package directly:
 
 ```ts
-import { buildBuiltInScenarioPackage, runScenarioRuntimeSmoke } from '@bioagent/scenario-core';
+import { buildBuiltInScenarioPackage, runScenarioRuntimeSmoke } from '@sciforge/scenario-core';
 
 const pkg = buildBuiltInScenarioPackage('literature-evidence-review');
 const smoke = await runScenarioRuntimeSmoke({ package: pkg, mode: 'dry-run' });

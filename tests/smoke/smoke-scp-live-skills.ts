@@ -4,17 +4,17 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
-import type { BioAgentSkillDomain, ToolPayload } from '../../src/runtime/runtime-types.js';
+import type { SciForgeSkillDomain, ToolPayload } from '../../src/runtime/runtime-types.js';
 
 if (!process.env.SCP_HUB_API_KEY && !process.env.SCPhub_api_key && !process.env.SCPHUB_API_KEY) {
   throw new Error('Set SCP_HUB_API_KEY or SCPhub_api_key to run live SCP skill smoke tests.');
 }
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-scp-live-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-scp-live-'));
 
 const cases: Array<{
   name: string;
-  skillDomain: BioAgentSkillDomain;
+  skillDomain: SciForgeSkillDomain;
   availableSkills: string[];
   prompt: string;
   expectedArtifact: string;

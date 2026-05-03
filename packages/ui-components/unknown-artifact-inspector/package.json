@@ -1,5 +1,5 @@
 {
-  "name": "@bioagent-ui/unknown-artifact-inspector",
+  "name": "@sciforge-ui/unknown-artifact-inspector",
   "version": "1.0.0",
   "type": "module",
   "main": "./manifest.ts",

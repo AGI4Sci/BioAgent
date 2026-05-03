@@ -27,14 +27,14 @@ function asStringArray(value: unknown): string[] | undefined {
   return entries.length ? entries : undefined;
 }
 
-export async function sendBioAgentToolMessage(
+export async function sendSciForgeToolMessage(
   input: SendAgentMessageInput,
   callbacks: { onEvent?: (event: AgentStreamEvent) => void } = {},
   signal?: AbortSignal,
 ): Promise<NormalizedAgentResponse> {
   const builtInScenarioId = builtInScenarioIdForInput(input);
   const rawArtifactSummary = summarizeArtifacts(input);
-  const referenceSummary = summarizeBioAgentReferences(input);
+  const referenceSummary = summarizeSciForgeReferences(input);
   const rawRecentExecutionRefs = summarizeExecutionRefs(input);
   const contextPolicy = currentTurnContextPolicy(input, rawArtifactSummary, rawRecentExecutionRefs);
   const artifactSummary = contextPolicy.isolated ? [] : rawArtifactSummary;
@@ -90,8 +90,8 @@ export async function sendBioAgentToolMessage(
     if (priorFailure) {
       callbacks.onEvent?.(toolEvent('repair-start', `正在修复：已发现上一轮 failureReason=${priorFailure}`));
     }
-    callbacks.onEvent?.(toolEvent('project-tool-start', `BioAgent ${builtInScenarioId} project tool started`));
-    const response = await fetch(`${input.config.workspaceWriterBaseUrl}/api/bioagent/tools/run/stream`, {
+    callbacks.onEvent?.(toolEvent('project-tool-start', `SciForge ${builtInScenarioId} project tool started`));
+    const response = await fetch(`${input.config.workspaceWriterBaseUrl}/api/sciforge/tools/run/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -120,7 +120,7 @@ export async function sendBioAgentToolMessage(
           scopeCheck: {
             source: 'structured-scenario-hint',
             decisionOwner: 'AgentServer',
-            note: 'BioAgent does not route or reject current-turn intent by keyword; AgentServer decides from rawUserPrompt and context.',
+            note: 'SciForge does not route or reject current-turn intent by keyword; AgentServer decides from rawUserPrompt and context.',
           },
           scenarioOverride: input.scenarioOverride,
           scenarioPackageRef: input.scenarioPackageRef,
@@ -156,14 +156,14 @@ export async function sendBioAgentToolMessage(
     ));
   });
   if (!response.ok || error || !isRecord(result)) {
-    throw new Error(error || `BioAgent project tool failed: HTTP ${response.status}`);
+    throw new Error(error || `SciForge project tool failed: HTTP ${response.status}`);
   }
   const completion = workspaceResultCompletion(result);
   callbacks.onEvent?.(toolEvent('project-tool-done', completion.status === 'failed'
-    ? `BioAgent ${builtInScenarioId} 未完成：${completion.reason ?? '后台返回 repair-needed/failed-with-reason 诊断，未产出用户要求的最终结果。'}`
+    ? `SciForge ${builtInScenarioId} 未完成：${completion.reason ?? '后台返回 repair-needed/failed-with-reason 诊断，未产出用户要求的最终结果。'}`
     : priorFailure
-      ? `BioAgent ${builtInScenarioId} 已完成，并保留上一轮修复上下文`
-      : `BioAgent ${builtInScenarioId} project tool completed`));
+      ? `SciForge ${builtInScenarioId} 已完成，并保留上一轮修复上下文`
+      : `SciForge ${builtInScenarioId} project tool completed`));
   return normalizeAgentResponse(builtInScenarioId, input.prompt, {
     ok: true,
     data: {
@@ -181,8 +181,8 @@ export async function sendBioAgentToolMessage(
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new Error(timedOut
-        ? `BioAgent project tool 超时：${input.config.requestTimeoutMs || 900_000}ms 内没有完成。流式面板已显示最后一个真实事件。`
-        : 'BioAgent project tool 已取消。');
+        ? `SciForge project tool 超时：${input.config.requestTimeoutMs || 900_000}ms 内没有完成。流式面板已显示最后一个真实事件。`
+        : 'SciForge project tool 已取消。');
     }
     throw error;
   } finally {
@@ -248,7 +248,7 @@ function shouldTreatMessageAsBlocking(message: string, units: Record<string, unk
 }
 
 function looksLikeBlockingDiagnosticMessage(message: string) {
-  return /^(?:BioAgent runtime gateway needs repair|Agent backend .* failed|AgentServer .* failed|No validated local skill|Task output failed|AgentServer .* did not|Generated artifacts did not)/i.test(message)
+  return /^(?:SciForge runtime gateway needs repair|Agent backend .* failed|AgentServer .* failed|No validated local skill|Task output failed|AgentServer .* did not|Generated artifacts did not)/i.test(message)
     || /\b(?:execution unit|artifact|research-report|paper-list)\s+status=(?:repair-needed|failed-with-reason|failed)\b/i.test(message);
 }
 
@@ -695,7 +695,7 @@ function currentTurnConversation(
   const conversation = stableSessionMessages(input).slice(-16).map((message, index, messages) => {
     const isRecent = index >= Math.max(0, messages.length - 8);
     const references = message.references?.length
-      ? `\n  references: ${JSON.stringify(message.references.map(compactBioAgentReference))}`
+      ? `\n  references: ${JSON.stringify(message.references.map(compactSciForgeReference))}`
       : '';
     return `${message.role}: ${compactConversationContent(message.content, isRecent ? 1200 : 480)}${references}`;
   });
@@ -731,7 +731,7 @@ function summarizeArtifacts(input: SendAgentMessageInput) {
     schemaVersion: artifact.schemaVersion,
     dataRef: artifact.dataRef,
     path: artifact.path,
-    workspaceArtifactRef: input.sessionId ? `.bioagent/artifacts/${safeWorkspaceName(input.sessionId)}-${safeWorkspaceName(artifact.id || artifact.type || 'artifact')}.json` : undefined,
+    workspaceArtifactRef: input.sessionId ? `.sciforge/artifacts/${safeWorkspaceName(input.sessionId)}-${safeWorkspaceName(artifact.id || artifact.type || 'artifact')}.json` : undefined,
     runId: artifactRunId(artifact),
     status: artifactStatus(artifact),
     failureReason: artifactFailureReason(artifact),
@@ -788,11 +788,11 @@ function uniqueStrings(values: Array<string | undefined>) {
   return out;
 }
 
-function summarizeBioAgentReferences(input: SendAgentMessageInput) {
-  return (input.references ?? []).slice(0, 8).map(compactBioAgentReference);
+function summarizeSciForgeReferences(input: SendAgentMessageInput) {
+  return (input.references ?? []).slice(0, 8).map(compactSciForgeReference);
 }
 
-function compactBioAgentReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {
+function compactSciForgeReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {
   return {
     id: reference.id,
     kind: reference.kind,
@@ -979,7 +979,7 @@ function compactRecord(value: unknown) {
 }
 
 function looksLikeRef(value: string) {
-  return /\.bioagent\/|stdout|stderr|output|input|\.json|\.log|\.py|\.ipynb|\.r$/i.test(value);
+  return /\.sciforge\/|stdout|stderr|output|input|\.json|\.log|\.py|\.ipynb|\.r$/i.test(value);
 }
 
 function safeWorkspaceName(value: string) {
@@ -991,14 +991,14 @@ function workspacePersistenceSummary(input: SendAgentMessageInput) {
   const sessionId = input.sessionId;
   return {
     workspacePath,
-    bioagentDir: workspacePath ? `${workspacePath}/.bioagent` : '.bioagent',
-    workspaceStateRef: '.bioagent/workspace-state.json',
-    sessionRef: sessionId ? `.bioagent/sessions/${safeWorkspaceName(sessionId)}.json` : undefined,
-    artifactDir: '.bioagent/artifacts/',
-    taskDir: '.bioagent/tasks/',
-    taskResultDir: '.bioagent/task-results/',
-    logDir: '.bioagent/logs/',
-    note: 'Generated task code, task inputs/results/logs, and UI artifacts are persisted under the workspace .bioagent directory when Workspace Writer is online.',
+    sciforgeDir: workspacePath ? `${workspacePath}/.sciforge` : '.sciforge',
+    workspaceStateRef: '.sciforge/workspace-state.json',
+    sessionRef: sessionId ? `.sciforge/sessions/${safeWorkspaceName(sessionId)}.json` : undefined,
+    artifactDir: '.sciforge/artifacts/',
+    taskDir: '.sciforge/tasks/',
+    taskResultDir: '.sciforge/task-results/',
+    logDir: '.sciforge/logs/',
+    note: 'Generated task code, task inputs/results/logs, and UI artifacts are persisted under the workspace .sciforge directory when Workspace Writer is online.',
   };
 }
 
@@ -1051,7 +1051,7 @@ function buildAgentContext(
     conversationLedger: buildConversationLedger(input),
     contextReusePolicy: buildContextReusePolicy(input, recentConversation),
     artifactAccessPolicy,
-    currentReferences: summarizeBioAgentReferences(input),
+    currentReferences: summarizeSciForgeReferences(input),
     availableComponentIds,
     artifacts: artifactSummary,
     recentExecutionRefs,
@@ -1078,7 +1078,7 @@ function buildConversationLedger(input: SendAgentMessageInput) {
       contentChars: message.content.length,
       contentDigest: stableTextDigest(message.content),
       contentPreview: compactConversationContent(message.content, isRecent ? 900 : 360),
-      references: message.references?.length ? message.references.map(compactBioAgentReference) : undefined,
+      references: message.references?.length ? message.references.map(compactSciForgeReference) : undefined,
     };
   });
 }

@@ -6,7 +6,7 @@ import { compactWorkspaceStateForStorage, parseWorkspaceState, saveWorkspaceStat
 test('parseWorkspaceState preserves built-in and workspace scenario sessions', () => {
   const state = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/tmp/bioagent-workspace',
+    workspacePath: '/tmp/sciforge-workspace',
     sessionsByScenario: {
       'literature-evidence-review': {
         schemaVersion: 2,
@@ -88,7 +88,7 @@ test('parseWorkspaceState preserves built-in and workspace scenario sessions', (
 test('explicit workspace path treats workspace snapshot as canonical across browsers', () => {
   const localBrowserState = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/Applications/workspace/ailab/research/app/BioAgent/workspace',
+    workspacePath: '/Applications/workspace/ailab/research/app/SciForge/workspace',
     sessionsByScenario: {
       'literature-evidence-review': sessionFixture('local-browser', ['local-only', 'local-extra']),
     },
@@ -97,7 +97,7 @@ test('explicit workspace path treats workspace snapshot as canonical across brow
   });
   const sharedWorkspaceState = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/Applications/workspace/ailab/research/app/BioAgent/workspace',
+    workspacePath: '/Applications/workspace/ailab/research/app/SciForge/workspace',
     sessionsByScenario: {
       'literature-evidence-review': sessionFixture('shared-workspace', ['shared-history']),
     },
@@ -112,7 +112,7 @@ test('explicit workspace path treats workspace snapshot as canonical across brow
 test('parseWorkspaceState preserves hidden official package preferences', () => {
   const state = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/tmp/bioagent-workspace',
+    workspacePath: '/tmp/sciforge-workspace',
     sessionsByScenario: {},
     archivedSessions: [],
     hiddenOfficialPackageIds: ['structure-exploration', 'structure-exploration', 42],
@@ -144,7 +144,7 @@ test('saveWorkspaceState compacts instead of crashing on localStorage quota', ()
   try {
     const largeState = parseWorkspaceState({
       schemaVersion: 2,
-      workspacePath: '/tmp/bioagent-workspace',
+      workspacePath: '/tmp/sciforge-workspace',
       sessionsByScenario: {
         'literature-evidence-review': {
           ...sessionFixture('quota-session', Array.from({ length: 40 }, (_, index) => `message ${index} ${'x'.repeat(1000)}`)),
@@ -177,7 +177,7 @@ test('saveWorkspaceState compacts instead of crashing on localStorage quota', ()
 test('compactWorkspaceStateForStorage keeps recent session records', () => {
   const state = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/tmp/bioagent-workspace',
+    workspacePath: '/tmp/sciforge-workspace',
     sessionsByScenario: {
       'literature-evidence-review': sessionFixture('compact-session', Array.from({ length: 10 }, (_, index) => `message-${index}`)),
     },
@@ -202,13 +202,13 @@ test('compactWorkspaceStateForStorage strips binary dataUrls from artifacts and 
       type: 'uploaded-pdf',
       producerScenario: 'literature-evidence-review',
       schemaVersion: '1',
-      dataRef: '.bioagent/uploads/binary-session/upload.pdf',
+      dataRef: '.sciforge/uploads/binary-session/upload.pdf',
       data: { fileName: 'upload.pdf', dataUrl },
     }],
   };
   const state = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/tmp/bioagent-workspace',
+    workspacePath: '/tmp/sciforge-workspace',
     sessionsByScenario: {
       'literature-evidence-review': {
         ...session,

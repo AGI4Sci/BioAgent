@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { appendTaskAttempt } from '../../src/runtime/task-attempt-history.js';
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-artifact-ref-followup-'));
-await mkdir(join(workspace, '.bioagent', 'artifacts'), { recursive: true });
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-ref-followup-'));
+await mkdir(join(workspace, '.sciforge', 'artifacts'), { recursive: true });
 
 await appendTaskAttempt(workspace, {
   id: 'generated-literature-smoke',
@@ -18,16 +18,16 @@ await appendTaskAttempt(workspace, {
   skillPlanRef: 'skill-plan-smoke',
   attempt: 1,
   status: 'done',
-  codeRef: '.bioagent/tasks/generated-literature-smoke/run.py',
-  inputRef: '.bioagent/task-inputs/generated-literature-smoke.json',
-  outputRef: '.bioagent/task-results/generated-literature-smoke.json',
-  stdoutRef: '.bioagent/logs/generated-literature-smoke.stdout.log',
-  stderrRef: '.bioagent/logs/generated-literature-smoke.stderr.log',
+  codeRef: '.sciforge/tasks/generated-literature-smoke/run.py',
+  inputRef: '.sciforge/task-inputs/generated-literature-smoke.json',
+  outputRef: '.sciforge/task-results/generated-literature-smoke.json',
+  stdoutRef: '.sciforge/logs/generated-literature-smoke.stdout.log',
+  stderrRef: '.sciforge/logs/generated-literature-smoke.stderr.log',
   exitCode: 0,
   createdAt: new Date().toISOString(),
 });
 
-await writeFile(join(workspace, '.bioagent', 'artifacts', 'session-smoke-paper-list.json'), JSON.stringify({
+await writeFile(join(workspace, '.sciforge', 'artifacts', 'session-smoke-paper-list.json'), JSON.stringify({
   id: 'paper-list',
   type: 'paper-list',
   data: {
@@ -41,7 +41,7 @@ await writeFile(join(workspace, '.bioagent', 'artifacts', 'session-smoke-paper-l
   },
 }, null, 2));
 
-await writeFile(join(workspace, '.bioagent', 'artifacts', 'session-smoke-research-report.json'), JSON.stringify({
+await writeFile(join(workspace, '.sciforge', 'artifacts', 'session-smoke-research-report.json'), JSON.stringify({
   id: 'research-report',
   type: 'research-report',
   data: { markdown: '## Summary\nAI agent papers cover deployment monitoring, software engineering, multi-agent anomaly detection, planning caches, and math proof systems.' },
@@ -118,7 +118,7 @@ const server = createServer(async (req, res) => {
         confidence: 0.91,
         claimType: 'context-summary',
         evidenceLevel: 'agentserver-context',
-        reasoningTrace: 'AgentServer returned only a direct report; BioAgent should preserve existing context artifacts.',
+        reasoningTrace: 'AgentServer returned only a direct report; SciForge should preserve existing context artifacts.',
         claims: ['Existing paper-list should be carried through for context answers.'],
         uiManifest: { components: ['report-viewer', 'paper-card-list', 'evidence-matrix'] },
         executionUnits: [],
@@ -130,7 +130,7 @@ const server = createServer(async (req, res) => {
       } : {
         message: [
           '我先判断当前问题是在询问上一轮产物位置和主题要点，而不是请求重新检索。',
-          '任务脚本在 .bioagent/tasks/generated-literature-smoke/run.py，paper-list artifact 在 session-smoke-paper-list.json，research-report artifact 在 session-smoke-research-report.json。',
+          '任务脚本在 .sciforge/tasks/generated-literature-smoke/run.py，paper-list artifact 在 session-smoke-paper-list.json，research-report artifact 在 session-smoke-research-report.json。',
           '主题包括 deployment monitoring、software engineering、multi-agent anomaly detection、planning caches 和 math proof systems。',
         ].join('\n'),
         confidence: 0.9,
@@ -143,7 +143,7 @@ const server = createServer(async (req, res) => {
         artifacts: [{
           id: 'paper-list',
           type: 'paper-list',
-          dataRef: '.bioagent/task-results/generated-literature-smoke.json',
+          dataRef: '.sciforge/task-results/generated-literature-smoke.json',
           metadata: { source: 'existing-context' },
         }],
       };
@@ -172,10 +172,10 @@ const server = createServer(async (req, res) => {
             id: 'mock-report-continuation-generation',
             output: {
               result: {
-                taskFiles: [{ path: '.bioagent/tasks/literature-continuation-report.py', language: 'python', content: generatedReportTask }],
-                entrypoint: { language: 'python', path: '.bioagent/tasks/literature-continuation-report.py' },
+                taskFiles: [{ path: '.sciforge/tasks/literature-continuation-report.py', language: 'python', content: generatedReportTask }],
+                entrypoint: { language: 'python', path: '.sciforge/tasks/literature-continuation-report.py' },
                 environmentRequirements: { language: 'python' },
-                validationCommand: 'python .bioagent/tasks/literature-continuation-report.py <input> <output>',
+                validationCommand: 'python .sciforge/tasks/literature-continuation-report.py <input> <output>',
                 expectedArtifacts: ['paper-list', 'research-report'],
                 patchSummary: 'Generated a continuation report task from prior context.',
               },
@@ -196,7 +196,7 @@ const server = createServer(async (req, res) => {
     confidence: 0.91,
     claimType: 'context-summary',
     evidenceLevel: 'agentserver-context',
-    reasoningTrace: 'AgentServer returned only a direct report; BioAgent should preserve existing context artifacts.',
+    reasoningTrace: 'AgentServer returned only a direct report; SciForge should preserve existing context artifacts.',
     claims: ['Existing paper-list should be carried through for context answers.'],
     uiManifest: { components: ['report-viewer', 'paper-card-list', 'evidence-matrix'] },
     executionUnits: [],
@@ -208,7 +208,7 @@ const server = createServer(async (req, res) => {
   } : {
     message: [
       '我先判断当前问题是在询问上一轮产物位置和主题要点，而不是请求重新检索。',
-      '任务脚本在 .bioagent/tasks/generated-literature-smoke/run.py，paper-list artifact 在 session-smoke-paper-list.json，research-report artifact 在 session-smoke-research-report.json。',
+      '任务脚本在 .sciforge/tasks/generated-literature-smoke/run.py，paper-list artifact 在 session-smoke-paper-list.json，research-report artifact 在 session-smoke-research-report.json。',
       '主题包括 deployment monitoring、software engineering、multi-agent anomaly detection、planning caches 和 math proof systems。',
     ].join('\n'),
     confidence: 0.9,
@@ -221,7 +221,7 @@ const server = createServer(async (req, res) => {
     artifacts: [{
       id: 'paper-list',
       type: 'paper-list',
-      dataRef: '.bioagent/task-results/generated-literature-smoke.json',
+      dataRef: '.sciforge/task-results/generated-literature-smoke.json',
       metadata: { source: 'existing-context' },
     }],
   };
@@ -260,10 +260,10 @@ const result = await runWorkspaceRuntimeGateway({
     recentExecutionRefs: [{
       id: 'generated-literature-task',
       status: 'done',
-      codeRef: '.bioagent/tasks/generated-literature-smoke/run.py',
-      outputRef: '.bioagent/task-results/generated-literature-smoke.json',
-      stdoutRef: '.bioagent/logs/generated-literature-smoke.stdout.log',
-      stderrRef: '.bioagent/logs/generated-literature-smoke.stderr.log',
+      codeRef: '.sciforge/tasks/generated-literature-smoke/run.py',
+      outputRef: '.sciforge/task-results/generated-literature-smoke.json',
+      stdoutRef: '.sciforge/logs/generated-literature-smoke.stdout.log',
+      stderrRef: '.sciforge/logs/generated-literature-smoke.stderr.log',
     }],
   },
   artifacts: [],
@@ -284,7 +284,7 @@ assert.match(result.message, /generated-literature-smoke\/run\.py/);
 assert.match(result.message, /session-smoke-paper-list\.json/);
 assert.match(result.message, /session-smoke-research-report\.json/);
 assert.match(result.message, /软件工程|software|部署|deployment|多智能体|multi-agent/i);
-assert.notEqual(result.executionUnits[0]?.tool, 'bioagent.context-ref-inspector');
+assert.notEqual(result.executionUnits[0]?.tool, 'sciforge.context-ref-inspector');
 assert.equal(result.executionUnits[0]?.status, 'done');
 const contextReport = result.artifacts.find((artifact) => artifact.type === 'research-report');
 assert.ok(contextReport);
@@ -307,10 +307,10 @@ const existingOnlySummary = await runWorkspaceRuntimeGateway({
     recentExecutionRefs: [{
       id: 'generated-literature-task',
       status: 'done',
-      codeRef: '.bioagent/tasks/generated-literature-smoke/run.py',
-      outputRef: '.bioagent/task-results/generated-literature-smoke.json',
-      stdoutRef: '.bioagent/logs/generated-literature-smoke.stdout.log',
-      stderrRef: '.bioagent/logs/generated-literature-smoke.stderr.log',
+      codeRef: '.sciforge/tasks/generated-literature-smoke/run.py',
+      outputRef: '.sciforge/task-results/generated-literature-smoke.json',
+      stdoutRef: '.sciforge/logs/generated-literature-smoke.stdout.log',
+      stderrRef: '.sciforge/logs/generated-literature-smoke.stderr.log',
     }],
   },
   artifacts: result.artifacts,
@@ -365,10 +365,10 @@ const reportContinuation = await runWorkspaceRuntimeGateway({
     recentExecutionRefs: [{
       id: 'generated-literature-task',
       status: 'done',
-      codeRef: '.bioagent/tasks/generated-literature-smoke/run.py',
-      outputRef: '.bioagent/task-results/generated-literature-smoke.json',
-      stdoutRef: '.bioagent/logs/generated-literature-smoke.stdout.log',
-      stderrRef: '.bioagent/logs/generated-literature-smoke.stderr.log',
+      codeRef: '.sciforge/tasks/generated-literature-smoke/run.py',
+      outputRef: '.sciforge/task-results/generated-literature-smoke.json',
+      stdoutRef: '.sciforge/logs/generated-literature-smoke.stdout.log',
+      stderrRef: '.sciforge/logs/generated-literature-smoke.stderr.log',
     }],
   },
   artifacts: [],
@@ -380,7 +380,7 @@ const reportContinuation = await runWorkspaceRuntimeGateway({
 });
 assert.equal(contextDispatchCount, 0);
 assert.equal(generationDispatchCount, 4);
-assert.notEqual(reportContinuation.executionUnits[0]?.tool, 'bioagent.context-ref-inspector');
+assert.notEqual(reportContinuation.executionUnits[0]?.tool, 'sciforge.context-ref-inspector');
 assert.match(reportContinuation.reasoningTrace, /AgentServer generation run|continuation report task/i);
 assert.ok(reportContinuation.artifacts.some((artifact) => artifact.type === 'paper-list'));
 assert.ok(reportContinuation.artifacts.some((artifact) => artifact.type === 'research-report'));
@@ -390,7 +390,7 @@ await new Promise<void>((resolve) => server.close(() => resolve()));
 const freshRound = await runWorkspaceRuntimeGateway({
   skillDomain: 'literature',
   prompt: [
-    'BioAgent should complete the user task end-to-end.',
+    'SciForge should complete the user task end-to-end.',
     'Recent multi-turn conversation:',
     'assistant: 上一轮已经有一些 refs。',
     'Current user request:',
@@ -410,11 +410,11 @@ const freshRound = await runWorkspaceRuntimeGateway({
   },
   artifacts: result.artifacts,
 });
-assert.notEqual(freshRound.executionUnits[0]?.tool, 'bioagent.context-ref-inspector');
+assert.notEqual(freshRound.executionUnits[0]?.tool, 'sciforge.context-ref-inspector');
 assert.match(freshRound.message, /AgentServer|runtime gateway|repair/i);
 
-const failedWorkspace = await mkdtemp(join(tmpdir(), 'bioagent-artifact-ref-failed-'));
-await mkdir(join(failedWorkspace, '.bioagent', 'artifacts'), { recursive: true });
+const failedWorkspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-ref-failed-'));
+await mkdir(join(failedWorkspace, '.sciforge', 'artifacts'), { recursive: true });
 await appendTaskAttempt(failedWorkspace, {
   id: 'generated-literature-success-old',
   prompt: 'older successful search',
@@ -423,10 +423,10 @@ await appendTaskAttempt(failedWorkspace, {
   skillPlanRef: 'skill-plan-failed-smoke',
   attempt: 1,
   status: 'done',
-  codeRef: '.bioagent/tasks/old-success.py',
-  outputRef: '.bioagent/task-results/old-success.json',
-  stdoutRef: '.bioagent/logs/old-success.stdout.log',
-  stderrRef: '.bioagent/logs/old-success.stderr.log',
+  codeRef: '.sciforge/tasks/old-success.py',
+  outputRef: '.sciforge/task-results/old-success.json',
+  stdoutRef: '.sciforge/logs/old-success.stdout.log',
+  stderrRef: '.sciforge/logs/old-success.stderr.log',
   exitCode: 0,
   createdAt: '2026-04-28T00:00:00.000Z',
 });
@@ -438,16 +438,16 @@ await appendTaskAttempt(failedWorkspace, {
   skillPlanRef: 'skill-plan-failed-smoke',
   attempt: 1,
   status: 'failed-with-reason',
-  codeRef: '.bioagent/tasks/current-failed.py',
-  inputRef: '.bioagent/task-inputs/current-failed.json',
-  outputRef: '.bioagent/task-results/current-failed.json',
-  stdoutRef: '.bioagent/logs/current-failed.stdout.log',
-  stderrRef: '.bioagent/logs/current-failed.stderr.log',
+  codeRef: '.sciforge/tasks/current-failed.py',
+  inputRef: '.sciforge/task-inputs/current-failed.json',
+  outputRef: '.sciforge/task-results/current-failed.json',
+  stdoutRef: '.sciforge/logs/current-failed.stdout.log',
+  stderrRef: '.sciforge/logs/current-failed.stderr.log',
   exitCode: 2,
   failureReason: 'missing --outputPath',
   createdAt: '2026-04-28T01:00:00.000Z',
 });
-await writeFile(join(failedWorkspace, '.bioagent', 'artifacts', 'session-other-paper-list.json'), JSON.stringify({
+await writeFile(join(failedWorkspace, '.sciforge', 'artifacts', 'session-other-paper-list.json'), JSON.stringify({
   id: 'paper-list',
   type: 'paper-list',
   data: { rows: [{ title: 'Unrelated old paper' }] },
@@ -470,10 +470,10 @@ const failedAnswer = await runWorkspaceRuntimeGateway({
     recentExecutionRefs: [{
       id: 'current-failed',
       status: 'failed-with-reason',
-      codeRef: '.bioagent/tasks/current-failed.py',
-      outputRef: '.bioagent/task-results/current-failed.json',
-      stdoutRef: '.bioagent/logs/current-failed.stdout.log',
-      stderrRef: '.bioagent/logs/current-failed.stderr.log',
+      codeRef: '.sciforge/tasks/current-failed.py',
+      outputRef: '.sciforge/task-results/current-failed.json',
+      stdoutRef: '.sciforge/logs/current-failed.stdout.log',
+      stderrRef: '.sciforge/logs/current-failed.stderr.log',
       failureReason: 'missing --outputPath',
     }],
   },

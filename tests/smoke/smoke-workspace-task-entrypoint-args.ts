@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runWorkspaceTask } from '../../src/runtime/workspace-task-runner.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-entrypoint-args-'));
-await mkdir(join(workspace, '.bioagent', 'tasks'), { recursive: true });
-await writeFile(join(workspace, '.bioagent', 'tasks', 'flag_task.py'), [
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-entrypoint-args-'));
+await mkdir(join(workspace, '.sciforge', 'tasks'), { recursive: true });
+await writeFile(join(workspace, '.sciforge', 'tasks', 'flag_task.py'), [
   'import argparse, json, os',
   'parser = argparse.ArgumentParser()',
   'parser.add_argument("--inputPath", required=True)',
@@ -19,13 +19,13 @@ await writeFile(join(workspace, '.bioagent', 'tasks', 'flag_task.py'), [
 const result = await runWorkspaceTask(workspace, {
   id: 'flag-entrypoint',
   language: 'python',
-  entrypoint: 'python3 .bioagent/tasks/flag_task.py --inputPath <inputPath> --outputPath <outputPath>',
+  entrypoint: 'python3 .sciforge/tasks/flag_task.py --inputPath <inputPath> --outputPath <outputPath>',
   entrypointArgs: ['--inputPath', '<inputPath>', '--outputPath', '<outputPath>'],
-  taskRel: '.bioagent/tasks/flag_task.py',
+  taskRel: '.sciforge/tasks/flag_task.py',
   input: { prompt: 'hello' },
-  outputRel: '.bioagent/task-results/flag-entrypoint.json',
-  stdoutRel: '.bioagent/logs/flag-entrypoint.stdout.log',
-  stderrRel: '.bioagent/logs/flag-entrypoint.stderr.log',
+  outputRel: '.sciforge/task-results/flag-entrypoint.json',
+  stdoutRel: '.sciforge/logs/flag-entrypoint.stdout.log',
+  stderrRel: '.sciforge/logs/flag-entrypoint.stderr.log',
 });
 
 assert.equal(result.exitCode, 0);
@@ -33,7 +33,7 @@ assert.deepEqual(JSON.parse(await readFile(join(workspace, result.outputRef), 'u
   inputExists: true,
 });
 
-await writeFile(join(workspace, '.bioagent', 'tasks', 'inferred_flag_task.py'), [
+await writeFile(join(workspace, '.sciforge', 'tasks', 'inferred_flag_task.py'), [
   'import argparse, json',
   'parser = argparse.ArgumentParser()',
   'parser.add_argument("--inputPath", required=False)',
@@ -47,12 +47,12 @@ const inferred = await runWorkspaceTask(workspace, {
   id: 'inferred-flag-entrypoint',
   language: 'python',
   entrypoint: 'main',
-  taskRel: '.bioagent/tasks/inferred_flag_task.py',
+  taskRel: '.sciforge/tasks/inferred_flag_task.py',
   inputArgMode: 'empty-data-path',
   input: { prompt: 'hello' },
-  outputRel: '.bioagent/task-results/inferred-flag-entrypoint.json',
-  stdoutRel: '.bioagent/logs/inferred-flag-entrypoint.stdout.log',
-  stderrRel: '.bioagent/logs/inferred-flag-entrypoint.stderr.log',
+  outputRel: '.sciforge/task-results/inferred-flag-entrypoint.json',
+  stdoutRel: '.sciforge/logs/inferred-flag-entrypoint.stdout.log',
+  stderrRel: '.sciforge/logs/inferred-flag-entrypoint.stderr.log',
 });
 
 assert.equal(inferred.exitCode, 0);

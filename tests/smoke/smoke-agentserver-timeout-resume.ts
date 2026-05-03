@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 
 import { runWorkspaceRuntimeGateway } from '../../src/runtime/workspace-runtime-gateway.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-agentserver-timeout-resume-'));
-const previousTimeout = process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS;
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-timeout-resume-'));
+const previousTimeout = process.env.SCIFORGE_AGENTSERVER_GENERATION_TIMEOUT_MS;
 let callCount = 0;
 let secondPromptText = '';
 
@@ -58,8 +58,8 @@ const server = createServer(async (req, res) => {
         status: 'completed',
         output: {
           result: {
-            taskFiles: [{ path: '.bioagent/tasks/resume.py', language: 'python', content: generatedTask }],
-            entrypoint: '.bioagent/tasks/resume.py',
+            taskFiles: [{ path: '.sciforge/tasks/resume.py', language: 'python', content: generatedTask }],
+            entrypoint: '.sciforge/tasks/resume.py',
             expectedArtifacts: [],
           },
         },
@@ -74,7 +74,7 @@ assert.ok(address && typeof address === 'object');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 
 try {
-  process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS = '40';
+  process.env.SCIFORGE_AGENTSERVER_GENERATION_TIMEOUT_MS = '40';
   const timeoutResult = await runWorkspaceRuntimeGateway({
     skillDomain: 'literature',
     prompt: 'long AgentServer run should timeout then resume cleanly',
@@ -88,7 +88,7 @@ try {
   assert.doesNotMatch(timeoutResult.message, /taskFiles and entrypoint|protocol/i);
   assert.ok(timeoutResult.executionUnits.some((unit) => isRecord(unit) && unit.status === 'repair-needed'));
 
-  process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS = '1000';
+  process.env.SCIFORGE_AGENTSERVER_GENERATION_TIMEOUT_MS = '1000';
   const resumed = await runWorkspaceRuntimeGateway({
     skillDomain: 'literature',
     prompt: 'long AgentServer run should timeout then resume cleanly',
@@ -101,16 +101,16 @@ try {
   assert.equal(resumed.message, 'resumed ok');
   assert.match(secondPromptText, /timed out or was cancelled/i);
   assert.match(secondPromptText, /priorAttempts/i);
-  const debugFiles = await readdir(join(workspace, '.bioagent', 'debug', 'agentserver'));
+  const debugFiles = await readdir(join(workspace, '.sciforge', 'debug', 'agentserver'));
   assert.ok(debugFiles.length >= 2);
-  const timeoutDebug = await Promise.all(debugFiles.map((file) => readFile(join(workspace, '.bioagent', 'debug', 'agentserver', file), 'utf8')));
+  const timeoutDebug = await Promise.all(debugFiles.map((file) => readFile(join(workspace, '.sciforge', 'debug', 'agentserver', file), 'utf8')));
   assert.ok(timeoutDebug.some((text) => /"responseStatus": 0/.test(text)));
   console.log('[ok] AgentServer timeout/cancel diagnostics become repair-needed and retry resumes with priorAttempts');
 } finally {
   if (previousTimeout === undefined) {
-    delete process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS;
+    delete process.env.SCIFORGE_AGENTSERVER_GENERATION_TIMEOUT_MS;
   } else {
-    process.env.BIOAGENT_AGENTSERVER_GENERATION_TIMEOUT_MS = previousTimeout;
+    process.env.SCIFORGE_AGENTSERVER_GENERATION_TIMEOUT_MS = previousTimeout;
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

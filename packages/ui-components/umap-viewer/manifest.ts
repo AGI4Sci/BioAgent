@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/umap-viewer',
+  packageName: '@sciforge-ui/umap-viewer',
   moduleId: 'omics-umap-viewer',
   version: '1.0.0',
   title: 'UMAP viewer',

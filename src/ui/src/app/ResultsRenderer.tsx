@@ -19,12 +19,12 @@ import type { VolcanoPoint } from '../charts';
 import { HeatmapViewer, MoleculeViewer, NetworkGraph, UmapViewer } from '../visualizations';
 import { exportJsonFile, exportTextFile } from './exportUtils';
 import { ActionButton, Badge, Card, ChartLoadingFallback, ClaimTag, ConfidenceBar, EmptyArtifactState, EvidenceTag, SectionHeader, TabBar, cx } from './uiPrimitives';
-import type { BioAgentConfig, BioAgentReference, BioAgentRun, BioAgentSession, DisplayIntent, EvidenceClaim, NotebookRecord, ObjectAction, ObjectReference, PreviewDescriptor, ResolvedViewPlan, RuntimeArtifact, RuntimeExecutionUnit, ScenarioInstanceId, UIManifestSlot, ViewPlanSection } from '../domain';
+import type { SciForgeConfig, SciForgeReference, SciForgeRun, SciForgeSession, DisplayIntent, EvidenceClaim, NotebookRecord, ObjectAction, ObjectReference, PreviewDescriptor, ResolvedViewPlan, RuntimeArtifact, RuntimeExecutionUnit, ScenarioInstanceId, UIManifestSlot, ViewPlanSection } from '../domain';
 import {
   artifactForObjectReference,
   artifactReferenceKind as packageArtifactReferenceKind,
   availableObjectActions,
-  bioAgentReferenceAttribute,
+  sciForgeReferenceAttribute,
   findArtifact,
   objectReferenceKindLabel,
   pathForObjectReference,
@@ -68,7 +68,7 @@ function artifactSource(artifact?: RuntimeArtifact): 'project-tool' | 'record-on
   const mode = asString(artifact.metadata?.mode);
   const runner = asString(artifact.metadata?.runner);
   if (mode?.includes('record')) return 'record-only';
-  if (runner?.includes('local-csv') || artifact.dataRef?.includes('.bioagent/omics/')) return 'project-tool';
+  if (runner?.includes('local-csv') || artifact.dataRef?.includes('.sciforge/omics/')) return 'project-tool';
   return 'project-tool';
 }
 
@@ -78,7 +78,7 @@ function sourceVariant(source: ReturnType<typeof artifactSource>): 'success' | '
   return 'muted';
 }
 
-function executionUnitForArtifact(session: BioAgentSession, artifact?: RuntimeArtifact): RuntimeExecutionUnit | undefined {
+function executionUnitForArtifact(session: SciForgeSession, artifact?: RuntimeArtifact): RuntimeExecutionUnit | undefined {
   if (!artifact) return undefined;
   return session.executionUnits.find((unit) => {
     const refs = [...(unit.artifacts ?? []), ...(unit.outputArtifacts ?? [])];
@@ -193,7 +193,7 @@ function compactParams(params: string) {
   return params.length > 128 ? `${params.slice(0, 125)}...` : params;
 }
 
-function exportExecutionBundle(session: BioAgentSession) {
+function exportExecutionBundle(session: SciForgeSession) {
   const decision = evaluateExecutionBundleExport(session);
   if (!decision.allowed) {
     window.alert(`导出被 artifact policy 阻止：${decision.blockedArtifactIds.join(', ')}`);
@@ -215,7 +215,7 @@ function ResultPaneWorkspaceFileEditor({
   onClose,
 }: {
   state: { file: WorkspaceFileContent; draft: string };
-  config: BioAgentConfig;
+  config: SciForgeConfig;
   onChange: (next: { file: WorkspaceFileContent; draft: string }) => void;
   onClose: () => void;
 }) {
@@ -311,8 +311,8 @@ export function ResultsRenderer({
   onWorkspaceFileEditorChange,
 }: {
   scenarioId: ScenarioId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
+  config: SciForgeConfig;
+  session: SciForgeSession;
   defaultSlots: UIManifestSlot[];
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
   collapsed: boolean;
@@ -511,8 +511,8 @@ export function ResultsRenderer({
 
 type RegistryRendererProps = {
   scenarioId: ScenarioId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
+  config: SciForgeConfig;
+  session: SciForgeSession;
   slot: UIManifestSlot;
   artifact?: RuntimeArtifact;
 };
@@ -563,9 +563,9 @@ function resolveViewPlan({
   pinnedObjectReferences = [],
 }: {
   scenarioId: ScenarioId;
-  session: BioAgentSession;
+  session: SciForgeSession;
   defaultSlots?: UIManifestSlot[];
-  activeRun?: BioAgentRun;
+  activeRun?: SciForgeRun;
   focusedObjectReference?: ObjectReference;
   pinnedObjectReferences?: ObjectReference[];
 }): RuntimeResolvedViewPlan {
@@ -700,7 +700,7 @@ function resolveViewPlan({
   };
 }
 
-function extractDisplayIntent(activeRun?: BioAgentRun): DisplayIntent | undefined {
+function extractDisplayIntent(activeRun?: SciForgeRun): DisplayIntent | undefined {
   const candidates = [
     activeRun?.raw,
     isRecord(activeRun?.raw) ? activeRun?.raw.displayIntent : undefined,
@@ -722,7 +722,7 @@ function extractDisplayIntent(activeRun?: BioAgentRun): DisplayIntent | undefine
   return undefined;
 }
 
-function inferDisplayIntentFromArtifacts(session: BioAgentSession, activeRun?: BioAgentRun): DisplayIntent {
+function inferDisplayIntentFromArtifacts(session: SciForgeSession, activeRun?: SciForgeRun): DisplayIntent {
   const artifactTypes = Array.from(new Set(session.artifacts.map((artifact) => artifact.type)));
   const text = `${activeRun?.prompt ?? ''}\n${activeRun?.response ?? ''}`.toLowerCase();
   const requiredArtifactTypes = prioritizeArtifactTypes(artifactTypes, text);
@@ -868,7 +868,7 @@ function isPrimaryResultModule(module: RuntimeUIModule) {
   return ['report-viewer', 'molecule-viewer', 'volcano-plot', 'heatmap-viewer', 'umap-viewer', 'network-graph'].includes(module.componentId);
 }
 
-function compactViewPlanItems(items: ResolvedViewPlanItem[], session: BioAgentSession) {
+function compactViewPlanItems(items: ResolvedViewPlanItem[], session: SciForgeSession) {
   const strongestByArtifact = new Map<string, ResolvedViewPlanItem>();
   const strongestByPresentationIdentity = new Map<string, ResolvedViewPlanItem>();
   for (const item of items) {
@@ -1084,9 +1084,9 @@ function sectionRank(section: ViewPlanSection) {
 
 function blockedDesignForIntent(
   displayIntent: DisplayIntent,
-  session: BioAgentSession,
+  session: SciForgeSession,
   items: ResolvedViewPlanItem[],
-  activeRun?: BioAgentRun,
+  activeRun?: SciForgeRun,
 ) {
   const requiredTypes = displayIntent.requiredArtifactTypes ?? [];
   const unsupportedType = requiredTypes.find((artifactType) => {
@@ -1570,7 +1570,7 @@ function isGeneratedReportShell(markdown: string) {
   return /^# Markdown report\b/i.test(markdown) && /workspace ref|workspace 引用|artifact 没有内联 markdown/i.test(markdown);
 }
 
-function relatedArtifactsForReport(session: BioAgentSession, artifact?: RuntimeArtifact) {
+function relatedArtifactsForReport(session: SciForgeSession, artifact?: RuntimeArtifact) {
   const runId = asString(artifact?.metadata?.runId) || asString(artifact?.metadata?.agentServerRunId) || asString(artifact?.metadata?.producerRunId);
   const candidates = session.artifacts.filter((item) => item.id !== artifact?.id);
   const sameRun = runId
@@ -1762,7 +1762,7 @@ function reportRefFromArtifact(artifact?: RuntimeArtifact) {
 
 function reportRefFromText(text?: string) {
   if (!text) return undefined;
-  return text.match(/(?:^|["'`\s(:：])((?:\.bioagent|workspace\/\.bioagent|\/[^"'`\s]+)[^"'`\s]*\.md)(?:$|["'`\s),，。])/i)?.[1]
+  return text.match(/(?:^|["'`\s(:：])((?:\.sciforge|workspace\/\.sciforge|\/[^"'`\s]+)[^"'`\s]*\.md)(?:$|["'`\s),，。])/i)?.[1]
     || text.match(/([\w./-]*report[\w./-]*\.md)/i)?.[1];
 }
 
@@ -1951,11 +1951,11 @@ function canvasArtifactType(kind: 'volcano' | 'heatmap' | 'umap' | 'network') {
   return kind === 'network' ? 'knowledge-graph' : 'omics-differential-expression';
 }
 
-function referenceForResultSlot(item: ResolvedViewPlanItem): BioAgentReference {
+function referenceForResultSlot(item: ResolvedViewPlanItem): SciForgeReference {
   return referenceForResultSlotLike(item);
 }
 
-function artifactReferenceKind(artifact: RuntimeArtifact, componentId = ''): BioAgentReference['kind'] {
+function artifactReferenceKind(artifact: RuntimeArtifact, componentId = ''): SciForgeReference['kind'] {
   return packageArtifactReferenceKind(artifact, componentId, rowCountForReference(artifact.data));
 }
 
@@ -1966,7 +1966,7 @@ function rowCountForReference(data: unknown) {
   return rows?.length;
 }
 
-function ArtifactSourceBar({ artifact, session }: { artifact?: RuntimeArtifact; session?: BioAgentSession }) {
+function ArtifactSourceBar({ artifact, session }: { artifact?: RuntimeArtifact; session?: SciForgeSession }) {
   const source = artifactSource(artifact);
   const unit = session ? executionUnitForArtifact(session, artifact) : undefined;
   if (!artifact) {
@@ -1978,7 +1978,7 @@ function ArtifactSourceBar({ artifact, session }: { artifact?: RuntimeArtifact; 
     );
   }
   return (
-    <div className="artifact-source-bar" data-bioagent-reference={bioAgentReferenceAttribute(referenceForArtifact(artifact, artifactReferenceKind(artifact)))}>
+    <div className="artifact-source-bar" data-sciforge-reference={sciForgeReferenceAttribute(referenceForArtifact(artifact, artifactReferenceKind(artifact)))}>
       <Badge variant={sourceVariant(source)}>{source}</Badge>
       <code>{artifact.id}</code>
       <code>{artifact.type}</code>
@@ -1997,7 +1997,7 @@ function packageRendererProps(props: RegistryRendererProps): UIComponentRenderer
     session: props.session,
     config: props.config,
     helpers: {
-      ArtifactSourceBar: ({ artifact, session }) => <ArtifactSourceBar artifact={artifact as RuntimeArtifact | undefined} session={session as BioAgentSession | undefined} />,
+      ArtifactSourceBar: ({ artifact, session }) => <ArtifactSourceBar artifact={artifact as RuntimeArtifact | undefined} session={session as SciForgeSession | undefined} />,
       ArtifactDownloads: ({ artifact }) => <ArtifactDownloads artifact={artifact as RuntimeArtifact | undefined} />,
       ComponentEmptyState,
       MarkdownBlock,
@@ -2040,9 +2040,9 @@ function PrimaryResult({
   onInspectArtifact,
 }: {
   scenarioId: ScenarioId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
-  activeRun?: BioAgentRun;
+  config: SciForgeConfig;
+  session: SciForgeSession;
+  activeRun?: SciForgeRun;
   viewPlan: RuntimeResolvedViewPlan;
   focusMode: ResultFocusMode;
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
@@ -2120,7 +2120,7 @@ function PrimaryResult({
   );
 }
 
-function RunStatusSummary({ session, activeRun }: { session: BioAgentSession; activeRun?: BioAgentRun }) {
+function RunStatusSummary({ session, activeRun }: { session: SciForgeSession; activeRun?: SciForgeRun }) {
   const failures = failedExecutionUnits(session, activeRun);
   const run = activeRun ?? session.runs.at(-1);
   const blockers = runAuditBlockers(session, activeRun);
@@ -2164,8 +2164,8 @@ function RunAuditDetails({
   defaultOpen,
 }: {
   scenarioId: ScenarioId;
-  session: BioAgentSession;
-  activeRun?: BioAgentRun;
+  session: SciForgeSession;
+  activeRun?: SciForgeRun;
   viewPlan: RuntimeResolvedViewPlan;
   defaultOpen?: boolean;
 }) {
@@ -2197,7 +2197,7 @@ function RunAuditDetails({
   );
 }
 
-function RunAuditOverview({ session, activeRun }: { session: BioAgentSession; activeRun?: BioAgentRun }) {
+function RunAuditOverview({ session, activeRun }: { session: SciForgeSession; activeRun?: SciForgeRun }) {
   const blockers = runAuditBlockers(session, activeRun);
   const refs = runAuditRefs(session, activeRun);
   const recoverActions = runRecoverActions(session, activeRun);
@@ -2223,11 +2223,11 @@ function RunAuditOverview({ session, activeRun }: { session: BioAgentSession; ac
   );
 }
 
-export function shouldOpenRunAuditDetails(session: BioAgentSession, activeRun?: BioAgentRun) {
+export function shouldOpenRunAuditDetails(session: SciForgeSession, activeRun?: SciForgeRun) {
   return Boolean((activeRun ?? session.runs.at(-1))?.status === 'failed' || failedExecutionUnits(session, activeRun).length);
 }
 
-function failedExecutionUnits(session: BioAgentSession, activeRun?: BioAgentRun) {
+function failedExecutionUnits(session: SciForgeSession, activeRun?: SciForgeRun) {
   const runRefs = new Set([activeRun?.id].filter((id): id is string => Boolean(id)));
   return session.executionUnits.filter((unit) => {
     const failed = unit.status === 'failed' || unit.status === 'failed-with-reason' || unit.status === 'repair-needed' || Boolean(unit.failureReason);
@@ -2237,7 +2237,7 @@ function failedExecutionUnits(session: BioAgentSession, activeRun?: BioAgentRun)
   });
 }
 
-function runAuditBlockers(session: BioAgentSession, activeRun?: BioAgentRun) {
+function runAuditBlockers(session: SciForgeSession, activeRun?: SciForgeRun) {
   const run = activeRun ?? session.runs.at(-1);
   const raw = isRecord(run?.raw) ? run?.raw : undefined;
   const lines = [
@@ -2249,7 +2249,7 @@ function runAuditBlockers(session: BioAgentSession, activeRun?: BioAgentRun) {
   return Array.from(new Set(lines));
 }
 
-function runRecoverActions(session: BioAgentSession, activeRun?: BioAgentRun) {
+function runRecoverActions(session: SciForgeSession, activeRun?: SciForgeRun) {
   const run = activeRun ?? session.runs.at(-1);
   const raw = isRecord(run?.raw) ? run?.raw : undefined;
   return Array.from(new Set([
@@ -2259,7 +2259,7 @@ function runRecoverActions(session: BioAgentSession, activeRun?: BioAgentRun) {
   ]));
 }
 
-function runAuditRefs(session: BioAgentSession, activeRun?: BioAgentRun) {
+function runAuditRefs(session: SciForgeSession, activeRun?: SciForgeRun) {
   const run = activeRun ?? session.runs.at(-1);
   const raw = isRecord(run?.raw) ? run?.raw : undefined;
   return Array.from(new Set([
@@ -2270,7 +2270,7 @@ function runAuditRefs(session: BioAgentSession, activeRun?: BioAgentRun) {
   ]));
 }
 
-function rawAuditItems(session: BioAgentSession, activeRun: BioAgentRun | undefined, viewPlan: RuntimeResolvedViewPlan) {
+function rawAuditItems(session: SciForgeSession, activeRun: SciForgeRun | undefined, viewPlan: RuntimeResolvedViewPlan) {
   const run = activeRun ?? session.runs.at(-1);
   return [
     run ? { id: `run-${run.id}`, label: `run ${run.id}`, value: JSON.stringify(run.raw ?? run, null, 2) } : undefined,
@@ -2360,8 +2360,8 @@ function WorkspaceObjectPreview({
   config,
 }: {
   reference: ObjectReference;
-  session: BioAgentSession;
-  config: BioAgentConfig;
+  session: SciForgeSession;
+  config: SciForgeConfig;
 }) {
   const artifact = artifactForObjectReference(reference, session);
   const inlinePreview = useMemo(() => uploadedArtifactPreview(artifact), [artifact]);
@@ -2443,7 +2443,7 @@ function WorkspaceObjectPreview({
   if (inlinePreview) {
     const previewReference = referenceForObjectReference(reference, inlinePreview.kind === 'pdf' || inlinePreview.kind === 'image' ? 'file-region' : 'file');
     return (
-      <div className="workspace-object-preview" data-bioagent-reference={bioAgentReferenceAttribute(previewReference)}>
+      <div className="workspace-object-preview" data-sciforge-reference={sciForgeReferenceAttribute(previewReference)}>
         <div className="workspace-object-preview-head">
           <Badge variant="info">{inlinePreview.kind}</Badge>
           <strong>{inlinePreview.title}</strong>
@@ -2484,7 +2484,7 @@ function WorkspaceObjectPreview({
   }
   if (descriptor) {
     return (
-      <div className="workspace-object-preview" data-bioagent-reference={bioAgentReferenceAttribute(referenceForObjectReference(reference, descriptor.kind === 'pdf' || descriptor.kind === 'image' ? 'file-region' : 'file'))}>
+      <div className="workspace-object-preview" data-sciforge-reference={sciForgeReferenceAttribute(referenceForObjectReference(reference, descriptor.kind === 'pdf' || descriptor.kind === 'image' ? 'file-region' : 'file'))}>
         <div className="workspace-object-preview-head">
           <Badge variant="info">{descriptor.kind}</Badge>
           <strong>{descriptor.title || descriptor.ref}</strong>
@@ -2496,7 +2496,7 @@ function WorkspaceObjectPreview({
   }
   if (!file) return null;
   return (
-    <div className="workspace-object-preview" data-bioagent-reference={bioAgentReferenceAttribute(referenceForObjectReference(reference, fileKindForPath(file.path, file.language) === 'pdf' ? 'file-region' : 'file'))}>
+    <div className="workspace-object-preview" data-sciforge-reference={sciForgeReferenceAttribute(referenceForObjectReference(reference, fileKindForPath(file.path, file.language) === 'pdf' ? 'file-region' : 'file'))}>
       <div className="workspace-object-preview-head">
         <Badge variant="info">{file.language || fileKindForPath(file.path)}</Badge>
         <strong>{file.path}</strong>
@@ -2546,7 +2546,7 @@ function uniqueStrings<T extends string>(values: T[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-function DescriptorPreview({ descriptor, reference }: { descriptor: PreviewDescriptor; reference: BioAgentReference }) {
+function DescriptorPreview({ descriptor, reference }: { descriptor: PreviewDescriptor; reference: SciForgeReference }) {
   if ((descriptor.kind === 'pdf' || descriptor.kind === 'image') && descriptor.rawUrl) {
     return (
       <UploadedDataUrlPreview
@@ -2574,7 +2574,7 @@ function DescriptorPreview({ descriptor, reference }: { descriptor: PreviewDescr
   );
 }
 
-function PreviewDescriptorActions({ descriptor, reference }: { descriptor: PreviewDescriptor; reference: BioAgentReference }) {
+function PreviewDescriptorActions({ descriptor, reference }: { descriptor: PreviewDescriptor; reference: SciForgeReference }) {
   return (
     <>
       <div className="source-list">
@@ -2647,7 +2647,7 @@ function WorkspaceFileInlineViewer({ file }: { file: WorkspaceFileContent }) {
   if (kind === 'document' || kind === 'spreadsheet' || kind === 'presentation') {
     return (
       <div className="workspace-object-media-note">
-        <p>{officePreviewLabel(kind)} 已作为可点击文件引用聚焦。浏览器内联预览暂不展开此类二进制文件，可用“系统打开”查看完整内容，或继续把它作为上下文引用给 BioAgent。</p>
+        <p>{officePreviewLabel(kind)} 已作为可点击文件引用聚焦。浏览器内联预览暂不展开此类二进制文件，可用“系统打开”查看完整内容，或继续把它作为上下文引用给 SciForge。</p>
         <div className="source-list">
           <code>{file.path}</code>
           <code>{file.mimeType || 'application/octet-stream'}</code>
@@ -2763,7 +2763,7 @@ function UploadedDataUrlPreview({
   dataUrl: string;
   title: string;
   mimeType?: string;
-  reference?: BioAgentReference;
+  reference?: SciForgeReference;
 }) {
   const [objectUrl, setObjectUrl] = useState('');
   const [regionPick, setRegionPick] = useState<RegionPickState | null>(null);
@@ -2798,7 +2798,7 @@ function UploadedDataUrlPreview({
 
   if (kind === 'image') {
     return (
-      <div className="workspace-object-image-frame" data-bioagent-reference={bioAgentReferenceAttribute(reference)}>
+      <div className="workspace-object-image-frame" data-sciforge-reference={sciForgeReferenceAttribute(reference)}>
         <img src={dataUrl} alt={title} />
         {regionLayer}
         <PreviewReferenceHint reference={reference} label="点选图片或拖选区域作为图像上下文" onPickRegion={reference ? beginRegionPick : undefined} />
@@ -2806,7 +2806,7 @@ function UploadedDataUrlPreview({
     );
   }
   return (
-    <div className="workspace-object-pdf-shell" data-bioagent-reference={bioAgentReferenceAttribute(reference)}>
+    <div className="workspace-object-pdf-shell" data-sciforge-reference={sciForgeReferenceAttribute(reference)}>
       <object className="workspace-object-pdf-frame" data={objectUrl || dataUrl} type={mimeType || 'application/pdf'} aria-label={title}>
         <iframe className="workspace-object-pdf-frame" title={title} src={objectUrl || dataUrl} />
       </object>
@@ -2874,7 +2874,7 @@ function PreviewReferenceHint({
   label,
   onPickRegion,
 }: {
-  reference?: BioAgentReference;
+  reference?: SciForgeReference;
   label: string;
   onPickRegion?: () => void;
 }) {
@@ -2903,7 +2903,7 @@ function clamp01(value: number) {
   return Math.min(1, Math.max(0, value));
 }
 
-function referenceForWorkspaceFile(file: WorkspaceFileContent, kind: BioAgentReference['kind'] = 'file'): BioAgentReference {
+function referenceForWorkspaceFile(file: WorkspaceFileContent, kind: SciForgeReference['kind'] = 'file'): SciForgeReference {
   return referenceForWorkspaceFileLike(file, kind);
 }
 
@@ -3200,8 +3200,8 @@ function ResultItemsSection({
   title: string;
   items: ResolvedViewPlanItem[];
   scenarioId: ScenarioId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
+  config: SciForgeConfig;
+  session: SciForgeSession;
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
   onInspectArtifact: (artifact: RuntimeArtifact) => void;
 }) {
@@ -3267,8 +3267,8 @@ function RegistrySlot({
   onInspectArtifact,
 }: {
   scenarioId: ScenarioId;
-  config: BioAgentConfig;
-  session: BioAgentSession;
+  config: SciForgeConfig;
+  session: SciForgeSession;
   item: ResolvedViewPlanItem;
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
   onInspectArtifact: (artifact: RuntimeArtifact) => void;
@@ -3282,7 +3282,7 @@ function RegistrySlot({
     return (
       <Card
         className="registry-slot"
-        data-bioagent-reference={bioAgentReferenceAttribute(artifact ? referenceForArtifact(artifact, artifactReferenceKind(artifact)) : referenceForResultSlot(item))}
+        data-sciforge-reference={sciForgeReferenceAttribute(artifact ? referenceForArtifact(artifact, artifactReferenceKind(artifact)) : referenceForResultSlot(item))}
       >
         <SectionHeader icon={AlertTriangle} title={slot.title ?? '未注册组件'} subtitle={slot.componentId} />
         <p className="empty-state">Scenario 返回了未知 componentId。当前使用通用 inspector 展示 artifact、manifest 和日志引用。</p>
@@ -3294,7 +3294,7 @@ function RegistrySlot({
   return (
     <Card
       className={cx('registry-slot', item.section === 'primary' && 'primary-slot')}
-      data-bioagent-reference={bioAgentReferenceAttribute(artifact ? referenceForArtifact(artifact, artifactReferenceKind(artifact, slot.componentId)) : referenceForResultSlot(item))}
+      data-sciforge-reference={sciForgeReferenceAttribute(artifact ? referenceForArtifact(artifact, artifactReferenceKind(artifact, slot.componentId)) : referenceForResultSlot(item))}
     >
       <SectionHeader icon={Target} title={slot.title ?? entry.label} subtitle={resultSlotSubtitle(item, artifact)} />
       {artifact ? (
@@ -3393,7 +3393,7 @@ function ArtifactInspectorDrawer({
   onArtifactHandoff,
 }: {
   scenarioId: ScenarioId;
-  session: BioAgentSession;
+  session: SciForgeSession;
   artifact: RuntimeArtifact;
   onClose: () => void;
   onArtifactHandoff: (targetScenario: ScenarioId, artifact: RuntimeArtifact) => void;
@@ -3573,7 +3573,7 @@ function EvidenceMatrix({ claims, artifacts = [] }: { claims: EvidenceClaim[]; a
                   {previewKind === 'pdf' && dataUrl ? (
                     <UploadedDataUrlPreview kind="pdf" dataUrl={dataUrl} title={title} mimeType={mimeType} />
                   ) : null}
-                  {previewKind !== 'image' && previewKind !== 'pdf' ? <p className="empty-state">此文件类型已加入证据矩阵，可在对话栏引用给 BioAgent 使用。</p> : null}
+                  {previewKind !== 'image' && previewKind !== 'pdf' ? <p className="empty-state">此文件类型已加入证据矩阵，可在对话栏引用给 SciForge 使用。</p> : null}
                   <div className="source-list">
                     <code>artifact:{artifact.id}</code>
                     {artifact.dataRef ? <code>{artifact.dataRef}</code> : null}
@@ -3622,7 +3622,7 @@ function ExecutionPanel({
   executionUnits,
   embedded = false,
 }: {
-  session: BioAgentSession;
+  session: SciForgeSession;
   executionUnits: RuntimeExecutionUnit[];
   embedded?: boolean;
 }) {

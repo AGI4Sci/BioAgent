@@ -1,1 +1,1 @@
-export { BioAgentApp } from './app/BioAgentApp';
+export { SciForgeApp } from './app/SciForgeApp';

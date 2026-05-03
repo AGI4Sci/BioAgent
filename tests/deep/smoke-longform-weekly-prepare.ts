@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { prepareLongformWeeklyRegression } from '../../tools/longform-regression';
 import { validateDeepRunManifest, type DeepRunManifest } from '../../tools/deep-test-manifest';
 
-const outRoot = await mkdtemp(join(tmpdir(), 'bioagent-longform-weekly-prepare-'));
+const outRoot = await mkdtemp(join(tmpdir(), 'sciforge-longform-weekly-prepare-'));
 const prepared = await prepareLongformWeeklyRegression({
   manifests: [],
   outRoot,
@@ -13,7 +13,7 @@ const prepared = await prepareLongformWeeklyRegression({
   now: new Date('2026-05-02T10:00:00.000Z'),
   weeklyRequiredPassedRealRuns: 2,
   appUrl: 'http://localhost:5173/',
-  workspacePath: '/tmp/bioagent-longform-workspace',
+  workspacePath: '/tmp/sciforge-longform-workspace',
   backend: 'codex',
   modelName: 'fixture-model',
   operator: 'Codex smoke',
@@ -30,7 +30,7 @@ for (const item of prepared.prepared) {
   const manifest = JSON.parse(await readFile(item.manifestPath, 'utf8')) as DeepRunManifest;
   assert.deepEqual(validateDeepRunManifest(manifest), []);
   assert.equal(manifest.run.id, `weekly-fixture-${item.scenarioId}`);
-  assert.equal(manifest.runtimeProfile.workspacePath, '/tmp/bioagent-longform-workspace');
+  assert.equal(manifest.runtimeProfile.workspacePath, '/tmp/sciforge-longform-workspace');
 }
 
 const pendingSkip = await prepareLongformWeeklyRegression({

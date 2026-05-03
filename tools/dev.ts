@@ -3,14 +3,14 @@ import { connect } from 'node:net';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const WORKSPACE_PORT = Number(process.env.BIOAGENT_WORKSPACE_PORT || 5174);
-const UI_PORT = Number(process.env.BIOAGENT_UI_PORT || 5173);
-const AGENT_SERVER_PORT = Number(process.env.BIOAGENT_AGENT_SERVER_PORT || 18080);
-const AGENT_SERVER_ROOT = resolve(process.env.BIOAGENT_AGENT_SERVER_ROOT || '../AgentServer');
+const WORKSPACE_PORT = Number(process.env.SCIFORGE_WORKSPACE_PORT || 5174);
+const UI_PORT = Number(process.env.SCIFORGE_UI_PORT || 5173);
+const AGENT_SERVER_PORT = Number(process.env.SCIFORGE_AGENT_SERVER_PORT || 18080);
+const AGENT_SERVER_ROOT = resolve(process.env.SCIFORGE_AGENT_SERVER_ROOT || '../AgentServer');
 const children: ChildProcess[] = [];
 let shuttingDown = false;
 
-if (process.env.BIOAGENT_AGENT_SERVER_AUTOSTART !== '0') {
+if (process.env.SCIFORGE_AGENT_SERVER_AUTOSTART !== '0') {
   if (await isListening(AGENT_SERVER_PORT)) {
     console.log(`AgentServer already running: http://127.0.0.1:${AGENT_SERVER_PORT}`);
   } else if (existsSync(AGENT_SERVER_ROOT)) {
@@ -21,7 +21,7 @@ if (process.env.BIOAGENT_AGENT_SERVER_AUTOSTART !== '0') {
       ...agentServerModelEnvFromLocalConfig(),
     }, { restartOnFailure: true }));
   } else {
-    console.warn(`AgentServer root not found at ${AGENT_SERVER_ROOT}; set BIOAGENT_AGENT_SERVER_ROOT or BIOAGENT_AGENT_SERVER_AUTOSTART=0.`);
+    console.warn(`AgentServer root not found at ${AGENT_SERVER_ROOT}; set SCIFORGE_AGENT_SERVER_ROOT or SCIFORGE_AGENT_SERVER_AUTOSTART=0.`);
   }
 }
 
@@ -51,13 +51,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 if (await isListening(WORKSPACE_PORT)) {
-  console.log(`BioAgent workspace writer already running: http://127.0.0.1:${WORKSPACE_PORT}`);
+  console.log(`SciForge workspace writer already running: http://127.0.0.1:${WORKSPACE_PORT}`);
 } else {
   children.push(start('workspace', ['run', 'workspace:server']));
 }
 
 if (await isListening(UI_PORT)) {
-  console.log(`BioAgent UI already running: http://127.0.0.1:${UI_PORT}`);
+  console.log(`SciForge UI already running: http://127.0.0.1:${UI_PORT}`);
 } else {
   children.push(start('ui', ['run', 'dev:ui']));
 }

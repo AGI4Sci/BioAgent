@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/volcano-plot',
+  packageName: '@sciforge-ui/volcano-plot',
   moduleId: 'omics-volcano-plot',
   version: '1.0.0',
   title: 'Volcano plot',

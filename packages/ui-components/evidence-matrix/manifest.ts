@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/evidence-matrix',
+  packageName: '@sciforge-ui/evidence-matrix',
   moduleId: 'evidence-matrix-panel',
   version: '1.0.0',
   title: 'Evidence matrix panel',

@@ -74,7 +74,7 @@ export function safeWorkspaceRel(path: string) {
 
 export function generatedTaskArchiveRel(taskId: string, path: string) {
   const rel = safeWorkspaceRel(path);
-  const archivePrefix = '.bioagent/tasks/';
+  const archivePrefix = '.sciforge/tasks/';
   const withoutArchivePrefix = rel.startsWith(archivePrefix) ? rel.slice(archivePrefix.length) : rel;
   const withoutTaskPrefix = withoutArchivePrefix.startsWith(`${taskId}/`)
     ? withoutArchivePrefix.slice(taskId.length + 1)
@@ -84,7 +84,7 @@ export function generatedTaskArchiveRel(taskId: string, path: string) {
 }
 
 export function isTaskInputRel(path: string) {
-  return safeWorkspaceRel(path).startsWith('.bioagent/task-inputs/');
+  return safeWorkspaceRel(path).startsWith('.sciforge/task-inputs/');
 }
 
 export function uniqueStrings(values: string[]) {

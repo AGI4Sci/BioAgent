@@ -33,7 +33,7 @@ const forbiddenPackageReferences = [
 ];
 
 for (const manifest of manifests) {
-  assert.ok(manifest.packageName.startsWith('@bioagent-'), `${manifest.packageName} must use a BioAgent package scope`);
+  assert.ok(manifest.packageName.startsWith('@sciforge-'), `${manifest.packageName} must use a SciForge package scope`);
   assert.ok(manifest.version, `${manifest.packageName} must declare a version`);
   assert.ok(manifest.docs.readmePath, `${manifest.packageName} must point to README.md`);
   assert.ok(manifest.docs.agentSummary.trim(), `${manifest.packageName} must expose docs.agentSummary`);
@@ -60,10 +60,10 @@ for (const manifest of manifests) {
 }
 
 const artifactPreviewPackageJson = JSON.parse(await readFile('packages/artifact-preview/package.json', 'utf8')) as { name?: string; private?: boolean };
-assert.equal(artifactPreviewPackageJson.name, '@bioagent-ui/artifact-preview', 'artifact-preview package name must be stable');
-assert.notEqual(artifactPreviewPackageJson.private, true, '@bioagent-ui/artifact-preview must be publishable');
-assert.ok(existsSync('packages/artifact-preview/README.md'), '@bioagent-ui/artifact-preview must have README.md');
-assert.ok(existsSync('packages/artifact-preview/index.ts'), '@bioagent-ui/artifact-preview must export runtime preview utilities');
+assert.equal(artifactPreviewPackageJson.name, '@sciforge-ui/artifact-preview', 'artifact-preview package name must be stable');
+assert.notEqual(artifactPreviewPackageJson.private, true, '@sciforge-ui/artifact-preview must be publishable');
+assert.ok(existsSync('packages/artifact-preview/README.md'), '@sciforge-ui/artifact-preview must have README.md');
+assert.ok(existsSync('packages/artifact-preview/index.ts'), '@sciforge-ui/artifact-preview must export runtime preview utilities');
 
 for (const file of await packageFiles('packages')) {
   const text = await readFile(file, 'utf8');

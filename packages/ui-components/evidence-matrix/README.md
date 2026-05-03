@@ -1,4 +1,4 @@
-# @bioagent-ui/evidence-matrix
+# @sciforge-ui/evidence-matrix
 
 ## Agent quick contract
 - componentId: `evidence-matrix`

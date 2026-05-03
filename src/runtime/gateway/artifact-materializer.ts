@@ -25,7 +25,7 @@ export async function persistArtifactRefsForPayload(
     const id = safeArtifactId(String(artifact.id || artifact.type || 'artifact'));
     const type = safeArtifactId(String(artifact.type || artifact.id || 'artifact'));
     const artifactHash = sha1(JSON.stringify(clipForAgentServerJson(artifact, 4))).slice(0, 12);
-    const rel = `.bioagent/artifacts/${safeArtifactId(sessionId)}-${type}-${id}-${artifactHash}.json`;
+    const rel = `.sciforge/artifacts/${safeArtifactId(sessionId)}-${type}-${id}-${artifactHash}.json`;
     const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
     const record = {
       ...artifact,

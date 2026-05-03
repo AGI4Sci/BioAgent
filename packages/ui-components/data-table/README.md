@@ -1,4 +1,4 @@
-# @bioagent-ui/data-table
+# @sciforge-ui/data-table
 
 ## Agent quick contract
 - componentId: `data-table`

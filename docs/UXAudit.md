@@ -1,4 +1,4 @@
-# BioAgent UX Audit
+# SciForge UX Audit
 
 Last updated: 2026-04-25
 
@@ -6,7 +6,7 @@ Last updated: 2026-04-25
 
 This audit captures the product hardening pass for the scalable Scenario Package model. The target user path is:
 
-1. Open BioAgent for the first time.
+1. Open SciForge for the first time.
 2. Import an official or local package.
 3. Compile a new scenario from a natural-language description.
 4. Open the generated workbench.
@@ -55,7 +55,7 @@ This audit captures the product hardening pass for the scalable Scenario Package
 - Expected: settings opens reliably, connection diagnostics are visible, workspace path is understandable, file actions report outcomes.
 - Current coverage: Settings dialog with Runtime Health and reload/recheck action; workspace sidebar opens and lists workspace entries; file actions keep inline status.
 - Verified by: browser smoke Settings and Workspace assertions.
-- Remaining risks: workspace tree needs a dedicated `.bioagent` grouping for tasks/logs/results/scenarios/exports and safer onboarding when a path is missing.
+- Remaining risks: workspace tree needs a dedicated `.sciforge` grouping for tasks/logs/results/scenarios/exports and safer onboarding when a path is missing.
 
 ### Timeline
 

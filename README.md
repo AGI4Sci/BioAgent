@@ -1,6 +1,6 @@
-# BioAgent
+# SciForge
 
-BioAgent is a scenario-first AI4Science workbench for life-science research.
+SciForge is a scenario-first AI4Science workbench for life-science research.
 
 The product shape is no longer "one page per agent". A user enters a research scenario, or starts from a built-in Scenario preset, and works in one chat-driven workspace. The scenario contract decides:
 
@@ -13,7 +13,7 @@ The product shape is no longer "one page per agent". A user enters a research sc
 The UI renders structured runtime artifacts through a component registry. The LLM may choose components and View Composition parameters through JSON, but it does not generate arbitrary UI code.
 Workspace-generated tasks and evolved skills also pass through the same UIManifest composition layer: task-requested components and user-edited Scenario settings can reorder or replace the default slots before React renders the component registry.
 
-BioAgent separates extension capability into two families:
+SciForge separates extension capability into two families:
 
 - **Tools**: deterministic MCP tools, database connectors, workspace runners, and repair flows.
 - **Skills**: capability contracts, markdown task knowledge, and user-approved evolved workspace skills. Seed skills in `skills/seed` describe capabilities and artifact contracts; runtime task code is generated in the active workspace and can later be promoted with user approval.
@@ -27,7 +27,7 @@ BioAgent separates extension capability into two families:
 - `skills/installed/scp/`: installed SCP markdown skills copied from the SCP skill library
 - `docs/`: product and architecture documentation
 - `docs/templates/scenario.md`: template for proposing new scenario cases
-- `workspace/`: default ignored runtime workspace; BioAgent writes generated files to `workspace/.bioagent/`
+- `workspace/`: default ignored runtime workspace; SciForge writes generated files to `workspace/.sciforge/`
 
 ## Product Model
 
@@ -52,7 +52,7 @@ They live in `src/ui/src/scenarioSpecs.ts`. Each preset declares its `skillDomai
 
 ## Scenario Builder And Library
 
-BioAgent can now compile composable Scenario Packages. In the workbench, Scenario Builder lets a user select skills, tools, artifact schemas, UI components, and failure policies, then preview:
+SciForge can now compile composable Scenario Packages. In the workbench, Scenario Builder lets a user select skills, tools, artifact schemas, UI components, and failure policies, then preview:
 
 - `ScenarioIR`
 - `SkillPlan`
@@ -62,7 +62,7 @@ BioAgent can now compile composable Scenario Packages. In the workbench, Scenari
 Draft and published packages are written under:
 
 ```text
-<workspace>/.bioagent/scenarios/<scenario-id>/
+<workspace>/.sciforge/scenarios/<scenario-id>/
 ```
 
 The split package files are:
@@ -107,10 +107,10 @@ If you started the UI separately and need workspace-backed runs or persisted cha
 npm run workspace:server
 ```
 
-The selected workspace is configured in the Resource Explorer or Settings dialog. BioAgent writes structured state under:
+The selected workspace is configured in the Resource Explorer or Settings dialog. SciForge writes structured state under:
 
 ```text
-<workspace>/.bioagent/
+<workspace>/.sciforge/
 ```
 
 By default this repository now points at:
@@ -121,13 +121,13 @@ By default this repository now points at:
 
 ## Runtime
 
-The workbench first calls the BioAgent workspace runtime:
+The workbench first calls the SciForge workspace runtime:
 
 ```text
-POST http://127.0.0.1:5174/api/bioagent/tools/run
+POST http://127.0.0.1:5174/api/sciforge/tools/run
 ```
 
-Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain to match seed capability contracts, workspace/evolved skills, and installed Markdown skills. Seed and Markdown skills do not point to fixed source task scripts; BioAgent asks AgentServer to generate or repair workspace-local task code when execution is needed.
+Requests are scenario-first: the UI sends `scenarioId` plus the scenario's internal `skillDomain`. The runtime uses the skill domain to match seed capability contracts, workspace/evolved skills, and installed Markdown skills. Seed and Markdown skills do not point to fixed source task scripts; SciForge asks AgentServer to generate or repair workspace-local task code when execution is needed.
 
 If no validated local skill can satisfy the request, the runtime can ask AgentServer to generate or repair workspace-local task code:
 
@@ -141,7 +141,7 @@ The UI also uses AgentServer directly as a fallback for structured chat response
 POST http://127.0.0.1:18080/api/agent-server/runs/stream
 ```
 
-If neither workspace runtime nor AgentServer is available, BioAgent records the user message and shows a clear connection error. It does not synthesize chart-driving demo artifacts.
+If neither workspace runtime nor AgentServer is available, SciForge records the user message and shows a clear connection error. It does not synthesize chart-driving demo artifacts.
 
 ## Structured Output Contract
 
@@ -164,18 +164,18 @@ Scenario responses can include natural language plus structured JSON:
 
 Unknown components fall back to `UnknownArtifactInspector`; generated UI plugins remain disabled by default and must be sandboxed before use.
 
-For workspace-backed runs, BioAgent normalizes returned `uiManifest` with the current task prompt and editable Scenario settings. This keeps generated and evolved skills stable while still allowing a prompt such as "only show data table + evidence matrix + execution unit" or "UMAP colorBy cellCycle splitBy batch" to produce a different formatted JSON manifest from the same artifact.
+For workspace-backed runs, SciForge normalizes returned `uiManifest` with the current task prompt and editable Scenario settings. This keeps generated and evolved skills stable while still allowing a prompt such as "only show data table + evidence matrix + execution unit" or "UMAP colorBy cellCycle splitBy batch" to produce a different formatted JSON manifest from the same artifact.
 
 ## Workspace Records
 
 Chat state is stored in localStorage and mirrored to the workspace when the writer is available:
 
 ```text
-workspace/.bioagent/workspace-state.json
-workspace/.bioagent/sessions/*.json
-workspace/.bioagent/artifacts/*.json
-workspace/.bioagent/versions/*.json
-workspace/.bioagent/config.json
+workspace/.sciforge/workspace-state.json
+workspace/.sciforge/sessions/*.json
+workspace/.sciforge/artifacts/*.json
+workspace/.sciforge/versions/*.json
+workspace/.sciforge/config.json
 ```
 
 The state model stores sessions by Scenario, archived sessions, artifacts, ExecutionUnits, alignment contracts, timeline records, and collaboration/export policy fields.

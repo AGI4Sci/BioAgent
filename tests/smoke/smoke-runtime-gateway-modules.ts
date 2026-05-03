@@ -9,7 +9,7 @@ import { coerceAgentServerToolPayload, parseGenerationResponse } from '../../src
 import { repairNeededPayload } from '../../src/runtime/gateway/repair-policy.js';
 import type { SkillAvailability } from '../../src/runtime/runtime-types.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-gateway-modules-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-gateway-modules-'));
 try {
   await writeFile(join(workspace, 'report.md'), '## Summary\nGateway split smoke passed.\n', 'utf8');
   const request = normalizeGatewayRequest({
@@ -45,7 +45,7 @@ try {
   assert.ok(tree.some((entry) => entry.path === 'report.md'));
 
   const envelope = buildContextEnvelope(request, { workspace, workspaceTreeSummary: tree });
-  assert.equal(envelope.version, 'bioagent.context-envelope.v1');
+  assert.equal(envelope.version, 'sciforge.context-envelope.v1');
   assert.equal(envelope.mode, 'delta');
   assert.deepEqual(envelope.scenarioFacts.expectedArtifactTypes, ['research-report', 'paper-list']);
   assert.equal(envelope.sessionFacts.conversationLedger?.totalTurns, 20);
@@ -57,21 +57,21 @@ try {
     type: 'research-report',
     path: 'report.md',
   }], workspace, {
-    taskRel: '.bioagent/tasks/task.py',
-    outputRel: '.bioagent/task-results/task.json',
-    stdoutRel: '.bioagent/logs/task.stdout.log',
-    stderrRel: '.bioagent/logs/task.stderr.log',
+    taskRel: '.sciforge/tasks/task.py',
+    outputRel: '.sciforge/task-results/task.json',
+    stdoutRel: '.sciforge/logs/task.stdout.log',
+    stderrRel: '.sciforge/logs/task.stderr.log',
   });
   assert.equal((normalizedArtifacts[0].data as Record<string, unknown>).markdown, '## Summary\nGateway split smoke passed.\n');
 
   const persisted = await persistArtifactRefsForPayload(workspace, request, normalizedArtifacts, {
-    taskRel: '.bioagent/tasks/task.py',
-    outputRel: '.bioagent/task-results/task.json',
-    stdoutRel: '.bioagent/logs/task.stdout.log',
-    stderrRel: '.bioagent/logs/task.stderr.log',
+    taskRel: '.sciforge/tasks/task.py',
+    outputRel: '.sciforge/task-results/task.json',
+    stdoutRel: '.sciforge/logs/task.stdout.log',
+    stderrRel: '.sciforge/logs/task.stderr.log',
   });
   const artifactRef = String((persisted[0].metadata as Record<string, unknown>).artifactRef);
-  assert.match(artifactRef, /^\.bioagent\/artifacts\/session-gateway-research-report-research-report-/);
+  assert.match(artifactRef, /^\.sciforge\/artifacts\/session-gateway-research-report-research-report-/);
   assert.match(await readFile(join(workspace, artifactRef), 'utf8'), /Gateway split smoke passed/);
 
   const directPayload = coerceAgentServerToolPayload({
@@ -82,11 +82,11 @@ try {
   assert.equal(directPayload?.uiManifest[0].componentId, 'report-viewer');
 
   const generation = parseGenerationResponse({
-    taskFiles: [{ path: '.bioagent/tasks/task.py', content: 'print(1)' }],
-    entrypoint: 'python .bioagent/tasks/task.py --flag',
+    taskFiles: [{ path: '.sciforge/tasks/task.py', content: 'print(1)' }],
+    entrypoint: 'python .sciforge/tasks/task.py --flag',
     expectedArtifacts: [{ type: 'research-report' }],
   });
-  assert.equal(generation?.entrypoint.path, '.bioagent/tasks/task.py');
+  assert.equal(generation?.entrypoint.path, '.sciforge/tasks/task.py');
   assert.deepEqual(generation?.entrypoint.args, ['--flag']);
 
   const skill: SkillAvailability = {

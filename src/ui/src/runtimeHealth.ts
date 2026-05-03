@@ -1,4 +1,4 @@
-import type { BioAgentConfig } from './domain';
+import type { SciForgeConfig } from './domain';
 
 export type RuntimeHealthStatus = 'checking' | 'online' | 'offline' | 'optional' | 'not-configured';
 
@@ -10,7 +10,7 @@ export interface RuntimeHealthItem {
   recoverAction?: string;
 }
 
-export function modelHealth(config: BioAgentConfig): RuntimeHealthItem {
+export function modelHealth(config: SciForgeConfig): RuntimeHealthItem {
   const provider = config.modelProvider.trim() || 'native';
   if (provider === 'native') {
     const nativeModel = config.modelName.trim();

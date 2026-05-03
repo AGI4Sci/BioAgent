@@ -9,13 +9,13 @@ import type { GatewayRequest, SkillAvailability, ToolPayload } from '../../src/r
 import { buildBuiltInScenarioPackage } from '../../src/ui/src/scenarioCompiler/scenarioPackage';
 import { buildScenarioQualityReport } from '../../src/ui/src/scenarioCompiler/scenarioQualityGate';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-scenarios-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-scenarios-'));
 const port = 19080 + Math.floor(Math.random() * 1000);
 const child = spawn(process.execPath, ['--import', 'tsx', 'src/runtime/workspace-server.ts'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
-    BIOAGENT_WORKSPACE_PORT: String(port),
+    SCIFORGE_WORKSPACE_PORT: String(port),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -28,21 +28,21 @@ try {
   const qualityReport = buildScenarioQualityReport({ package: { ...pkg, validationReport }, validationReport, checkedAt: '2026-04-25T00:00:00.000Z' });
   const draftPkg = { ...pkg, status: 'draft' as const, validationReport, qualityReport };
 
-  let response = await fetch(`${baseUrl}/api/bioagent/scenarios/save`, {
+  let response = await fetch(`${baseUrl}/api/sciforge/scenarios/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, package: draftPkg }),
   });
   await assertOk(response);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/list?workspacePath=${encodeURIComponent(workspace)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/list?workspacePath=${encodeURIComponent(workspace)}`);
   await assertOk(response);
   let list = await response.json() as { scenarios: Array<{ id: string; status: string }> };
   assert.equal(list.scenarios.length, 1);
   assert.equal(list.scenarios[0].id, pkg.id);
   assert.equal(list.scenarios[0].status, 'draft');
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/library?workspacePath=${encodeURIComponent(workspace)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/library?workspacePath=${encodeURIComponent(workspace)}`);
   await assertOk(response);
   const library = await response.json() as {
     library: {
@@ -54,7 +54,7 @@ try {
   assert.equal(library.library.items[0].packageRef.version, pkg.version);
   assert.equal(library.library.viewPresetCandidates[0].uiPlanRef, pkg.uiPlan.id);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/get?workspacePath=${encodeURIComponent(workspace)}&id=${encodeURIComponent(pkg.id)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/get?workspacePath=${encodeURIComponent(workspace)}&id=${encodeURIComponent(pkg.id)}`);
   await assertOk(response);
   const loaded = await response.json() as { package: typeof pkg };
   assert.equal(loaded.package.scenario.title, pkg.scenario.title);
@@ -62,20 +62,20 @@ try {
   assert.deepEqual(loaded.package.validationReport, validationReport);
   assert.equal(loaded.package.qualityReport?.ok, true);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/publish`, {
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, id: pkg.id }),
   });
   await assertOk(response);
-  const scenarioJson = JSON.parse(await readFile(join(workspace, '.bioagent', 'scenarios', pkg.id, 'scenario.json'), 'utf8'));
-  const validationJson = JSON.parse(await readFile(join(workspace, '.bioagent', 'scenarios', pkg.id, 'validation-report.json'), 'utf8'));
-  const qualityJson = JSON.parse(await readFile(join(workspace, '.bioagent', 'scenarios', pkg.id, 'quality-report.json'), 'utf8'));
+  const scenarioJson = JSON.parse(await readFile(join(workspace, '.sciforge', 'scenarios', pkg.id, 'scenario.json'), 'utf8'));
+  const validationJson = JSON.parse(await readFile(join(workspace, '.sciforge', 'scenarios', pkg.id, 'validation-report.json'), 'utf8'));
+  const qualityJson = JSON.parse(await readFile(join(workspace, '.sciforge', 'scenarios', pkg.id, 'quality-report.json'), 'utf8'));
   assert.equal(scenarioJson.status, 'published');
   assert.deepEqual(validationJson, validationReport);
   assert.equal(qualityJson.ok, true);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/publish`, {
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -96,26 +96,26 @@ try {
   });
   assert.equal(response.status, 400);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/archive`, {
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/archive`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, id: pkg.id }),
   });
   await assertOk(response);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/list?workspacePath=${encodeURIComponent(workspace)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/list?workspacePath=${encodeURIComponent(workspace)}`);
   await assertOk(response);
   list = await response.json() as { scenarios: Array<{ id: string; status: string }> };
   assert.equal(list.scenarios[0].status, 'archived');
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/restore`, {
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/restore`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, id: pkg.id, status: 'draft' }),
   });
   await assertOk(response);
 
-  response = await fetch(`${baseUrl}/api/bioagent/scenarios/list?workspacePath=${encodeURIComponent(workspace)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/scenarios/list?workspacePath=${encodeURIComponent(workspace)}`);
   await assertOk(response);
   list = await response.json() as { scenarios: Array<{ id: string; status: string }> };
   assert.equal(list.scenarios[0].status, 'draft');
@@ -123,12 +123,12 @@ try {
   await writeProposal(workspace, 'scvelo-velocity-report', 'scvelo velocity report api reject smoke');
   await writeProposal(workspace, 'single-cell-label-transfer-qc', 'single-cell label-transfer qc report api archive smoke');
 
-  response = await fetch(`${baseUrl}/api/bioagent/skill-proposals/list?workspacePath=${encodeURIComponent(workspace)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/skill-proposals/list?workspacePath=${encodeURIComponent(workspace)}`);
   await assertOk(response);
   let proposalList = await response.json() as { proposals: Array<{ id: string; status: string }> };
   assert.equal(proposalList.proposals.length, 2);
 
-  response = await fetch(`${baseUrl}/api/bioagent/skill-proposals/reject`, {
+  response = await fetch(`${baseUrl}/api/sciforge/skill-proposals/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, id: 'scvelo-velocity-report', reason: 'not reusable enough' }),
@@ -138,14 +138,14 @@ try {
   assert.equal(proposalResult.proposal.status, 'rejected');
   assert.equal(proposalResult.proposal.statusReason, 'not reusable enough');
 
-  response = await fetch(`${baseUrl}/api/bioagent/skill-proposals/accept`, {
+  response = await fetch(`${baseUrl}/api/sciforge/skill-proposals/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, id: 'scvelo-velocity-report' }),
   });
   assert.equal(response.status, 400);
 
-  response = await fetch(`${baseUrl}/api/bioagent/skill-proposals/archive`, {
+  response = await fetch(`${baseUrl}/api/sciforge/skill-proposals/archive`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ workspacePath: workspace, id: 'single-cell-label-transfer-qc', reason: 'reviewed later' }),
@@ -155,7 +155,7 @@ try {
   assert.equal(proposalResult.proposal.status, 'archived');
   assert.equal(proposalResult.proposal.statusReason, 'reviewed later');
 
-  response = await fetch(`${baseUrl}/api/bioagent/skill-proposals/list?workspacePath=${encodeURIComponent(workspace)}`);
+  response = await fetch(`${baseUrl}/api/sciforge/skill-proposals/list?workspacePath=${encodeURIComponent(workspace)}`);
   await assertOk(response);
   proposalList = await response.json() as { proposals: Array<{ id: string; status: string }> };
   assert.ok(proposalList.proposals.some((proposal) => proposal.id === 'scvelo-velocity-report' && proposal.status === 'rejected'));
@@ -167,8 +167,8 @@ try {
 }
 
 async function writeProposal(workspacePath: string, id: string, prompt: string) {
-  const taskRel = `.bioagent/tasks/${id}/task.py`;
-  await mkdir(join(workspacePath, '.bioagent', 'tasks', id), { recursive: true });
+  const taskRel = `.sciforge/tasks/${id}/task.py`;
+  await mkdir(join(workspacePath, '.sciforge', 'tasks', id), { recursive: true });
   await writeFile(join(workspacePath, taskRel), [
     'import json',
     'import sys',

@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/report-viewer',
+  packageName: '@sciforge-ui/report-viewer',
   moduleId: 'research-report-document',
   version: '1.0.0',
   title: 'Markdown report document',

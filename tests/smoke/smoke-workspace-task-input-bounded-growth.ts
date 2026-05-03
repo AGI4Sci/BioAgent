@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWorkspaceTask } from '../../src/runtime/workspace-task-runner.js';
 
-const workspace = await mkdtemp(join(tmpdir(), 'bioagent-input-growth-'));
+const workspace = await mkdtemp(join(tmpdir(), 'sciforge-input-growth-'));
 const scriptPath = join(workspace, 'noop.sh');
 await writeFile(scriptPath, [
   '#!/bin/sh',
@@ -15,11 +15,11 @@ await writeFile(scriptPath, [
   'printf \'}\' >> "$OUTPUT"',
 ].join('\n'));
 
-const previousMaxFiles = process.env.BIOAGENT_TASK_INPUT_MAX_FILES;
-const previousMaxBytes = process.env.BIOAGENT_TASK_INPUT_MAX_BYTES;
+const previousMaxFiles = process.env.SCIFORGE_TASK_INPUT_MAX_FILES;
+const previousMaxBytes = process.env.SCIFORGE_TASK_INPUT_MAX_BYTES;
 try {
-  process.env.BIOAGENT_TASK_INPUT_MAX_FILES = '5';
-  process.env.BIOAGENT_TASK_INPUT_MAX_BYTES = '200000';
+  process.env.SCIFORGE_TASK_INPUT_MAX_FILES = '5';
+  process.env.SCIFORGE_TASK_INPUT_MAX_BYTES = '200000';
   const largeData = 'X'.repeat(1024 * 1024);
   for (let index = 0; index < 20; index += 1) {
     const id = `bounded-${index}`;
@@ -33,23 +33,23 @@ try {
         artifacts: [{
           id: `artifact-${index}`,
           type: 'research-report',
-          dataRef: `.bioagent/artifacts/artifact-${index}.json`,
+          dataRef: `.sciforge/artifacts/artifact-${index}.json`,
           data: { markdown: largeData },
         }],
       },
-      outputRel: `.bioagent/task-results/${id}.json`,
-      stdoutRel: `.bioagent/logs/${id}.stdout.log`,
-      stderrRel: `.bioagent/logs/${id}.stderr.log`,
+      outputRel: `.sciforge/task-results/${id}.json`,
+      stdoutRel: `.sciforge/logs/${id}.stdout.log`,
+      stderrRel: `.sciforge/logs/${id}.stderr.log`,
     });
   }
 } finally {
-  if (previousMaxFiles === undefined) delete process.env.BIOAGENT_TASK_INPUT_MAX_FILES;
-  else process.env.BIOAGENT_TASK_INPUT_MAX_FILES = previousMaxFiles;
-  if (previousMaxBytes === undefined) delete process.env.BIOAGENT_TASK_INPUT_MAX_BYTES;
-  else process.env.BIOAGENT_TASK_INPUT_MAX_BYTES = previousMaxBytes;
+  if (previousMaxFiles === undefined) delete process.env.SCIFORGE_TASK_INPUT_MAX_FILES;
+  else process.env.SCIFORGE_TASK_INPUT_MAX_FILES = previousMaxFiles;
+  if (previousMaxBytes === undefined) delete process.env.SCIFORGE_TASK_INPUT_MAX_BYTES;
+  else process.env.SCIFORGE_TASK_INPUT_MAX_BYTES = previousMaxBytes;
 }
 
-const inputDir = join(workspace, '.bioagent', 'task-inputs');
+const inputDir = join(workspace, '.sciforge', 'task-inputs');
 const files = await readdir(inputDir);
 const sizes = await Promise.all(files.map(async (file) => (await stat(join(inputDir, file))).size));
 const totalBytes = sizes.reduce((sum, size) => sum + size, 0);

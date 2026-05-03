@@ -1,4 +1,4 @@
-# @bioagent-ui/volcano-plot
+# @sciforge-ui/volcano-plot
 
 ## Agent quick contract
 - componentId: `volcano-plot`

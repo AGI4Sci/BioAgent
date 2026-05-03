@@ -1,6 +1,6 @@
 import type {
-  BioAgentReference,
-  BioAgentSession,
+  SciForgeReference,
+  SciForgeSession,
   NormalizedAgentResponse,
   ObjectAction,
   ObjectReference,
@@ -20,7 +20,7 @@ import { makeId, nowIso } from './domain';
 type GoalInput = {
   turnId: string;
   prompt: string;
-  references?: BioAgentReference[];
+  references?: SciForgeReference[];
   scenarioId: ScenarioInstanceId;
   scenarioOverride?: ScenarioRuntimeOverride;
   expectedArtifacts?: string[];
@@ -30,7 +30,7 @@ type GoalInput = {
 type AcceptanceInput = {
   snapshot: UserGoalSnapshot;
   response: NormalizedAgentResponse;
-  session: BioAgentSession;
+  session: SciForgeSession;
   semanticAcceptance?: SemanticTurnAcceptance;
 };
 
@@ -133,11 +133,11 @@ export function buildBackendAcceptanceRepairPrompt({
   snapshot: UserGoalSnapshot;
   acceptance: TurnAcceptance;
   response: NormalizedAgentResponse;
-  session: BioAgentSession;
+  session: SciForgeSession;
 }) {
   const backendFailures = acceptance.failures.filter((failure) => BACKEND_REPAIR_ACTIONS.has(failure.repairAction ?? ''));
   const payload = {
-    kind: 'BioAgentAcceptanceRepairRequest',
+    kind: 'SciForgeAcceptanceRepairRequest',
     UserGoalSnapshot: snapshot,
     acceptanceFailures: {
       deterministic: backendFailures,
@@ -172,14 +172,14 @@ export function buildBackendAcceptanceRepairPrompt({
     },
   };
   return [
-    'BioAgent acceptance gate requires one backend artifact/execution repair rerun.',
+    'SciForge acceptance gate requires one backend artifact/execution repair rerun.',
     'Do not repeat broad research unless required; repair only the missing artifact/file/visualization/execution result.',
-    'Return a normal BioAgent JSON-compatible result with message, artifacts, executionUnits, objectReferences, and uiManifest when useful.',
+    'Return a normal SciForge JSON-compatible result with message, artifacts, executionUnits, objectReferences, and uiManifest when useful.',
     JSON.stringify(payload, null, 2),
   ].join('\n\n');
 }
 
-export function extractObjectReferencesFromTurnText(response: NormalizedAgentResponse, session: BioAgentSession): ObjectReference[] {
+export function extractObjectReferencesFromTurnText(response: NormalizedAgentResponse, session: SciForgeSession): ObjectReference[] {
   const texts = [
     response.message.content,
     response.run.response,
@@ -204,7 +204,7 @@ export function extractObjectReferencesFromTurnText(response: NormalizedAgentRes
 
 export function extractObjectReferencesFromText(
   text: string,
-  session: BioAgentSession,
+  session: SciForgeSession,
   response?: NormalizedAgentResponse,
 ): ObjectReference[] {
   const references: ObjectReference[] = [];
@@ -231,7 +231,7 @@ export function extractObjectReferencesFromText(
       provenance: { dataRef: url },
     });
   }
-  const pathPattern = /(?:^|[\s"'`(（:：])((?:\.bioagent|workspace\/\.bioagent|\/[^"'`\s<>)\]}，。；;]+|[\w.-]+\/[\w./-]+)[^\s"'`<>)\]}，。；;]*(?:\.md|\.markdown|\.csv|\.tsv|\.json|\.pdf|\.png|\.jpg|\.jpeg|\.gif|\.webp|\.svg|\.html|\.htm|\.txt|\.pdb|\.cif|\.mmcif|\/))(?:$|[\s"'`),，。；;])/gi;
+  const pathPattern = /(?:^|[\s"'`(（:：])((?:\.sciforge|workspace\/\.sciforge|\/[^"'`\s<>)\]}，。；;]+|[\w.-]+\/[\w./-]+)[^\s"'`<>)\]}，。；;]*(?:\.md|\.markdown|\.csv|\.tsv|\.json|\.pdf|\.png|\.jpg|\.jpeg|\.gif|\.webp|\.svg|\.html|\.htm|\.txt|\.pdb|\.cif|\.mmcif|\/))(?:$|[\s"'`),，。；;])/gi;
   for (const match of text.matchAll(pathPattern)) {
     const path = trimReferenceTail(match[1]);
     if (!path || path.includes('://')) continue;
@@ -271,7 +271,7 @@ export function extractObjectReferencesFromText(
   return prioritizeObjectReferences(mergeObjectReferences(references));
 }
 
-function inferGoalType(prompt: string, references: BioAgentReference[]): UserGoalType {
+function inferGoalType(prompt: string, references: SciForgeReference[]): UserGoalType {
   if (/修复|重试|repair|fix|rerun/i.test(prompt)) return 'repair';
   if (/继续|上一轮|上次|刚才|continue|previous/i.test(prompt)) return 'continuation';
   if (/报告|阅读报告|markdown|文档|report|document/i.test(prompt)) return 'report';
@@ -314,7 +314,7 @@ function inferFreshness(prompt: string): UserGoalSnapshot['freshness'] | undefin
 function evaluateTurnAcceptance(
   snapshot: UserGoalSnapshot,
   response: NormalizedAgentResponse,
-  session: BioAgentSession,
+  session: SciForgeSession,
   objectReferences: ObjectReference[],
 ): TurnAcceptance {
   const failures: TurnAcceptanceFailure[] = [];
@@ -471,7 +471,7 @@ function hasVisualization(response: NormalizedAgentResponse, objectReferences: O
   return objectReferences.some((reference) => /\.(png|jpe?g|gif|webp|svg|html?)($|[?#])/i.test(reference.ref) || /visual|plot|chart|figure|image/i.test(reference.artifactType ?? ''));
 }
 
-function shouldRequireReferenceReflection(reference: BioAgentReference) {
+function shouldRequireReferenceReflection(reference: SciForgeReference) {
   if (reference.kind !== 'ui') return true;
   const payload = isRecord(reference.payload) ? reference.payload : {};
   const selectedText = typeof payload.selectedText === 'string' ? payload.selectedText.trim() : '';
@@ -487,7 +487,7 @@ function looksLikeDomSelector(value: string) {
   return /[.#][a-z0-9_-]+|nth-of-type|>|data-|aria-|div|span|section|button/i.test(value);
 }
 
-function responseReflectsReferenceUse(reference: BioAgentReference, response: NormalizedAgentResponse, objectReferences: ObjectReference[]) {
+function responseReflectsReferenceUse(reference: SciForgeReference, response: NormalizedAgentResponse, objectReferences: ObjectReference[]) {
   const haystack = [
     response.message.content,
     response.run.response,
@@ -554,7 +554,7 @@ function readableMessageFromPayloadText(text: string) {
 
 function buildRepairPrompt(snapshot: UserGoalSnapshot, failures: TurnAcceptanceFailure[], response: NormalizedAgentResponse) {
   return [
-    'BioAgent TurnAcceptanceGate detected unmet user expectations.',
+    'SciForge TurnAcceptanceGate detected unmet user expectations.',
     `Original user goal: ${snapshot.rawPrompt}`,
     `Goal type: ${snapshot.goalType}`,
     `Failures: ${failures.map((failure) => `${failure.code}: ${failure.detail}`).join('; ')}`,
@@ -602,7 +602,7 @@ function summarizeExecutionsForRepair(units: RuntimeExecutionUnit[]) {
   }));
 }
 
-function summarizeFailureRefsForRepair(response: NormalizedAgentResponse, session: BioAgentSession) {
+function summarizeFailureRefsForRepair(response: NormalizedAgentResponse, session: SciForgeSession) {
   return summarizeExecutionsForRepair([...response.executionUnits, ...session.executionUnits])
     .filter((unit) => unit.status === 'failed' || unit.status === 'failed-with-reason' || unit.status === 'repair-needed' || unit.failureReason || unit.stderrRef || unit.stdoutRef || unit.codeRef);
 }
@@ -612,7 +612,7 @@ function compactRefs(value: unknown) {
   const visit = (entry: unknown, key = '') => {
     if (refs.size >= 16) return;
     if (typeof entry === 'string') {
-      if (/\.bioagent\/|file:|folder:|artifact:|run:|execution-unit:|stdout|stderr|output|code|\.md|\.csv|\.json|\.png|\.svg|\.html/i.test(entry)
+      if (/\.sciforge\/|file:|folder:|artifact:|run:|execution-unit:|stdout|stderr|output|code|\.md|\.csv|\.json|\.png|\.svg|\.html/i.test(entry)
         || /path|ref|file|dir|stdout|stderr|output|code|failure/i.test(key)) {
         refs.add(entry);
       }
@@ -634,7 +634,7 @@ function enrichRaw(raw: unknown, snapshot: UserGoalSnapshot, acceptance: TurnAcc
   return isRecord(raw) ? { ...raw, ...metadata } : { raw, ...metadata };
 }
 
-function referenceFromKnownObject(ref: string, session: BioAgentSession, response?: NormalizedAgentResponse) {
+function referenceFromKnownObject(ref: string, session: SciForgeSession, response?: NormalizedAgentResponse) {
   const normalized = ref.replace(/^(artifact|file|folder|run|execution-unit|scenario-package|url):/i, '');
   const artifact = [...(response?.artifacts ?? []), ...session.artifacts]
     .find((item) => item.id === normalized || item.path === normalized || item.dataRef === normalized);

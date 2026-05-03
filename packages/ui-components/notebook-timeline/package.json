@@ -1,5 +1,5 @@
 {
-  "name": "@bioagent-ui/notebook-timeline",
+  "name": "@sciforge-ui/notebook-timeline",
   "version": "1.0.0",
   "type": "module",
   "main": "./manifest.ts",

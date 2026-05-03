@@ -1,6 +1,6 @@
 import { readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { BioAgentSkillDomain, GatewayRequest, SkillAvailability } from '../runtime-types.js';
+import type { SciForgeSkillDomain, GatewayRequest, SkillAvailability } from '../runtime-types.js';
 import { clipForAgentServerJson, clipForAgentServerPrompt, hashJson, isRecord, toRecordList, toStringList } from '../gateway-utils.js';
 import { expectedArtifactTypesForRequest, selectedComponentIdsForRequest } from './gateway-request.js';
 
@@ -31,7 +31,7 @@ export function buildContextEnvelope(
     .map((entry) => clipForAgentServerPrompt(entry, mode === 'full' ? 900 : 700))
     .filter(Boolean);
   return {
-    version: 'bioagent.context-envelope.v1',
+    version: 'sciforge.context-envelope.v1',
     mode,
     createdAt: new Date().toISOString(),
     hashes: {
@@ -41,42 +41,42 @@ export function buildContextEnvelope(
       priorAttempts: hashJson(params.priorAttempts ?? []),
     },
     projectFacts: mode === 'full' ? {
-      project: 'BioAgent',
+      project: 'SciForge',
       runtimeRole: 'scenario-first AI4Science workspace runtime',
       taskCodePolicy: 'Generate or repair task code in the active workspace; do not rely on fixed source-tree scientific task scripts.',
       toolPayloadContract: ['message', 'confidence', 'claimType', 'evidenceLevel', 'reasoningTrace', 'claims', 'displayIntent', 'uiManifest', 'executionUnits', 'artifacts', 'objectReferences'],
     } : {
-      project: 'BioAgent',
-      taskCodePolicyRef: 'bioagent.generated-task.v1',
-      toolPayloadContractRef: 'bioagent.toolPayload.v1',
+      project: 'SciForge',
+      taskCodePolicyRef: 'sciforge.generated-task.v1',
+      toolPayloadContractRef: 'sciforge.toolPayload.v1',
     },
     orchestrationBoundary: {
       decisionOwner: 'AgentServer',
-      bioAgentRole: 'protocol validation, workspace execution, artifact/ref persistence, repair request dispatch, and UI display only',
+      sciForgeRole: 'protocol validation, workspace execution, artifact/ref persistence, repair request dispatch, and UI display only',
       currentUserRequestIsAuthoritative: true,
       agentId: params.agentId,
       agentServerCoreSnapshotAvailable: params.agentServerCoreSnapshotAvailable === true,
       contextModeReason: mode === 'delta'
-        ? 'BioAgent sent compact delta refs plus hashes for a multi-turn backend session.'
-        : 'BioAgent sent a full handoff because AgentServer Core context was unavailable or the turn had no reusable session refs.',
+        ? 'SciForge sent compact delta refs plus hashes for a multi-turn backend session.'
+        : 'SciForge sent a full handoff because AgentServer Core context was unavailable or the turn had no reusable session refs.',
     },
     workspaceFacts: mode === 'full' ? {
       workspacePath: params.workspace,
-      bioagentDir: '.bioagent',
-      taskDir: '.bioagent/tasks/',
-      taskResultDir: '.bioagent/task-results/',
-      logDir: '.bioagent/logs/',
-      artifactDir: '.bioagent/artifacts/',
+      sciforgeDir: '.sciforge',
+      taskDir: '.sciforge/tasks/',
+      taskResultDir: '.sciforge/task-results/',
+      logDir: '.sciforge/logs/',
+      artifactDir: '.sciforge/artifacts/',
       workspaceTreeSummary: workspaceTree,
       workspaceTreeHash: hashJson(workspaceTree),
       workspaceTreeEntryCount: workspaceTree.length,
     } : {
       workspacePath: params.workspace,
       dirs: {
-        task: '.bioagent/tasks/',
-        result: '.bioagent/task-results/',
-        log: '.bioagent/logs/',
-        artifact: '.bioagent/artifacts/',
+        task: '.sciforge/tasks/',
+        result: '.sciforge/task-results/',
+        log: '.sciforge/logs/',
+        artifact: '.sciforge/artifacts/',
       },
       workspaceTreeHash: hashJson(workspaceTree),
       workspaceTreeEntryCount: workspaceTree.length,
@@ -158,7 +158,7 @@ export async function workspaceTreeSummary(workspace: string) {
   return out;
 }
 
-export function expectedArtifactSchema(request: GatewayRequest | BioAgentSkillDomain): Record<string, unknown> {
+export function expectedArtifactSchema(request: GatewayRequest | SciForgeSkillDomain): Record<string, unknown> {
   const skillDomain = typeof request === 'string' ? request : request.skillDomain;
   const types = typeof request === 'string' ? [] : expectedArtifactTypesForRequest(request);
   if (types.length) return { types };

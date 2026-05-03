@@ -1,7 +1,7 @@
 import type { UIComponentManifest } from '../types';
 
 export const manifest: UIComponentManifest = {
-  packageName: '@bioagent-ui/data-table',
+  packageName: '@sciforge-ui/data-table',
   moduleId: 'generic-data-table',
   version: '1.0.0',
   title: 'Generic artifact table',

@@ -1,6 +1,6 @@
-# @bioagent-ui/object-references
+# @sciforge-ui/object-references
 
-BioAgent object references are the stable memory pointers used by chat, results,
+SciForge object references are the stable memory pointers used by chat, results,
 feedback, workbench surfaces, and future timeline/notebook views.
 
 This package owns normalization and conversion only. It does not render chips,

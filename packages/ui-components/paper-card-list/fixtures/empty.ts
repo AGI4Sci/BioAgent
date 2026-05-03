@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyPaperCardListFixture: UIComponentRendererProps = {
   slot: { componentId: 'paper-card-list', props: { papers: [] } },

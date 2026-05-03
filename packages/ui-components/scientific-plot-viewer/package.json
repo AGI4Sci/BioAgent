@@ -20,5 +20,8 @@
     "./fixtures/selection": "./fixtures/selection.ts",
     "./fixtures/publication": "./fixtures/publication.ts",
     "./render": "./render.tsx"
+  },
+  "peerDependencies": {
+    "@sciforge-ui/runtime-contract": "^1.0.0"
   }
 }

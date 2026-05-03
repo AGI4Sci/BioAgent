@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptySchemaFormEditorFixture: UIComponentRendererProps = {
   slot: { componentId: 'schema-form-editor', props: { mode: 'edit', showRawJson: true } },

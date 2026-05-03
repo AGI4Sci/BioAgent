@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 export { emptyReportViewerFixture } from './empty';
 
 export const basicReportViewerFixture: UIComponentRendererProps = {

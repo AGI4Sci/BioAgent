@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyStatisticalAnnotationLayerFixture: UIComponentRendererProps = {
   slot: { componentId: 'statistical-annotation-layer', props: { showPValues: true } },

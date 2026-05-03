@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyExecutionUnitTableFixture: UIComponentRendererProps = {
   slot: { componentId: 'execution-unit-table', title: 'No execution units' },

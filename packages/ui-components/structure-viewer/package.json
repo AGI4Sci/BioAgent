@@ -3,7 +3,14 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./manifest.ts",
-  "files": ["README.md", "fixtures", "manifest.ts", "package.json", "render.tsx", "workbench-demo"],
+  "files": [
+    "README.md",
+    "fixtures",
+    "manifest.ts",
+    "package.json",
+    "render.tsx",
+    "workbench-demo"
+  ],
   "exports": {
     ".": "./manifest.ts",
     "./manifest": "./manifest.ts",
@@ -14,5 +21,8 @@
     "./render": "./render.tsx",
     "./workbench-demo/*": "./workbench-demo/*"
   },
-  "peerDependencies": { "react": "^19.2.5" }
+  "peerDependencies": {
+    "react": "^19.2.5",
+    "@sciforge-ui/runtime-contract": "^1.0.0"
+  }
 }

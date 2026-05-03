@@ -19,5 +19,8 @@
     "./fixtures/empty": "./fixtures/empty.ts",
     "./fixtures/selection": "./fixtures/selection.ts",
     "./render": "./render.tsx"
+  },
+  "peerDependencies": {
+    "@sciforge-ui/runtime-contract": "^1.0.0"
   }
 }

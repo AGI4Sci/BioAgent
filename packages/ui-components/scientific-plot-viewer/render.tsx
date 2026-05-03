@@ -1,5 +1,5 @@
 import React from 'react';
-import type { UIComponentRendererProps } from '../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 type PlotlyTrace = Record<string, unknown>;
 type PlotlyLikeSpec = {

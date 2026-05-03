@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyTimeSeriesViewerFixture: UIComponentRendererProps = {
   slot: { componentId: 'time-series-viewer', props: { timeUnit: 'hour' } },

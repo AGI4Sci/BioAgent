@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyPlateLayoutViewerFixture: UIComponentRendererProps = {
   slot: { componentId: 'plate-layout-viewer', props: { colorBy: 'condition' } },

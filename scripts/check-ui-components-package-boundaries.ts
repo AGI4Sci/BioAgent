@@ -12,6 +12,8 @@ type PackageJson = {
   private?: boolean;
   files?: string[];
   exports?: string | Record<string, unknown>;
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 
 type Finding = {
@@ -23,11 +25,14 @@ type Severity = 'error' | 'warn';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const uiRoot = join(repoRoot, 'packages/ui-components');
+const aggregatePackageJson = await readPackageJson('@sciforge-ui/components', uiRoot);
 const componentDirNames = await discoverComponentDirs();
 const exportedManifestIds = new Set(uiComponentManifests.map((manifest) => manifest.componentId));
 const componentNames = new Set(componentDirNames);
 const errors: Finding[] = [];
 const warnings: Finding[] = [];
+
+checkAggregatePackageBoundary(aggregatePackageJson);
 
 for (const component of componentDirNames) {
   const dir = join(uiRoot, component);
@@ -51,6 +56,9 @@ for (const component of componentDirNames) {
     }
     if (packageJson?.private === true) {
       report(component, 'component packages must be publishable and must not set private: true', publicationSeverity(manifest));
+    }
+    if (!declaresDependency(packageJson, '@sciforge-ui/runtime-contract')) {
+      report(component, 'package.json must declare @sciforge-ui/runtime-contract as a dependency or peerDependency', publicationSeverity(manifest));
     }
     if (manifest.docs?.readmePath !== `packages/ui-components/${component}/README.md`) {
       report(component, `manifest docs.readmePath should be packages/ui-components/${component}/README.md`, publicationSeverity(manifest));
@@ -171,6 +179,56 @@ function checkPackageBoundary(component: string, dir: string, packageJson?: Pack
   }
 }
 
+function checkAggregatePackageBoundary(packageJson?: PackageJson) {
+  if (!packageJson) {
+    error('@sciforge-ui/components', 'missing aggregate package.json');
+    return;
+  }
+
+  if (packageJson.name !== '@sciforge-ui/components') {
+    error('@sciforge-ui/components', 'aggregate package name must be @sciforge-ui/components');
+  }
+  if (packageJson.private === true) {
+    error('@sciforge-ui/components', 'aggregate package must be publishable and must not set private: true');
+  }
+
+  const files = packageJson.files ?? [];
+  const exports = packageJson.exports;
+  for (const expected of [
+    'README.md',
+    'index.ts',
+    'types.ts',
+    'package.json',
+    '*/README.md',
+    '*/manifest.ts',
+    '*/render.tsx',
+    '*/fixtures/*',
+    '*/assets/*',
+    '*/workbench-demo/*',
+  ]) {
+    if (!files.includes(expected)) {
+      error('@sciforge-ui/components', `aggregate package.json files must include ${expected}`);
+    }
+  }
+
+  for (const [key, label] of [
+    ['.', 'manifest index'],
+    ['./types', 'shared types'],
+    ['./*/manifest', 'component manifest wildcard'],
+    ['./*/README.md', 'component README wildcard'],
+    ['./*/fixtures/basic', 'basic fixture wildcard'],
+    ['./*/fixtures/empty', 'empty fixture wildcard'],
+    ['./*/fixtures/selection', 'selection fixture wildcard'],
+    ['./*/render', 'renderer wildcard'],
+    ['./*/assets/*', 'assets wildcard'],
+    ['./*/workbench-demo/*', 'workbench demo wildcard'],
+  ] as const) {
+    if (!hasExport(exports, key)) {
+      error('@sciforge-ui/components', `aggregate package.json exports must include ${key} (${label})`);
+    }
+  }
+}
+
 function coversPackagePath(entry: string, expected: string) {
   const normalizedEntry = entry.replace(/\\/g, '/').replace(/\/\*\*?$/, '');
   const normalizedExpected = expected.replace(/\\/g, '/');
@@ -222,6 +280,9 @@ async function checkImports(component: string, dir: string) {
       if (sibling) {
         error(component, `${prettyPath(file)} imports sibling component "${sibling}" via "${specifier}"`);
       }
+      if (isRelativeImportOutsidePackage(file, dir, specifier)) {
+        error(component, `${prettyPath(file)} imports outside the component package via "${specifier}"`);
+      }
     }
   }
 }
@@ -249,6 +310,17 @@ function siblingComponentImport(component: string, file: string, specifier: stri
   const candidate = relativeToUiRoot[0];
   if (candidate && candidate !== component && componentNames.has(candidate)) return candidate;
   return undefined;
+}
+
+function isRelativeImportOutsidePackage(file: string, packageDir: string, specifier: string) {
+  if (!specifier.startsWith('.')) return false;
+  const resolved = normalize(resolve(dirname(file), specifier));
+  const relativeToPackage = relative(packageDir, resolved);
+  return relativeToPackage === '..' || relativeToPackage.startsWith(`..${sep}`);
+}
+
+function declaresDependency(packageJson: PackageJson | undefined, name: string) {
+  return Boolean(packageJson?.dependencies?.[name] || packageJson?.peerDependencies?.[name]);
 }
 
 async function listFiles(root: string, pattern: RegExp): Promise<string[]> {

@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyPredictionReviewerFixture: UIComponentRendererProps = {
   slot: { componentId: 'prediction-reviewer', props: { statusFilter: 'needs-review' } },

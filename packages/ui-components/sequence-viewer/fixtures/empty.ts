@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptySequenceViewerFixture: UIComponentRendererProps = {
   slot: { componentId: 'sequence-viewer', props: { showCoordinates: true } },

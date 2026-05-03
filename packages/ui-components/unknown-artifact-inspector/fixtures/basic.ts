@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const basicUnknownArtifactInspectorFixture: UIComponentRendererProps = {
   slot: { componentId: 'unknown-artifact-inspector', title: 'Unsupported artifact inspection' },

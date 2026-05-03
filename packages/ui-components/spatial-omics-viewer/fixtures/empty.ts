@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptySpatialOmicsViewerFixture: UIComponentRendererProps = {
   slot: { componentId: 'spatial-omics-viewer', props: { feature: 'MKI67' } },

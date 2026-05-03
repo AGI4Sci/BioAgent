@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyProtocolEditorFixture: UIComponentRendererProps = {
   slot: { componentId: 'protocol-editor', props: { mode: 'edit' } },

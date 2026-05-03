@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyModelEvalViewerFixture: UIComponentRendererProps = {
   slot: { componentId: 'model-eval-viewer', props: { metricSet: 'classification' } },

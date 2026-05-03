@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyPublicationFigureBuilderFixture: UIComponentRendererProps = {
   slot: { componentId: 'publication-figure-builder', props: { journalProfile: 'two-column' } },

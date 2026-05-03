@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./manifest.ts",
-  "files": ["README.md", "fixtures", "manifest.ts", "package.json", "render.tsx"],
+  "files": [
+    "README.md",
+    "fixtures",
+    "manifest.ts",
+    "package.json",
+    "render.tsx"
+  ],
   "exports": {
     ".": "./manifest.ts",
     "./manifest": "./manifest.ts",
@@ -14,6 +20,7 @@
     "./render": "./render.tsx"
   },
   "peerDependencies": {
-    "react": "^19.2.5"
+    "react": "^19.2.5",
+    "@sciforge-ui/runtime-contract": "^1.0.0"
   }
 }

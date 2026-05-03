@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { UIComponentRendererProps, UIComponentRuntimeArtifact } from '../types';
+import type { UIComponentRendererProps, UIComponentRuntimeArtifact } from '@sciforge-ui/runtime-contract';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

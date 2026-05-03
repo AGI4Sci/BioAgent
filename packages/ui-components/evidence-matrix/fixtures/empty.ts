@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyEvidenceMatrixFixture: UIComponentRendererProps = {
   slot: { componentId: 'evidence-matrix', title: 'Empty evidence matrix' },

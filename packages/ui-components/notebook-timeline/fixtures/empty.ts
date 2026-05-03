@@ -1,4 +1,4 @@
-import type { UIComponentRendererProps } from '../../types';
+import type { UIComponentRendererProps } from '@sciforge-ui/runtime-contract';
 
 export const emptyNotebookTimelineFixture: UIComponentRendererProps = {
   slot: { componentId: 'notebook-timeline', title: 'Empty research timeline' },

@@ -1,8 +1,11 @@
 {
   "name": "@sciforge-ui/components",
   "version": "1.0.0",
+  "description": "SciForge UI component manifests, renderers, fixtures, and package contracts.",
   "type": "module",
-  "private": true,
+  "private": false,
+  "main": "./index.ts",
+  "types": "./index.ts",
   "scripts": {
     "packages:check": "tsx ../../scripts/check-ui-components-package-boundaries.ts"
   },
@@ -14,9 +17,9 @@
     "*/README.md",
     "*/manifest.ts",
     "*/render.tsx",
-    "*/fixtures",
-    "*/assets",
-    "*/workbench-demo"
+    "*/fixtures/*",
+    "*/assets/*",
+    "*/workbench-demo/*"
   ],
   "exports": {
     ".": "./index.ts",
@@ -31,5 +34,9 @@
     "./*/workbench-demo/*": "./*/workbench-demo/*",
     "./data-table/render": "./data-table/render.tsx",
     "./report-viewer/render": "./report-viewer/render.tsx"
+  },
+  "peerDependencies": {
+    "@sciforge-ui/runtime-contract": "^1.0.0",
+    "react": "^19.2.5"
   }
 }

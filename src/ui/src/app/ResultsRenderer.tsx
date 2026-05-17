@@ -38,7 +38,7 @@ import {
   uploadedArtifactPreview,
 } from './results/previewDescriptor';
 import { UploadedDataUrlPreview, WorkspaceObjectPreview } from './results/WorkspaceObjectPreview';
-import { makeId, nowIso, type EvidenceClaim, type SciForgeConfig, type SciForgeRun, type SciForgeSession, type ObjectAction, type ObjectReference, type PreviewDescriptor, type RuntimeArtifact, type RuntimeCompatibilityDiagnostic, type RuntimeExecutionUnit, type UIManifestSlot } from '../domain';
+import { type EvidenceClaim, type SciForgeConfig, type SciForgeRun, type SciForgeSession, type ObjectAction, type ObjectReference, type PreviewDescriptor, type RuntimeArtifact, type RuntimeCompatibilityDiagnostic, type RuntimeExecutionUnit, type UIManifestSlot } from '../domain';
 import {
   conversationProjectionForSession,
   conversationProjectionStatus,
@@ -89,7 +89,6 @@ import {
   type WorkbenchSlotRenderProps,
 } from './results-renderer-registry-slot';
 import {
-  createOpenDebugAuditUIAction,
   type OpenDebugAuditUIAction,
   type TriggerRecoverUIAction,
 } from './uiActionBoundary';
@@ -393,7 +392,12 @@ function PrimaryResult({
         viewPlan={viewPlan}
         onTriggerRecoverAction={onTriggerRecoverAction}
       />
-      <CapabilityPlanSummaryCard summary={capabilityPlanSummaryForSession(session, activeRun?.id)} />
+      <CapabilityPlanSummaryCard
+        summary={capabilityPlanSummaryForSession(session, activeRun?.id)}
+        session={session}
+        activeRun={activeRun}
+        onOpenDebugAuditAction={onOpenDebugAuditAction}
+      />
       {model.emptyState ? (
         <EmptyArtifactState
           title={model.emptyState.title}
@@ -458,7 +462,17 @@ function PrimaryResult({
   );
 }
 
-function CapabilityPlanSummaryCard({ summary }: { summary?: CapabilityPlanSummary }) {
+function CapabilityPlanSummaryCard({
+  summary,
+  session,
+  activeRun,
+  onOpenDebugAuditAction,
+}: {
+  summary?: CapabilityPlanSummary;
+  session: SciForgeSession;
+  activeRun?: SciForgeRun;
+  onOpenDebugAuditAction?: (action: OpenDebugAuditUIAction) => void;
+}) {
   if (!summary || summary.status === 'none') return null;
   return (
     <Card className="capability-plan-summary">
@@ -469,7 +483,17 @@ function CapabilityPlanSummaryCard({ summary }: { summary?: CapabilityPlanSummar
       />
       <p>{summary.summary}</p>
       {summary.debugRefs.length ? (
-        <details className="result-details-panel subtle">
+        <details
+          className="result-details-panel subtle"
+          onToggle={(event) => {
+            if (event.currentTarget.open) {
+              void requestOpenDebugAuditThroughUserActionApi({ session, activeRun })
+                .then((action) => {
+                  if (action) onOpenDebugAuditAction?.(action);
+                });
+            }
+          }}
+        >
           <summary>
             <span>能力发现记录</span>
             <Badge variant="muted">{summary.debugRefs.length} refs</Badge>
@@ -690,7 +714,12 @@ function RunAuditDetails({
       className="result-details-panel audit-details-panel"
       open={defaultOpen}
       onToggle={(event) => {
-        if (event.currentTarget.open) onOpenDebugAuditAction?.(createOpenDebugAuditAction(session, activeRun));
+        if (event.currentTarget.open) {
+          void requestOpenDebugAuditThroughUserActionApi({ session, activeRun })
+            .then((action) => {
+              if (action) onOpenDebugAuditAction?.(action);
+            });
+        }
       }}
     >
       <summary>
@@ -844,14 +873,18 @@ export async function requestRecoverActionThroughUserActionApi(input: {
   return result.action?.type === 'trigger-recover' ? result.action : undefined;
 }
 
-function createOpenDebugAuditAction(session: SciForgeSession, activeRun: SciForgeRun | undefined): OpenDebugAuditUIAction {
-  return createOpenDebugAuditUIAction({
-    id: makeId('ui-action'),
-    session,
-    createdAt: nowIso(),
-    runId: activeRun?.id,
-    auditRefs: runAuditRefs(session, activeRun),
+export async function requestOpenDebugAuditThroughUserActionApi(input: {
+  session: SciForgeSession;
+  activeRun?: SciForgeRun;
+  userActionApi?: Pick<UserActionApi, 'openDebugAudit'>;
+}): Promise<OpenDebugAuditUIAction | undefined> {
+  const run = input.activeRun ?? input.session.runs.at(-1);
+  const api = input.userActionApi ?? createLocalUserActionApi();
+  const result = await api.openDebugAudit({
+    session: input.session,
+    runId: run?.id,
   });
+  return result.action?.type === 'open-debug-audit' ? result.action : undefined;
 }
 
 function runtimeCompatibilityDiagnosticsForPresentation(session: SciForgeSession, activeRun?: SciForgeRun): RuntimeCompatibilityDiagnostic[] {

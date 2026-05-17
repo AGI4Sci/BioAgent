@@ -13,6 +13,7 @@ import {
   createApproveResultUIAction,
   createCancelRunUIAction,
   createLoadArtifactPreviewUIAction,
+  createOpenDebugAuditUIAction,
   createRequestRetryUIAction,
   createSelectObjectUIAction,
   createSubmitTurnUIAction,
@@ -41,6 +42,7 @@ export interface UserActionApi {
   submitTurn(input: { session: SciForgeSession; text: string; selectedRefs?: string[] }): Promise<UserActionResult>;
   selectObject(input: { session: SciForgeSession; objectRef: string; intent: 'inspect' | 'ask-followup' | 'compare' | 'pin' }): Promise<UserActionResult>;
   loadArtifactPreview(input: { session: SciForgeSession; artifactRef: string; byteLimit?: number }): Promise<ArtifactPreview>;
+  openDebugAudit(input: { session: SciForgeSession; runId?: string }): Promise<UserActionResult>;
   requestRetry(input: { session: SciForgeSession; runId: string; reason?: string; scope: 'same-input' | 'with-repair-evidence' | 'rediscover-capabilities' }): Promise<UserActionResult>;
   triggerRecover(input: { session: SciForgeSession; runId: string; recoverAction: string }): Promise<UserActionResult>;
   approveResult(input: { session: SciForgeSession; runId: string; approval: 'human-approved' | 'reject-result'; note?: string }): Promise<UserActionResult>;
@@ -227,6 +229,21 @@ export function createLocalUserActionApi(projectionApi: ProjectionApi = createLo
       });
       return { ...preview, sourceAction: action };
     },
+    async openDebugAudit(input) {
+      const run = focusedRun(input.session, input.runId);
+      const capabilitySummary = capabilityPlanSummaryForSession(input.session, run?.id);
+      const action = createOpenDebugAuditUIAction({
+        session: input.session,
+        id: actionId('open-debug-audit'),
+        createdAt: new Date().toISOString(),
+        runId: run?.id,
+        auditRefs: uniqueStrings([
+          ...runAuditRefs(input.session, run),
+          ...(capabilitySummary?.debugRefs ?? []),
+        ].filter(isSafeDebugActionRef)),
+      });
+      return acceptedAction(action, await projectionApi.getConversationProjection({ session: input.session, focusedRunId: run?.id }), '调试审计展开动作已记录。');
+    },
     async requestRetry(input) {
       const action = createRequestRetryUIAction({
         session: input.session,
@@ -397,6 +414,11 @@ export function capabilityPlanSummaryForSession(session: SciForgeSession, runId?
 
 function isSafeCapabilityDebugRef(ref: string) {
   return /capability|discovery/i.test(ref)
+    && !/https?:\/\/|localhost|127\.0\.0\.1|token|secret|api[_-]?key|\/(?:Applications|Users|private|var|tmp)\//i.test(ref);
+}
+
+function isSafeDebugActionRef(ref: string) {
+  return Boolean(ref.trim())
     && !/https?:\/\/|localhost|127\.0\.0\.1|token|secret|api[_-]?key|\/(?:Applications|Users|private|var|tmp)\//i.test(ref);
 }
 

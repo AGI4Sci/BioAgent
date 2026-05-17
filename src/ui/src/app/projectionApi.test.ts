@@ -253,7 +253,54 @@ test('ProjectionApi derives CapabilityPlanSummary from discovery tool results wi
   assert.doesNotMatch(JSON.stringify(summary), /127\.0\.0\.1|RAW_DISCOVERY_TEXT/);
 });
 
-test('UserActionApi records recover, approval, and cancel as semantic action results', async () => {
+test('UserActionApi openDebugAudit folds discovery refs through the semantic action boundary', async () => {
+  const session = testSession({
+    runs: [{
+      id: 'run-discovery-debug-fold',
+      scenarioId: 'literature-evidence-review',
+      status: 'completed',
+      prompt: 'discover capabilities',
+      response: 'RAW_DISCOVERY_TEXT_SHOULD_NOT_RENDER',
+      createdAt: '2026-05-17T00:00:00.000Z',
+      raw: {
+        auditRefs: [
+          'audit:regular-run-ref',
+          'http://127.0.0.1:18080/internal',
+          '/Applications/workspace/ailab/research/app/SciForge/.secret',
+        ],
+        capabilityDiscoveryToolResults: [{
+          type: 'tool-result',
+          toolName: 'capability_discovery.search',
+          status: 'done',
+          auditRefs: [
+            'records/capability-discovery/search-audit.json',
+            'token=abc123',
+          ],
+          completionEvidence: 'not-evidence',
+          result: {
+            contract: 'sciforge.capability-discovery.v1',
+            candidates: [{ capabilityId: 'web_search', title: 'Web search' }],
+            completionEvidence: 'not-evidence',
+          },
+        }],
+      },
+    }],
+  });
+
+  const result = await createLocalUserActionApi().openDebugAudit({
+    session,
+    runId: 'run-discovery-debug-fold',
+  });
+
+  assert.equal(result.action?.type, 'open-debug-audit');
+  assert.deepEqual(result.action?.type === 'open-debug-audit' ? result.action.auditRefs : [], [
+    'audit:regular-run-ref',
+    'records/capability-discovery/search-audit.json',
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /127\.0\.0\.1|Applications\/workspace|token=abc123|RAW_DISCOVERY_TEXT/);
+});
+
+test('UserActionApi records recover, debug audit, approval, and cancel as semantic action results', async () => {
   const projection = {
     schemaVersion: 'sciforge.conversation-projection.v1',
     conversationId: 'conversation-actions',
@@ -295,6 +342,10 @@ test('UserActionApi records recover, approval, and cancel as semantic action res
     approval: 'reject-result',
     note: 'Still lacks verifier refs.',
   });
+  const openAudit = await actionApi.openDebugAudit({
+    session,
+    runId: 'run-actions',
+  });
   const cancel = await actionApi.cancelRun({
     session,
     runId: 'run-actions',
@@ -305,11 +356,13 @@ test('UserActionApi records recover, approval, and cancel as semantic action res
   assert.equal(recover.action?.type, 'trigger-recover');
   assert.equal(recover.action?.type === 'trigger-recover' ? recover.action.recoverAction : '', 'Import and verify candidate artifacts.');
   assert.deepEqual(recover.action?.type === 'trigger-recover' ? recover.action.auditRefs : [], ['artifact:partial-report', 'audit:recover']);
+  assert.equal(openAudit.action?.type, 'open-debug-audit');
+  assert.deepEqual(openAudit.action?.type === 'open-debug-audit' ? openAudit.action.auditRefs : [], ['artifact:partial-report', 'audit:recover']);
   assert.equal(approve.action?.type, 'approve-result');
   assert.equal(approve.action?.type === 'approve-result' ? approve.action.approval : '', 'reject-result');
   assert.equal(cancel.action?.type, 'cancel-run');
   assert.deepEqual(cancel.action?.type === 'cancel-run' ? cancel.action.rejectedGuidanceIds : [], ['guidance-a', 'guidance-b']);
-  assert.doesNotMatch(JSON.stringify({ recover, approve, cancel }), /RAW_RECOVER_TEXT/);
+  assert.doesNotMatch(JSON.stringify({ recover, openAudit, approve, cancel }), /RAW_RECOVER_TEXT/);
 });
 
 function testSession(overrides: Partial<SciForgeSession> = {}): SciForgeSession {

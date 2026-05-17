@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { backendRepairStates, coerceReportPayload, contractValidationFailures, renderRegisteredWorkbenchSlot, requestRecoverActionThroughUserActionApi, ResultsRenderer, runAuditRefs, runRecoverActions, shouldOpenRunAuditDetails } from './ResultsRenderer';
+import { backendRepairStates, coerceReportPayload, contractValidationFailures, renderRegisteredWorkbenchSlot, requestOpenDebugAuditThroughUserActionApi, requestRecoverActionThroughUserActionApi, ResultsRenderer, runAuditRefs, runRecoverActions, shouldOpenRunAuditDetails } from './ResultsRenderer';
 import { ArtifactInspectorDrawer } from './results-renderer-artifact-inspector';
 import { nextPinnedObjectReferences, resolveObjectReferenceActionPlan } from './results-renderer-object-actions';
 import { RegistrySlot } from './results-renderer-registry-slot';
@@ -1122,6 +1122,35 @@ test('requestRecoverActionThroughUserActionApi routes result recover buttons thr
   assert.equal(action?.recoverAction, 'regenerate report artifact with markdownRef');
   assert.ok(action?.auditRefs.includes('execution-unit:EU-report'));
   assert.ok(action?.auditRefs.includes('artifact:research-report'));
+});
+
+test('requestOpenDebugAuditThroughUserActionApi routes audit expansion through UserActionApi', async () => {
+  const session = contractFailureSession();
+  const action = await requestOpenDebugAuditThroughUserActionApi({
+    session,
+    activeRun: session.runs[0],
+    userActionApi: {
+      async openDebugAudit(input) {
+        assert.equal(input.runId, 'run-contract-failure');
+        return {
+          accepted: true,
+          action: {
+            type: 'open-debug-audit',
+            id: 'open-debug-audit-test',
+            kind: 'UIAction',
+            createdAt: '2026-05-17T00:00:00.000Z',
+            sessionId: input.session.sessionId,
+            scenarioId: input.session.scenarioId,
+            runId: input.runId,
+            auditRefs: ['execution-unit:EU-report', 'artifact:research-report'],
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(action?.type, 'open-debug-audit');
+  assert.deepEqual(action?.type === 'open-debug-audit' ? action.auditRefs : [], ['execution-unit:EU-report', 'artifact:research-report']);
 });
 
 test('ResultsRenderer shows capability discovery plan summary without exposing unsafe debug refs', () => {

@@ -2651,7 +2651,7 @@ function artifactMutationFollowupRequiresBackend(text: string) {
   if (readOnlyArtifactInfoRequested(text)) return false;
   if (readOnlyHypotheticalArtifactRevisionRequested(text)) return false;
   const refersToExistingContext = /(previous|prior|last|existing|current|visible|selected|above|artifact|matrix|report|deliverable|document|file|workspace|上一轮|之前|已有|当前|选中|证据矩阵|报告|产物|交付物|文档|文件)/i.test(text);
-  const asksForMutation = /(update|revise|rewrite|regenerate|edit|modify|refresh|replace|supersede|write|persist|produce|更新|修订|重写|改写|修改|替换|写入|产出|重新生成)/i.test(text);
+  const asksForMutation = /(update|revise|rewrite|regenerate|edit|modify|refresh|replace|supersede|overwrite|write|persist|save|produce|更新|修订|重写|改写|修改|替换|覆盖|写入|写回|保存|产出|重新生成)/i.test(text);
   const deliverableScope = /(artifact|file|document|deliverable|workspace|path|\.md|decision log|risk register|timeline|budget|scope|success metrics|artifact\/file|产物|交付物|文档|文件|路径|决策日志|风险登记|时间线|预算|成功指标|所有受影响结论)/i.test(text);
   const asksForPaths = /(artifact\/file path|artifact path|file path|workspace file|updated artifact|new file|路径|更新后的 artifact|新的 artifact|新文件|文件路径)/i.test(text);
   return refersToExistingContext && ((asksForMutation && deliverableScope) || asksForPaths);
@@ -2660,18 +2660,21 @@ function artifactMutationFollowupRequiresBackend(text: string) {
 function readOnlyArtifactInfoRequested(text: string) {
   return /(whether|does|what|which|list|audit|check|do not invent|not invent|是否|有没有|哪些|只列出|不要补造|审计|核对|检查|复跑性)/i.test(text)
     && /(rerun command|run command|script path|artifact path|file path|路径|命令|脚本路径)/i.test(text)
-    && !/(update|revise|rewrite|regenerate|edit|modify|refresh|replace|write|persist|produce|更新|修订|重写|改写|修改|替换|写入|产出|重新生成)/i.test(text);
+    && !/(update|revise|rewrite|regenerate|edit|modify|refresh|replace|overwrite|write|persist|save|produce|更新|修订|重写|改写|修改|替换|覆盖|写入|写回|保存|产出|重新生成)/i.test(text);
 }
 
 function readOnlyHypotheticalArtifactRevisionRequested(text: string) {
   const asksRecommendation = /(how should|how would|what should|what would|should (?:we|i)|recommend|recommendation|建议|应该如何|应如何|如何(?:修改|调整|改)|怎么(?:修改|调整|改)|怎样(?:修改|调整|改)|如果|预算降到)/i.test(text);
   const anchorsExistingArtifact = /(current|selected|existing|previous|prior|artifact|report|protocol|当前|选中|已有|之前|产物|报告|方案)/i.test(text);
   const asksAnswerOnly = /(answer|tell me|explain|基于|回答|说明|标明|继续标明|建议)/i.test(text);
-  const asksDurableWrite = /(write(?:\s+the)? file|persist|save|updated artifact|new artifact|artifact path|file path|生成(?:新的)?(?:报告|文件|产物)|写入|保存|产出|文件路径|新的 artifact|更新后的 artifact)/i.test(text);
+  const asksDurableWrite = /(write(?:\s+the)? file|persist|save|overwrite|updated artifact|new artifact|artifact path|file path|生成(?:新的)?(?:报告|文件|产物)|覆盖|写入|写回|保存|产出|文件路径|新的 artifact|更新后的 artifact)/i.test(text);
   return asksRecommendation && anchorsExistingArtifact && asksAnswerOnly && !asksDurableWrite;
 }
 
 function explicitAnswerOnlyNoToolsRequested(text: string) {
+  if (/(do not only answer|don't only answer|not only answer|not just answer|不要只回答|不要仅回答|不能只回答|不只是回答|不要只给(?:出)?(?:聊天)?(?:摘要|回答)?)/i.test(text)) {
+    return false;
+  }
   return /(answer-only|no tools|do not run tools|without starting|不要启动新的 workspace task|不要运行工具|不启动工具|只回答|仅回答)/i.test(text);
 }
 

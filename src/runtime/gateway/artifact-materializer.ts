@@ -573,6 +573,13 @@ async function copyWorkspaceFileRefIfPresent(sourceRel: string, scopedRel: strin
   const targetPath = safeWorkspaceFilePath(scopedRel, workspace);
   if (!sourcePath || !targetPath || sourcePath === targetPath) return;
   try {
+    const sourceStat = await stat(sourcePath);
+    try {
+      const targetStat = await stat(targetPath);
+      if (targetStat.isFile() && targetStat.mtimeMs >= sourceStat.mtimeMs) return;
+    } catch {
+      // Missing targets are populated below.
+    }
     await mkdir(dirname(targetPath), { recursive: true });
     await copyFile(sourcePath, targetPath);
   } catch {

@@ -134,6 +134,42 @@ test('payload validation binds verified claims with evidence prose to durable co
   assert.equal(evaluateToolPayloadEvidence(normalized, request(workspace)), undefined);
 });
 
+test('payload validation binds verified text-only claims to generated artifact refs', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-payload-text-claim-evidence-'));
+  const payload = {
+    message: 'Updated all four research-package deliverables for v2 constraints.',
+    confidence: 0.95,
+    claimType: 'artifact-generation',
+    evidenceLevel: 'verified',
+    reasoningTrace: 'Read existing files, rewrote deliverables, verified file sizes.',
+    claims: [{
+      id: 'C-001',
+      text: 'Budget reduced from $120k to $80k and timeline compressed from 12 to 9 months.',
+      claimType: 'constraint-change',
+      evidenceLevel: 'verified',
+    }],
+    displayIntent: 'summary',
+    uiManifest: [{ componentId: 'report-viewer', artifactRef: 'project-brief-v2' }],
+    executionUnits: [{
+      id: 'update-research-package-v2',
+      status: 'completed',
+      artifacts: ['project-brief-v2'],
+    }],
+    artifacts: [{
+      id: 'project-brief-v2',
+      type: 'research-report',
+      path: '.sciforge/sessions/session-1/task-results/research-package/project-brief.md',
+    }],
+  } as unknown as ToolPayload;
+
+  const normalized = await validateAndNormalizePayload(payload, request(workspace), skill, refs);
+  const claim = normalized.claims[0] ?? {};
+  const evidenceRefs = Array.isArray(claim.evidenceRefs) ? claim.evidenceRefs : [];
+
+  assert.ok(evidenceRefs.some((ref) => /project-brief\.md$/.test(String(ref))));
+  assert.equal(evaluateToolPayloadEvidence(normalized, request(workspace)), undefined);
+});
+
 test('structural payload validation does not make semantic completion judgments', () => {
   const errors = validateToolPayloadStructure({
     message: 'I will retrieve the latest papers and analyze the results.',

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -238,6 +238,58 @@ test('artifact delivery prefers an existing markdown file over shorter inline su
     assert.equal((artifact.data as Record<string, unknown>).markdown, '# Full Protocol\n\n## Primary Endpoint\n\nComplete protocol body.');
     assert.equal(await readFile(join(workspace, protocolRel), 'utf8'), '# Full Protocol\n\n## Primary Endpoint\n\nComplete protocol body.');
     await assert.rejects(stat(join(workspace, derivedRel)));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test('workspace-relative artifact scoping preserves a newer session-bundle file over a stale root copy', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-delivery-stale-root-copy-'));
+  try {
+    const request: GatewayRequest = {
+      skillDomain: 'literature',
+      prompt: 'answer from existing package without rewriting files',
+      workspacePath: workspace,
+      artifacts: [],
+      uiState: { sessionId: 'session-1', sessionCreatedAt: '2026-05-12T00:00:00.000Z' },
+    };
+    const refs = backendPayloadRefs('direct-run', 'agentserver://direct-payload', '.sciforge/sessions/2026-05-12_literature_session-1');
+    const sourceRel = 'research-package/timeline-budget.md';
+    const scopedRel = '.sciforge/sessions/2026-05-12_literature_session-1/task-results/research-package/timeline-budget.md';
+    await mkdir(dirname(join(workspace, sourceRel)), { recursive: true });
+    await mkdir(dirname(join(workspace, scopedRel)), { recursive: true });
+    await writeFile(join(workspace, sourceRel), '# Timeline\n\nTotal: $120,000 / 100%\n', 'utf8');
+    await writeFile(join(workspace, scopedRel), '# Timeline v2\n\nTotal: $80,000 / 100%\n', 'utf8');
+    await utimes(join(workspace, sourceRel), new Date('2026-05-12T00:00:00.000Z'), new Date('2026-05-12T00:00:00.000Z'));
+    await utimes(join(workspace, scopedRel), new Date('2026-05-13T00:00:00.000Z'), new Date('2026-05-13T00:00:00.000Z'));
+
+    const payload: ToolPayload = {
+      message: 'Confirmed from existing package.',
+      confidence: 0.8,
+      claimType: 'result',
+      evidenceLevel: 'runtime',
+      reasoningTrace: 'stale root copy guard test',
+      claims: [],
+      uiManifest: [{ componentId: 'report-viewer', artifactRef: 'timeline-budget' }],
+      executionUnits: [{ id: 'direct', status: 'done', tool: 'agentserver.direct-text' }],
+      artifacts: [{
+        id: 'timeline-budget',
+        type: 'markdown',
+        path: sourceRel,
+        data: { markdown: 'stale inline summary should not replace the file' },
+        metadata: { source: 'existing-context', reusedForContextAnswer: true },
+      }],
+    };
+
+    const normalizedArtifacts = await normalizeArtifactsForPayload(payload.artifacts, workspace, refs);
+    const materialized = await materializeBackendPayloadOutput(workspace, request, {
+      ...payload,
+      artifacts: normalizedArtifacts,
+    }, refs);
+
+    assert.equal(await readFile(join(workspace, scopedRel), 'utf8'), '# Timeline v2\n\nTotal: $80,000 / 100%\n');
+    assert.equal(materialized.artifacts[0].dataRef, scopedRel);
+    assert.equal((materialized.artifacts[0].data as Record<string, unknown>).markdown, '# Timeline v2\n\nTotal: $80,000 / 100%\n');
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -103,6 +103,40 @@ test('attachResultPresentationContract separates protocol success from unmet tas
   assert.match(String(card?.nextStep), /requested report|preserved table refs/i);
 });
 
+test('attachResultPresentationContract does not let a partial presentation inherit satisfied task outcome', () => {
+  const attached = attachResultPresentationContract(payload({
+    message: 'Only answered from selected QC refs; no workspace task was started.',
+    claims: [{ id: 'direct-context-claim', text: 'Only answered from selected QC refs.' }],
+    artifacts: [{ id: 'direct-context-summary', type: 'runtime-context-summary', data: { markdown: 'Only answered from selected QC refs.' } }],
+    executionUnits: [{ id: 'EU-direct-context', status: 'done', tool: 'sciforge.direct-context-fast-path' }],
+    displayIntent: {
+      protocolStatus: 'protocol-success',
+      taskOutcome: 'satisfied',
+      resultPresentation: createResultPresentationContract({
+        id: 'partial-selected-ref-answer',
+        status: 'partial',
+        answerBlocks: [{ id: 'answer', kind: 'paragraph', text: 'Only answered from selected QC refs; no file write happened.' }],
+        nextActions: [{ id: 'write-files', label: 'Run the requested writeback task.', kind: 'continue' }],
+      }),
+    },
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: '不要只回答，必须实际写回/覆盖已有交付物文件并保存四个 markdown 文件。',
+      artifacts: [],
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, unknown> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, unknown> | undefined;
+  const visibleAnswer = (projection?.conversationProjection as Record<string, unknown> | undefined)?.visibleAnswer as Record<string, unknown> | undefined;
+
+  assert.equal(projection?.protocolSuccess, true);
+  assert.equal(projection?.taskSuccess, false);
+  assert.equal(card?.taskOutcome, 'needs-work');
+  assert.equal(visibleAnswer?.status, 'degraded-result');
+});
+
 test('attachResultPresentationContract does not treat message text alone as satisfied task outcome', () => {
   const attached = attachResultPresentationContract(payload({
     message: 'Looks complete, but no structured task outcome was declared.',
@@ -560,6 +594,291 @@ test('attachResultPresentationContract honors nonblocking latency for harness li
   assert.equal(visibleAnswer?.status, 'satisfied');
   assert.equal(resultPresentation?.status, 'complete');
   assert.doesNotMatch(String(visibleAnswer?.text), /required verification|human approval|Partial result artifacts/i);
+});
+
+test('attachResultPresentationContract rebuilds stale partial presentation after verification becomes nonblocking', () => {
+  const stalePartial = createResultPresentationContract({
+    id: 'stale-background-verification-presentation',
+    status: 'partial',
+    answerBlocks: [
+      {
+        id: 'answer-needs-work',
+        kind: 'paragraph',
+        text: 'Partial result artifacts are available, but the user goal is not fully satisfied yet.\n\nNext step: Run the required verifier or attach human approval before marking the task satisfied.',
+      },
+      {
+        id: 'answer-draft-summary',
+        kind: 'paragraph',
+        text: 'Draft result summary: All four files read. Current budget is $80,000 / 100% and the timeline is 9 months.',
+      },
+    ],
+    keyFindings: [{
+      id: 'package-confirmed',
+      text: 'All four files read.',
+      verificationState: 'unverified',
+      citationIds: [],
+    }],
+    artifactActions: [{
+      id: 'timeline-budget',
+      label: 'Timeline Budget',
+      ref: '.sciforge/task-results/research-package/timeline-budget.md',
+      kind: 'inspect',
+      action: 'inspect',
+    }],
+    nextActions: [{ id: 'background-verification', label: 'Background verification can continue.', kind: 'inspect' }],
+    defaultExpandedSections: ['answer', 'evidence', 'artifacts'],
+  });
+
+  const attached = attachResultPresentationContract(payload({
+    message: 'All four files read. Current budget is $80,000 / 100% and the timeline is 9 months.',
+    artifacts: [{
+      id: 'timeline-budget',
+      type: 'markdown',
+      title: 'Timeline Budget',
+      dataRef: '.sciforge/task-results/research-package/timeline-budget.md',
+      data: { markdown: '# Timeline and Budget\n\nTotal: $80,000 / 100%' },
+    }],
+    executionUnits: [{
+      id: 'agentserver-direct-answer',
+      status: 'done',
+      tool: 'agentserver.direct-answer',
+      outputRef: '.sciforge/task-results/agentserver-direct-answer.md',
+    }],
+    verificationResults: [{
+      id: 'background-work-verify',
+      verdict: 'unverified',
+      confidence: 0,
+      evidenceRefs: ['execution-unit:agentserver-direct-answer'],
+      repairHints: [],
+      diagnostics: {
+        required: false,
+        nonBlocking: true,
+        visibleUnverified: true,
+      },
+    }],
+    displayIntent: {
+      resultPresentation: stalePartial,
+    },
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: 'Confirm the current files and keep background verification folded.',
+      artifacts: [],
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, any> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, any> | undefined;
+  const visibleAnswer = (projection?.conversationProjection as Record<string, any> | undefined)?.visibleAnswer as Record<string, any> | undefined;
+  const resultPresentation = attached.displayIntent?.resultPresentation as Record<string, any> | undefined;
+  const answerBlocks = resultPresentation?.answerBlocks as Array<Record<string, unknown>> | undefined;
+
+  assert.equal(projection?.taskSuccess, true);
+  assert.equal(card?.taskOutcome, 'satisfied');
+  assert.equal(visibleAnswer?.status, 'satisfied');
+  assert.equal(resultPresentation?.status, 'complete');
+  assert.doesNotMatch(String(visibleAnswer?.text), /required verification|human approval|Partial result artifacts|Draft result summary/i);
+  assert.doesNotMatch(String(answerBlocks?.[0]?.text), /Partial result artifacts|Draft result summary/i);
+});
+
+test('attachResultPresentationContract treats soft direct read-only answers as background-verifiable', () => {
+  const stalePartial = createResultPresentationContract({
+    id: 'stale-soft-direct-answer-presentation',
+    status: 'partial',
+    answerBlocks: [
+      {
+        id: 'answer-needs-work',
+        kind: 'paragraph',
+        text: 'Partial result artifacts are available, but the user goal is not fully satisfied yet.\n\nNext step: Run the required verifier or attach human approval before marking the task satisfied.',
+      },
+      {
+        id: 'answer-draft-summary',
+        kind: 'paragraph',
+        text: 'Draft result summary: All four files read. Current budget is $80,000 / 100% and the timeline is 9 months.',
+      },
+    ],
+    keyFindings: [{
+      id: 'package-confirmed',
+      text: 'All four files read.',
+      verificationState: 'unverified',
+      citationIds: [],
+    }],
+    artifactActions: [{
+      id: 'timeline-budget',
+      label: 'Timeline Budget',
+      ref: '.sciforge/task-results/research-package/timeline-budget.md',
+      kind: 'inspect',
+      action: 'inspect',
+    }],
+    nextActions: [{ id: 'audit-background', label: 'Keep audit details folded.', kind: 'inspect' }],
+  });
+
+  const attached = attachResultPresentationContract(payload({
+    message: 'All four files read. Current budget is $80,000 / 100% and the timeline is 9 months.',
+    artifacts: [{
+      id: 'timeline-budget',
+      type: 'markdown',
+      title: 'Timeline Budget',
+      dataRef: '.sciforge/task-results/research-package/timeline-budget.md',
+      data: { markdown: '# Timeline and Budget\n\nTotal: $80,000 / 100%' },
+    }],
+    executionUnits: [{
+      id: 'agentserver-direct-answer',
+      status: 'done',
+      tool: 'agentserver.direct-text',
+      outputRef: '.sciforge/task-results/agentserver-direct-answer.md',
+    }],
+    displayIntent: {
+      resultPresentation: stalePartial,
+    },
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: 'Confirm the current files and keep verification/audit/raw details folded.',
+      artifacts: [],
+      verificationPolicy: {
+        required: true,
+        mode: 'lightweight',
+        riskLevel: 'medium',
+        reason: 'contractRef=runtime://agent-harness/contracts/balanced-default/test; profileId=balanced-default; intensity=light',
+      },
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, any> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, any> | undefined;
+  const visibleAnswer = (projection?.conversationProjection as Record<string, any> | undefined)?.visibleAnswer as Record<string, any> | undefined;
+  const resultPresentation = attached.displayIntent?.resultPresentation as Record<string, any> | undefined;
+  const answerBlocks = resultPresentation?.answerBlocks as Array<Record<string, unknown>> | undefined;
+
+  assert.equal(projection?.taskSuccess, true);
+  assert.equal(card?.taskOutcome, 'satisfied');
+  assert.equal(visibleAnswer?.status, 'satisfied');
+  assert.equal(resultPresentation?.status, 'complete');
+  assert.doesNotMatch(String(visibleAnswer?.text), /required verification|human approval|Partial result artifacts|Draft result summary/i);
+  assert.doesNotMatch(String(answerBlocks?.[0]?.text), /Partial result artifacts|Draft result summary/i);
+});
+
+test('attachResultPresentationContract does not let direct read-only answers satisfy durable writeback requests', () => {
+  const completePresentation = createResultPresentationContract({
+    id: 'direct-readonly-writeback-claim',
+    status: 'complete',
+    answerBlocks: [{
+      id: 'answer',
+      kind: 'paragraph',
+      text: 'All four files are already correctly written and verified on disk.',
+    }],
+    keyFindings: [{
+      id: 'claimed-writeback',
+      text: 'The package files were updated.',
+      verificationState: 'verified',
+      citations: [],
+    }],
+    artifactActions: [{
+      id: 'timeline-budget',
+      label: 'Timeline Budget',
+      ref: '.sciforge/task-results/research-package/timeline-budget.md',
+      kind: 'inspect',
+      action: 'inspect',
+    }],
+  });
+
+  const attached = attachResultPresentationContract(payload({
+    message: 'All four files are already correctly written and verified on disk.',
+    artifacts: [{
+      id: 'timeline-budget',
+      type: 'markdown',
+      title: 'Timeline Budget',
+      dataRef: '.sciforge/task-results/research-package/timeline-budget.md',
+      data: { markdown: '# Timeline and Budget\n\nTotal: $80,000 / 100%' },
+    }],
+    executionUnits: [{
+      id: 'agentserver-direct-answer',
+      status: 'done',
+      tool: 'agentserver.direct-answer',
+      outputRef: '.sciforge/task-results/agentserver-direct-answer.md',
+    }],
+    verificationResults: [{
+      id: 'background-work-verify',
+      verdict: 'unverified',
+      confidence: 0,
+      evidenceRefs: ['execution-unit:agentserver-direct-answer'],
+      repairHints: [],
+      diagnostics: {
+        required: false,
+        nonBlocking: true,
+        visibleUnverified: true,
+      },
+    }],
+    displayIntent: {
+      resultPresentation: completePresentation,
+    },
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: '不要只回答，必须实际写回/覆盖已有交付物文件并保存四个 markdown 文件。',
+      artifacts: [],
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, any> | undefined;
+  const proxy = projection?.userSatisfactionProxy as Record<string, any> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, any> | undefined;
+  const visibleAnswer = (projection?.conversationProjection as Record<string, any> | undefined)?.visibleAnswer as Record<string, any> | undefined;
+
+  assert.equal(projection?.taskSuccess, false);
+  assert.equal(card?.taskOutcome, 'needs-work');
+  assert.equal(proxy?.answeredLatestRequest, false);
+  assert.match(String(proxy?.reasons), /durable artifact writeback/i);
+  assert.equal(visibleAnswer?.status, 'degraded-result');
+});
+
+test('attachResultPresentationContract treats explicit read-only no-rewrite confirmations as satisfiable', () => {
+  const attached = attachResultPresentationContract(payload({
+    message: 'Current effective constraints are $80,000 USD, 9 months, no real patient data, and the team is unchanged.',
+    artifacts: [{
+      id: 'p6-final-readonly-confirmation',
+      type: 'research-report',
+      title: 'P6 Final Read-Only Confirmation',
+      dataRef: '.sciforge/task-results/p6-final-readonly-confirmation.md',
+      data: {
+        markdown: 'Current effective constraints: $80,000 USD, 9 months, no real patient data, team unchanged. timeline-budget.md Total: $80,000 / 100%.',
+      },
+    }],
+    executionUnits: [{
+      id: 'agentserver-direct-answer',
+      status: 'done',
+      tool: 'agentserver.direct-text',
+      outputRef: '.sciforge/task-results/agentserver-direct-answer.md',
+    }],
+    verificationResults: [{
+      id: 'background-work-verify',
+      verdict: 'unverified',
+      confidence: 0,
+      evidenceRefs: ['execution-unit:agentserver-direct-answer'],
+      repairHints: [],
+      diagnostics: {
+        required: false,
+        nonBlocking: true,
+        visibleUnverified: true,
+      },
+    }],
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: '请再次做最终收口，只读当前已落盘文件，不要重写文件。确认 Total 是 $80,000 / 100%。',
+      artifacts: [],
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, any> | undefined;
+  const proxy = projection?.userSatisfactionProxy as Record<string, any> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, any> | undefined;
+
+  assert.equal(projection?.taskSuccess, true);
+  assert.equal(card?.taskOutcome, 'satisfied');
+  assert.equal(proxy?.answeredLatestRequest, true);
+  assert.doesNotMatch(String(proxy?.reasons), /durable artifact writeback/i);
 });
 
 test('attachResultPresentationContract treats selected verifier ids as background unless explicitly required', () => {

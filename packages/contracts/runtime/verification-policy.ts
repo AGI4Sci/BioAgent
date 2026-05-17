@@ -108,7 +108,10 @@ export function normalizeRuntimeVerificationPolicy(
       unverifiedReason: explicit?.unverifiedReason,
     };
     if (directContextNonBlocking) return relaxDirectContextVerificationPolicy(normalized);
-    if (softHarnessVerificationCanUseNonBlockingLatency(request, normalized, payload)) {
+    if (
+      softHarnessVerificationCanUseNonBlockingLatency(request, normalized, payload)
+      || softHarnessVerificationCanUseBackgroundDefault(request, normalized, payload)
+    ) {
       return relaxSoftHarnessVerificationPolicy(normalized);
     }
     return normalized;
@@ -280,10 +283,11 @@ export function verificationIsNonBlocking(
     policy.selectedVerifierIds ?? [],
   );
   const softHarnessRequired = softHarnessVerificationCanUseNonBlockingLatency(request, policy, payload);
-  return (latencyNonBlocking || directContextReadOnly)
+  const softHarnessBackground = softHarnessVerificationCanUseBackgroundDefault(request, policy, payload);
+  return (latencyNonBlocking || directContextReadOnly || softHarnessBackground)
     && policy.riskLevel !== 'high'
     && policy.humanApprovalPolicy !== 'required'
-    && (!policy.required || softHarnessRequired);
+    && (!policy.required || softHarnessRequired || softHarnessBackground);
 }
 
 export function mostDecisiveVerificationResult(results: RuntimeVerificationResult[]) {
@@ -429,6 +433,18 @@ function softHarnessVerificationCanUseNonBlockingLatency(
   payload?: RuntimeVerificationPolicyPayload,
 ) {
   if (!verificationLatencyIsNonBlocking(request)) return false;
+  if (!isSoftAgentHarnessVerificationPolicy(policy)) return false;
+  if (policy.riskLevel === 'high' || policy.humanApprovalPolicy === 'required') return false;
+  if (hasStructuredHighRiskActionSignal(request, payload)) return false;
+  if (blockingVerificationExplicitlyRequested(request)) return false;
+  return true;
+}
+
+function softHarnessVerificationCanUseBackgroundDefault(
+  request: RuntimeVerificationPolicyRequest,
+  policy: RuntimeVerificationPolicy,
+  payload?: RuntimeVerificationPolicyPayload,
+) {
   if (!isSoftAgentHarnessVerificationPolicy(policy)) return false;
   if (policy.riskLevel === 'high' || policy.humanApprovalPolicy === 'required') return false;
   if (hasStructuredHighRiskActionSignal(request, payload)) return false;

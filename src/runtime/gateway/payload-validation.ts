@@ -464,6 +464,10 @@ function claimHasEvidenceText(claim: Record<string, unknown>) {
     claim.basis,
     claim.support,
     claim.source,
+    claim.text,
+    claim.claim,
+    claim.summary,
+    claim.description,
   ].some((value) => typeof value === 'string' && value.trim().length > 0);
 }
 

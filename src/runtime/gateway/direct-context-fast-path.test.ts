@@ -93,6 +93,39 @@ test('context follow-up protocol enables direct context answer even when AgentSe
   assert.match(payload.message, /research-report|report/i);
 });
 
+test('direct context fast path yields to backend when prompt negates answer-only and requires writeback', () => {
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: '不要只回答，必须实际写回/覆盖已有交付物文件。请更新并保存 research-package/project-brief.md、decision-log.md、risk-register.md、timeline-budget.md，并复核 Total 是 $80,000 / 100%。',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'timeline-budget',
+      type: 'markdown',
+      path: 'research-package/timeline-budget.md',
+      data: { markdown: '# Timeline\n\nTotal: $120,000 / 100%' },
+    }],
+    uiState: {
+      directContextDecision: directDecision(),
+      conversationPolicy: {
+        applicationStatus: 'applied',
+        policySource: 'python-conversation-policy',
+        ...canonicalDirectDecision('context-summary'),
+        executionModePlan: { executionMode: 'direct-context-answer' },
+        responsePlan: { initialResponseMode: 'direct-context-answer' },
+      },
+      currentReferences: [{
+        id: 'selected-qc',
+        kind: 'artifact',
+        ref: 'artifact:timeline-budget',
+        label: 'Timeline Budget',
+        summary: 'stale selected reference',
+      }],
+    },
+  };
+
+  assert.equal(directContextFastPathPayload(request), undefined);
+});
+
 test('context follow-up summarizes risk claims from current context instead of dumping refs', () => {
   const request: GatewayRequest = {
     skillDomain: 'literature',

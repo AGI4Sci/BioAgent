@@ -243,6 +243,38 @@ test('package verification policy treats harness light verification as non-block
   assert.equal(gate.result.diagnostics?.nonBlocking, true);
 });
 
+test('package verification policy treats soft harness light verification as background by default', () => {
+  const request = {
+    prompt: 'Generate a mini grant research package.',
+    verificationPolicy: {
+      required: true,
+      mode: 'lightweight',
+      riskLevel: 'medium',
+      reason: 'contractRef=runtime://agent-harness/contracts/balanced-default/test; profileId=balanced-default; intensity=light',
+    },
+  };
+  const payload = {
+    message: 'Research package generated successfully.',
+    claimType: 'research-package',
+    evidenceLevel: 'generated',
+    executionUnits: [{
+      id: 'generate-package',
+      status: 'done',
+      tool: 'workspace-task',
+    }],
+  };
+  const policy = normalizeRuntimeVerificationPolicy(request, payload);
+  const gate = evaluateRuntimeVerificationGate(payload, request, policy);
+
+  assert.equal(policy.required, false);
+  assert.match(policy.reason, /non-blocking background verification/);
+  assert.equal(verificationIsNonBlocking(request, policy, payload), true);
+  assert.equal(gate.blocked, false);
+  assert.equal(gate.result.verdict, 'unverified');
+  assert.equal(gate.result.diagnostics?.required, false);
+  assert.equal(gate.result.diagnostics?.nonBlocking, true);
+});
+
 test('package verification policy keeps explicit harness verification blocking despite latency policy', () => {
   const request = {
     prompt: 'Generate a mini grant research package, but required verification must pass before completion.',

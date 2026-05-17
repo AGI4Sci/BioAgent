@@ -96,7 +96,7 @@ def _infer_task_relation(prompt: str, has_explicit_refs: bool, has_prior_context
         return "new-task"
     if _has_repair_intent(prompt, has_explicit_refs, has_prior_context, keywords):
         return "repair"
-    if _matches(keywords, "continue", prompt):
+    if _matches(keywords, "continue", prompt) and not _is_future_followup_instruction(prompt, has_prior_context, has_explicit_refs):
         return "continue"
     if has_prior_context and _matches(keywords, "location", prompt):
         return "continue"
@@ -109,6 +109,34 @@ def _infer_task_relation(prompt: str, has_explicit_refs: bool, has_prior_context
     # previously both branches returned "new-task", causing the TypeScript context policy
     # to return mode='isolate' even on natural second-turn follow-ups.
     return "continue" if has_prior_context else "new-task"
+
+
+def _is_future_followup_instruction(prompt: str, has_prior_context: bool, has_explicit_refs: bool) -> bool:
+    """Avoid treating requirements for a later follow-up as current continuation.
+
+    Fresh tasks often ask SciForge to produce an artifact that can be selected
+    in a subsequent turn. Phrases like "完成后我会继续追问" describe a future UI
+    requirement, not a request to resume prior work.
+    """
+
+    if has_prior_context or has_explicit_refs:
+        return False
+    future_followup = re.search(
+        r"(?:完成后|之后|稍后|后续|下一轮|下一步|later|after(?:wards)?|subsequent(?:ly)?)"
+        r".{0,80}"
+        r"(?:继续追问|追问|follow[- ]?up|continue)",
+        prompt,
+        re.I,
+    )
+    if future_followup:
+        return True
+    return bool(re.search(
+        r"(?:follow[- ]?up|继续追问|追问)"
+        r".{0,80}"
+        r"(?:可用|可复用|usable|available|works?|support|支持)",
+        prompt,
+        re.I,
+    ))
 
 
 def _has_repair_intent(prompt: str, has_explicit_refs: bool, has_prior_context: bool, keywords: Mapping[str, re.Pattern[str]]) -> bool:

@@ -1,11 +1,14 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
 import type { AgentServerGenerationResponse, GatewayRequest, SkillAvailability, ToolPayload, WorkspaceRuntimeCallbacks } from '../runtime-types.js';
-import { isRecord, safeWorkspaceRel } from '../gateway-utils.js';
+import { errorMessage, isRecord, safeWorkspaceRel } from '../gateway-utils.js';
 import { ensureSessionBundle, sessionBundleRelForRequest, sessionBundleResourceRel } from '../session-bundle.js';
 import { emitWorkspaceRuntimeEvent } from '../workspace-runtime-events.js';
-import { sha1 } from '../workspace-task-runner.js';
+import { fileExists, sha1 } from '../workspace-task-runner.js';
 import { materializeBackendPayloadOutput, type RuntimeRefBundle } from './artifact-materializer.js';
 import {
   attachGeneratedTaskSuccessBudgetDebit,
@@ -44,6 +47,7 @@ import {
   agentServerPathOnlyStrictRetryStillMissingReason,
   agentServerPathOnlyTaskFilesReason,
   agentServerStablePayloadTaskId,
+  workspaceTaskPythonCommandCandidates,
 } from '../../../packages/skills/runtime-policy';
 import {
   evaluateGeneratedTaskPayloadPreflight,
@@ -53,6 +57,8 @@ import {
 import { attachAgentServerCompletionCandidateArtifacts } from './agentserver-completion-candidate.js';
 
 export const AGENTSERVER_DIRECT_PAYLOAD_TASK_REF = 'agentserver://direct-payload' as const;
+
+const execFileAsync = promisify(execFile);
 
 export type AgentServerGenerationResult =
   | AgentServerTaskFilesGeneration
@@ -195,6 +201,10 @@ export async function resolveGeneratedTaskGenerationRetryLifecycle(
   const interfaceResult = await retryGeneratedTaskInterfaceContract(input, generation);
   if (interfaceResult.kind === 'payload') return interfaceResult;
   generation = interfaceResult.generation;
+
+  const syntaxResult = await retryGeneratedTaskSyntaxPreflightContract(input, generation);
+  if (syntaxResult.kind === 'payload') return syntaxResult;
+  generation = syntaxResult.generation;
 
   return await retryGeneratedTaskPayloadPreflightContract(input, generation);
 }
@@ -405,7 +415,8 @@ async function retryGeneratedTaskEntrypointContract(
   input: ResolveGeneratedTaskGenerationLifecycleInput,
   generation: AgentServerTaskFilesGeneration,
 ): Promise<ResolveGeneratedTaskGenerationLifecycleResult> {
-  const nonExecutableEntrypointReason = agentServerGeneratedEntrypointContractReason(generation.response, { normalizePath: safeWorkspaceRel });
+  const nonExecutableEntrypointReason = agentServerGeneratedEntrypointContractReason(generation.response, { normalizePath: safeWorkspaceRel })
+    ?? await generatedTaskEntrypointContentMissingReason(input.workspace, generation.response);
   if (!nonExecutableEntrypointReason) return { kind: 'task-files', generation };
   emitGenerationRetryEvent(input.callbacks, nonExecutableEntrypointReason, 'entrypoint');
   const retriedGeneration = await requestStrictGenerationRetry(input, nonExecutableEntrypointReason);
@@ -422,7 +433,8 @@ async function retryGeneratedTaskEntrypointContract(
       }),
     };
   }
-  const retryReason = agentServerGeneratedEntrypointContractReason(retriedGeneration.response, { normalizePath: safeWorkspaceRel });
+  const retryReason = agentServerGeneratedEntrypointContractReason(retriedGeneration.response, { normalizePath: safeWorkspaceRel })
+    ?? await generatedTaskEntrypointContentMissingReason(input.workspace, retriedGeneration.response);
   if (retryReason) {
     return repairNeeded(
       input,
@@ -430,6 +442,19 @@ async function retryGeneratedTaskEntrypointContract(
     );
   }
   return { kind: 'task-files', generation: retriedGeneration };
+}
+
+async function generatedTaskEntrypointContentMissingReason(workspace: string, response: AgentServerGenerationResponse) {
+  const entryRel = safeWorkspaceRel(response.entrypoint.path);
+  const content = response.taskFiles.find((file) => safeWorkspaceRel(file.path) === entryRel)?.content
+    ?? await readGeneratedTaskFileIfPresent(workspace, entryRel);
+  if (content !== undefined) return undefined;
+  const declaredFiles = response.taskFiles.map((file) => safeWorkspaceRel(file.path)).filter(Boolean);
+  return [
+    `AgentServer entrypoint path is not materialized: ${entryRel}.`,
+    'The entrypoint path must match one returned taskFiles item with inline content or an already-written readable workspace file.',
+    declaredFiles.length ? `Returned taskFiles: ${declaredFiles.join(', ')}` : 'Returned taskFiles: none',
+  ].join(' ');
 }
 
 async function retryGeneratedTaskPathOnlyContract(
@@ -479,6 +504,37 @@ async function retryGeneratedTaskInterfaceContract(
     return repairNeeded(
       input,
       `AgentServer generation contract violation: ${taskInterfaceReason}. Strict retry still returned a static/non-interface task: ${retryInterfaceReason}`,
+    );
+  }
+  return { kind: 'task-files', generation: retriedGeneration };
+}
+
+async function retryGeneratedTaskSyntaxPreflightContract(
+  input: ResolveGeneratedTaskGenerationLifecycleInput,
+  generation: AgentServerTaskFilesGeneration,
+): Promise<ResolveGeneratedTaskGenerationLifecycleResult> {
+  const syntaxReason = await generatedTaskSyntaxPreflightReason(input.workspace, generation.response);
+  if (!syntaxReason) return { kind: 'task-files', generation };
+  emitGenerationRetryEvent(input.callbacks, syntaxReason, 'syntax-preflight');
+  const retriedGeneration = await requestStrictGenerationRetry(input, syntaxReason);
+  if (!retriedGeneration.ok) return repairNeeded(input, retriedGeneration.error);
+  if ('directPayload' in retriedGeneration) {
+    return {
+      kind: 'payload',
+      payload: await completeAgentServerDirectPayloadLifecycle({
+        ...directPayloadCompletionInput(input, retriedGeneration),
+        kind: 'strict-retry',
+        stableTaskKind: 'direct-retry-syntax-preflight',
+        logLine: `AgentServer syntax-preflight retry direct ToolPayload run: ${retriedGeneration.runId || 'unknown'}\n`,
+        source: 'agentserver-direct-payload',
+      }),
+    };
+  }
+  const retrySyntaxReason = await generatedTaskSyntaxPreflightReason(input.workspace, retriedGeneration.response);
+  if (retrySyntaxReason) {
+    return repairNeeded(
+      input,
+      `AgentServer generation contract violation: ${syntaxReason}. Strict retry still returned code that failed syntax preflight: ${retrySyntaxReason}`,
     );
   }
   return { kind: 'task-files', generation: retriedGeneration };
@@ -844,6 +900,58 @@ async function generatedTaskInterfaceContractReason(workspace: string, response:
   if (content === undefined) return undefined;
   const language = String(response.entrypoint.language || '').toLowerCase();
   return agentServerGeneratedTaskInterfaceContractReason({ entryRel, language, source: content });
+}
+
+async function generatedTaskSyntaxPreflightReason(workspace: string, response: AgentServerGenerationResponse) {
+  const language = String(response.entrypoint.language || '').toLowerCase();
+  if (language !== 'python') return undefined;
+  const entryRel = safeWorkspaceRel(response.entrypoint.path);
+  const content = response.taskFiles.find((file) => safeWorkspaceRel(file.path) === entryRel)?.content
+    ?? await readGeneratedTaskFileIfPresent(workspace, entryRel);
+  if (content === undefined) return undefined;
+  const command = await pythonSyntaxCommand(workspace);
+  const tempDir = await mkdtemp(join(tmpdir(), 'sciforge-syntax-preflight-'));
+  const tempPath = join(tempDir, 'entrypoint.py');
+  try {
+    await writeFile(tempPath, content, 'utf8');
+    await execFileAsync(command, [
+      '-c',
+      [
+        'import ast, sys',
+        'path = sys.argv[1]',
+        'with open(path, "r", encoding="utf-8") as handle:',
+        '    ast.parse(handle.read(), filename=sys.argv[2])',
+      ].join('\n'),
+      tempPath,
+      entryRel,
+    ], {
+      cwd: workspace,
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+    });
+    return undefined;
+  } catch (error) {
+    return `Generated Python entrypoint failed syntax preflight before execution: ${sanitizeChildProcessDiagnostic(error)}`;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function pythonSyntaxCommand(workspace: string) {
+  for (const candidate of workspaceTaskPythonCommandCandidates(workspace)) {
+    if (await fileExists(candidate)) return candidate;
+  }
+  return 'python3';
+}
+
+function sanitizeChildProcessDiagnostic(error: unknown) {
+  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  return [
+    typeof record.stderr === 'string' ? record.stderr : '',
+    typeof record.stdout === 'string' ? record.stdout : '',
+    errorMessage(error),
+  ].filter((part) => part.trim()).join('\n').trim();
 }
 
 function directPayloadCompletionInput(

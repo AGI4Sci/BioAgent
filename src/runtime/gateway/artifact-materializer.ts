@@ -252,9 +252,14 @@ function targetFormatForArtifact(artifact: Record<string, unknown>): ReadableTar
   if (/\.csv(?:$|[?#])/.test(ref) || /csv|table|matrix|dataset/.test(type)) return 'csv';
   if (/\.tsv(?:$|[?#])/.test(ref)) return 'tsv';
   if (/\.txt(?:$|[?#])/.test(ref)) return 'text';
+  if (artifactHasReadableInlineMarkdown(artifact)) return 'markdown';
   if (/\.json(?:$|[?#])/.test(ref) || /json|payload|manifest|schema/.test(type)) return 'json';
   if (/\.(?:pdf|png|jpe?g|gif|webp|svg|docx?|xlsx?|pptx?)(?:$|[?#])/.test(ref)) return 'binary';
   return 'unknown';
+}
+
+function artifactHasReadableInlineMarkdown(artifact: Record<string, unknown>) {
+  return Boolean(unwrapReadableContent(artifact, 'markdown'));
 }
 
 function existingArtifactReadableRef(

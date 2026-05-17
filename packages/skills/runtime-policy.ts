@@ -278,10 +278,10 @@ export function agentServerGeneratedTaskPromptPolicyLines() {
     'Hard contract: taskFiles MUST be an array of objects with path, language, and non-empty content unless the file was physically written in the workspace before returning. Never return taskFiles as string paths only.',
     'Hard contract: entrypoint.path MUST reference one of the returned taskFiles or a file that was physically written in the workspace before returning.',
     'If you physically write task files into the workspace, prefer a compact path-only taskFiles object (path + language, content may be omitted/empty) and return JSON immediately. Do not cat/read full generated source back into the final response just to inline it.',
-    'Transport budget contract: single long string around 8k characters may compact; long reports must be task-written file refs.',
+    'Transport budget contract: single long string around 8k characters may compact; terminal AgentServerGenerationResponse JSON should stay under 6000 characters and each taskFiles[].content should normally stay under 3500 characters.',
     'Entrypoint contract: entrypoint.path must be executable task code supported by the runner (.py/.r/.sh, or language=cli with an explicit command). Do not set a markdown/text/json/pdf/report artifact as entrypoint. For report-only answers, return a direct ToolPayload; for generated tasks, make the executable write report/data artifacts.',
     'Generated task interface contract: executable task code must read the SciForge inputPath argument for prompt/current refs/artifacts and write a valid ToolPayload JSON file to the outputPath argument. outputPath is a JSON file path, not an output directory; write extra report/data files beside it under dirname(outputPath) / Path(output_path).parent, then cite those files from artifacts[].path/dataRef/ref.',
-    'Generated task compactness contract: build long text at runtime; no huge markdown.',
+    'Generated task compactness contract: build long text at runtime; no huge markdown, long comments, long embedded tables, or verbose report templates in taskFiles[].content. If the executable cannot fit compactly, return a valid failed-with-reason ToolPayload explaining the missing capability/budget instead of emitting oversized taskFiles JSON.',
     'Generated Python dependency contract: avoid optional pandas/report helpers that require undeclared packages, for example DataFrame.to_markdown requires tabulate; either include the package in the task dependency bootstrap or use dependency-free formatting such as to_csv/string tables. Report formatting must not prevent the ToolPayload write.',
     'Generated Python statistics contract: when using pandas with statsmodels/sklearn/scipy, coerce design matrices and outcomes to numeric dtypes after get_dummies/joins (for example X = X.astype(float), y = y.astype(float)); wrap model fitting and rerun-command creation so a fit/runtime failure still writes a failed-with-reason ToolPayload with stderr-style diagnostics, not only a traceback or partial files.',
     'Generated ToolPayload construction contract: initialize top-level claims, uiManifest, executionUnits, and artifacts as arrays. Append uiManifest slots as array entries such as {"componentId":"table-viewer","artifactRef":"artifact-id"}; never use an object descriptor such as {"preferredView":...,"views":[...]} for uiManifest.',
@@ -425,7 +425,7 @@ export function agentServerWorkspaceTaskRepairPromptPolicyLines(group: 'all' | '
   return [...groups.intro, ...groups.completion];
 }
 
-export function agentServerGeneratedTaskRetryDetail(kind: 'entrypoint' | 'path-only-task-files' | 'task-interface' | 'payload-preflight' | 'provider-first-payload-preflight' | 'provider-first-recovery-adapter') {
+export function agentServerGeneratedTaskRetryDetail(kind: 'entrypoint' | 'path-only-task-files' | 'task-interface' | 'syntax-preflight' | 'payload-preflight' | 'provider-first-payload-preflight' | 'provider-first-recovery-adapter') {
   if (kind === 'entrypoint') {
     return 'Retrying AgentServer generation once; entrypoint must be executable code, while reports/data must be emitted as artifacts or direct ToolPayload content.';
   }
@@ -437,6 +437,9 @@ export function agentServerGeneratedTaskRetryDetail(kind: 'entrypoint' | 'path-o
   }
   if (kind === 'payload-preflight') {
     return 'Retrying AgentServer generation once; generated tasks must write a complete ToolPayload envelope before expensive execution.';
+  }
+  if (kind === 'syntax-preflight') {
+    return 'Retrying AgentServer generation once; generated task entrypoints must parse before SciForge runs workspace code.';
   }
   if (kind === 'provider-first-recovery-adapter') {
     return 'Using deterministic provider-first recovery adapter after strict retry still bypassed ready SciForge provider routes.';

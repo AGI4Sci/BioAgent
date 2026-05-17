@@ -258,8 +258,9 @@ export function looksLikeVisionSenseComputerUseRequest(prompt: string) {
   if (/\b(browser|word|powerpoint|ppt)\b.{0,32}\b(open|click|type|scroll|drag|operate|control|use)\b/i.test(text)) return true;
   if (/\b(open|click|type|scroll|drag|operate|control|use)\b.{0,32}\b(browser|word|powerpoint|ppt)\b/i.test(text)) return true;
   if (/截图|屏幕|桌面|鼠标|键盘|点击|滚动|拖拽/.test(text)) return true;
-  if (/(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿).{0,24}(打开|点击|输入|滚动|拖拽|操作|控制|切换|保存|创建)/.test(text)) return true;
-  if (/(打开|点击|输入|滚动|拖拽|操作|控制|切换|保存|创建).{0,24}(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿)/.test(text)) return true;
+  if (/(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿).{0,24}(打开|点击|输入|滚动|拖拽|操作|切换|保存|创建)/.test(text)) return true;
+  if (/(打开|点击|输入|滚动|拖拽|操作|切换|保存|创建).{0,24}(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿)/.test(text)) return true;
+  if (/控制.{0,12}(浏览器|网页|页面|窗口|应用|软件|演示文稿)|(?:浏览器|网页|页面|窗口|应用|软件|演示文稿).{0,12}控制/.test(text)) return true;
   return false;
 }
 

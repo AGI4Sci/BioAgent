@@ -23,7 +23,15 @@ assert.equal(
   false,
 );
 assert.equal(
+  looksLikeComputerUseRequest('请生成一个项目设计文档，每个文件控制在 400 words 内，并写入 workspace 目录。'),
+  false,
+);
+assert.equal(
   looksLikeComputerUseRequest('点击浏览器里的搜索框并输入 KRAS G12D。'),
+  true,
+);
+assert.equal(
+  looksLikeComputerUseRequest('请控制浏览器打开网页并点击搜索框。'),
   true,
 );
 assert.equal(

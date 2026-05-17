@@ -16,9 +16,14 @@ Archive/historical note: 根目录 `PROJECT.md` 中 2026-05-14/15 的 CAP/PSM/ME
 
 SciForge 当前是本地 workspace-backed 科研 Agent 工作台。它的职责不是维护一套硬编码回复模板，而是把用户请求、workspace 引用、scenario contract、能力 brief、backend stream、artifact、ExecutionUnit、反馈和修复证据组织成可审计系统。
 
+产品边界必须同时保护通用性和专业性：SciForge 复用通用 backend agent 的理解、规划、文件操作、代码生成、检索和修复能力；SciForge 自身只在科研资产形成的关键节点提供 contract、artifact schema、viewer、verifier、projection、权限、审计和 repair loop。换句话说，SciForge 是带专业收敛能力的通用科研 Agent 工作台，而不是僵硬流程系统，也不是第二个通用 coding agent。
+
 核心原则来自 [`../PROJECT.md`](../PROJECT.md)：
 
 - SciForge 的根本定位是 downstream scenario adapter，不是第二套 agent；它应尽可能复用 agent backend 的通用推理、检索、文件读取、artifact 解析、工具选择、多轮恢复和胶水代码生成能力。
+- 用户入口和探索过程默认保持开放：不要要求用户先理解或选择 contract bundle、artifact schema、provider route 或 verifier policy；自然语言目标、当前 selection 和 workspace refs 应足以启动一次 backend-driven run。
+- 专业化只在资产边界收敛：当结果需要展示、复用、交接、验证、修复、导出或进入团队流程时，必须落入 artifact / ExecutionUnit / evidence / verifier / Projection contract。
+- 保留 escape hatch：用户可以要求先快速探索、临时试算或绕开严格交付格式；系统仍应记录最小事实和风险标记，但不能把所有探索都提前压成强 schema。
 - 正常用户请求必须交给 AgentServer/agent backend 真实理解和回答。
 - 多轮对话的权威事实来源是 workspace 本地 append-only ledger/ref store；AgentServer 负责 context orchestration、retrieval、compaction 和 backend handoff；SciForge 不把完整聊天历史当 prompt 记忆，只把 ledger/ref/blob store 投影成当前 turn 所需的 bounded context packet。详见 [`SciForge-SingleAgent-Architecture.md`](SciForge-SingleAgent-Architecture.md)。
 - Python conversation-policy package 是多轮对话策略算法主路径；其中 execution mode classifier 是 `direct-context-answer` / `thin-reproducible-adapter` / `single-stage-task` / `multi-stage-project` / `repair-or-continue-project` 的唯一策略源。

@@ -80,6 +80,60 @@ test('generation lifecycle routes provider-first payload preflight violations to
   assert.equal(events.some((event) => /direct provider bypass/.test(event.message ?? '')), true);
 });
 
+test('generation lifecycle retries when entrypoint path does not match materialized task files', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-entrypoint-missing-retry-'));
+  const events: WorkspaceRuntimeEvent[] = [];
+  const strictRetryReasons: string[] = [];
+
+  const result = await resolveGeneratedTaskGenerationRetryLifecycle({
+    baseUrl: 'http://127.0.0.1:18080',
+    request: {
+      skillDomain: 'knowledge',
+      prompt: 'analyze a pasted TSV and write reproducible artifacts',
+      artifacts: [],
+      uiState: { sessionId: 'entrypoint-missing-retry' },
+    },
+    skill,
+    skills: [skill],
+    workspace,
+    generation: {
+      ok: true,
+      runId: 'initial-entrypoint-missing',
+      response: {
+        ...generation('analysis/run.tsv_analysis.py', [
+          'import json, sys',
+          '_, input_path, output_path = sys.argv',
+          'payload = {"message": "ok", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []}',
+          'open(output_path, "w", encoding="utf-8").write(json.dumps(payload))',
+        ].join('\n')),
+        entrypoint: { language: 'python', path: 'analysis/run.tsv_/run.tsv_analysis.py' },
+      },
+    },
+    callbacks: {
+      onEvent: (event) => events.push(event),
+    },
+    deps: depsWithRetry(async (params) => {
+      strictRetryReasons.push(params.strictTaskFilesReason ?? '');
+      return {
+        ok: true,
+        runId: 'retry-entrypoint-present',
+        response: generation('analysis/run.tsv_analysis.py', [
+          'import json, sys',
+          '_, input_path, output_path = sys.argv',
+          'payload = {"message": "ok", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []}',
+          'open(output_path, "w", encoding="utf-8").write(json.dumps(payload))',
+        ].join('\n')),
+      };
+    }),
+  });
+
+  assert.equal(result.kind, 'task-files');
+  assert.equal(result.generation.runId, 'retry-entrypoint-present');
+  assert.match(strictRetryReasons[0] ?? '', /entrypoint path is not materialized/i);
+  assert.equal((strictRetryReasons[0] ?? '').includes('analysis/run.tsv_analysis.py'), true);
+  assert.equal(events.some((event) => /entrypoint path is not materialized/i.test(event.message ?? '')), true);
+});
+
 test('generation lifecycle provider-first adapter is deterministic for repeated bypasses', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-provider-first-preflight-still-blocked-'));
   const events: WorkspaceRuntimeEvent[] = [];
@@ -166,6 +220,58 @@ test('generation lifecycle retries generic payload preflight violations before e
   assert.match(strictRetryReasons[0] ?? '', /required ToolPayload envelope fields: claims/);
   assert.equal(events.some((event) => /payload preflight/i.test(event.message ?? '')), true);
   assert.equal(events.some((event) => /complete ToolPayload envelope/.test(event.detail ?? '')), true);
+});
+
+test('generation lifecycle retries Python syntax preflight violations before execution', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-syntax-preflight-retry-'));
+  const events: WorkspaceRuntimeEvent[] = [];
+  const strictRetryReasons: string[] = [];
+
+  const result = await resolveGeneratedTaskGenerationRetryLifecycle({
+    baseUrl: 'http://127.0.0.1:18080',
+    request: {
+      skillDomain: 'knowledge',
+      prompt: 'generate a reproducible messy TSV analysis package',
+      artifacts: [],
+      expectedArtifactTypes: ['csv', 'markdown', 'chart'],
+      uiState: { sessionId: 'syntax-preflight-retry' },
+    },
+    skill,
+    skills: [skill],
+    workspace,
+    generation: {
+      ok: true,
+      runId: 'initial-syntax-error',
+      response: generation('.sciforge/tasks/bad-syntax.py', [
+        'import json, sys',
+        '_, input_path, output_path = sys.argv',
+        'df´l = 1',
+        'open(output_path, "w", encoding="utf-8").write(json.dumps({"message": "ok", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []}))',
+      ].join('\n')),
+    },
+    callbacks: {
+      onEvent: (event) => events.push(event),
+    },
+    deps: depsWithRetry(async (params) => {
+      strictRetryReasons.push(params.strictTaskFilesReason ?? '');
+      return {
+        ok: true,
+        runId: 'retry-valid-syntax',
+        response: generation('.sciforge/tasks/valid-syntax.py', [
+          'import json, sys',
+          '_, input_path, output_path = sys.argv',
+          'payload = {"message": "ok", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []}',
+          'open(output_path, "w", encoding="utf-8").write(json.dumps(payload))',
+        ].join('\n')),
+      };
+    }),
+  });
+
+  assert.equal(result.kind, 'task-files');
+  assert.equal(result.generation.runId, 'retry-valid-syntax');
+  assert.match(strictRetryReasons[0] ?? '', /failed syntax preflight/i);
+  assert.match(strictRetryReasons[0] ?? '', /invalid character/i);
+  assert.equal(events.some((event) => /syntax preflight/i.test(event.message ?? '')), true);
 });
 
 test('generation lifecycle retries payload preflight again when strict retry surfaces outputPath directory misuse', async () => {

@@ -17,6 +17,7 @@ import {
   evaluateGeneratedTaskPayloadPreflight,
   generatedTaskPayloadPreflightFailureReason,
   generatedTaskPayloadPreflightRecoverActions,
+  runGeneratedTaskRepairAttemptLifecycle,
   type GeneratedTaskRuntimeRefs,
 } from './generated-task-runner-validation-lifecycle.js';
 import { isGeneratedTaskCapabilityFirstPolicyIssue } from './generated-task-payload-preflight.js';
@@ -31,7 +32,7 @@ export interface GeneratedTaskExecutionLifecycleInput {
   skill: SkillAvailability;
   generation: AgentServerTaskFilesGeneration;
   callbacks?: WorkspaceRuntimeCallbacks;
-  deps: Pick<GeneratedTaskRunnerDeps, 'repairNeededPayload'>;
+  deps: Pick<GeneratedTaskRunnerDeps, 'repairNeededPayload'> & Partial<Pick<GeneratedTaskRunnerDeps, 'attemptPlanRefs' | 'tryAgentServerRepairAndRerun'>>;
 }
 
 export interface GeneratedTaskExecutionLifecycleRun extends GeneratedTaskRuntimeRefs {
@@ -122,6 +123,18 @@ export async function runGeneratedTaskExecutionLifecycle(
     generatedPathMap: materialized.generatedPathMap,
   });
   if (syntaxPreflight.blocked) {
+    const repaired = await runGeneratedTaskSyntaxPreflightRepairLifecycle({
+      workspace: input.workspace,
+      request: input.request,
+      skill: input.skill,
+      generation: input.generation,
+      taskId,
+      refs,
+      syntaxPreflight,
+      callbacks: input.callbacks,
+      deps: input.deps,
+    });
+    if (repaired) return { kind: 'payload', payload: repaired };
     return {
       kind: 'payload',
       payload: input.deps.repairNeededPayload(
@@ -179,6 +192,112 @@ export async function runGeneratedTaskExecutionLifecycle(
       run,
       ...refs,
       supplementArtifactTypes: supplementScopeForGeneratedRun(input.request, input.generation.response.expectedArtifacts),
+    },
+  };
+}
+
+async function runGeneratedTaskSyntaxPreflightRepairLifecycle(input: {
+  workspace: string;
+  request: GatewayRequest;
+  skill: SkillAvailability;
+  generation: AgentServerTaskFilesGeneration;
+  taskId: string;
+  refs: GeneratedTaskRuntimeRefs;
+  syntaxPreflight: { blocked: true; reason: string; language: string; taskRel?: string; diagnostic: string };
+  callbacks?: WorkspaceRuntimeCallbacks;
+  deps: Pick<GeneratedTaskRunnerDeps, 'repairNeededPayload'> & Partial<Pick<GeneratedTaskRunnerDeps, 'attemptPlanRefs' | 'tryAgentServerRepairAndRerun'>>;
+}): Promise<ToolPayload | undefined> {
+  if (!input.deps.attemptPlanRefs || !input.deps.tryAgentServerRepairAndRerun) return undefined;
+  await writeSyntaxPreflightDiagnosticRefs(input.workspace, input.refs, input.syntaxPreflight);
+  const run = syntaxPreflightRunResult(input);
+  return await runGeneratedTaskRepairAttemptLifecycle({
+    workspacePath: input.workspace,
+    request: input.request,
+    skill: input.skill,
+    taskId: input.taskId,
+    runId: input.generation.runId,
+    run,
+    ...input.refs,
+    attemptPlanRefs: input.deps.attemptPlanRefs,
+    attemptStatus: 'repair-needed',
+    schemaErrors: ['python entrypoint syntax preflight failed'],
+    attemptSchemaErrors: ['python entrypoint syntax preflight failed'],
+    failureReason: input.syntaxPreflight.reason,
+    recoverActions: [
+      'Regenerate the task code so the entrypoint parses before execution.',
+      'Run a syntax-only parser check before rerunning expensive workspace work.',
+    ],
+    callbacks: input.callbacks,
+    tryAgentServerRepairAndRerun: input.deps.tryAgentServerRepairAndRerun,
+  });
+}
+
+async function writeSyntaxPreflightDiagnosticRefs(
+  workspace: string,
+  refs: GeneratedTaskRuntimeRefs,
+  syntaxPreflight: { reason: string; diagnostic: string },
+) {
+  const writes = [
+    { rel: refs.stdoutRel, content: '' },
+    { rel: refs.stderrRel, content: `${syntaxPreflight.reason}\n` },
+    {
+      rel: refs.outputRel,
+      content: `${JSON.stringify({
+        schemaVersion: 'sciforge.generated-task.syntax-preflight.v1',
+        status: 'repair-needed',
+        failureReason: syntaxPreflight.reason,
+        diagnostic: syntaxPreflight.diagnostic,
+      }, null, 2)}\n`,
+    },
+  ].filter((entry): entry is { rel: string; content: string } => typeof entry.rel === 'string' && entry.rel.length > 0);
+  for (const entry of writes) {
+    await mkdir(dirname(join(workspace, entry.rel)), { recursive: true });
+    await writeFile(join(workspace, entry.rel), entry.content, 'utf8');
+  }
+}
+
+function syntaxPreflightRunResult(input: {
+  workspace: string;
+  request: GatewayRequest;
+  generation: AgentServerTaskFilesGeneration;
+  taskId: string;
+  refs: GeneratedTaskRuntimeRefs;
+  syntaxPreflight: { reason: string; diagnostic: string };
+}): WorkspaceTaskRunResult {
+  return {
+    spec: {
+      id: input.taskId,
+      language: input.generation.response.entrypoint.language,
+      entrypoint: input.generation.response.entrypoint.command || 'main',
+      entrypointArgs: input.generation.response.entrypoint.args,
+      taskRel: input.refs.taskRel,
+      inputRel: input.refs.inputRel,
+      outputRel: input.refs.outputRel,
+      stdoutRel: input.refs.stdoutRel,
+      stderrRel: input.refs.stderrRel,
+      sessionBundleRel: sessionBundleRelForRequest(input.request),
+      input: {
+        prompt: input.request.prompt,
+        syntaxPreflight: {
+          status: 'blocked',
+          reason: input.syntaxPreflight.reason,
+          diagnostic: input.syntaxPreflight.diagnostic,
+        },
+      },
+    },
+    workspace: input.workspace,
+    command: 'python3',
+    args: ['-m', 'py_compile', input.refs.taskRel],
+    exitCode: 1,
+    stdoutRef: input.refs.stdoutRel,
+    stderrRef: input.refs.stderrRel,
+    outputRef: input.refs.outputRel,
+    stdout: '',
+    stderr: input.syntaxPreflight.reason,
+    runtimeFingerprint: {
+      kind: 'generated-task-python-syntax-preflight',
+      blocked: true,
+      taskRel: input.refs.taskRel,
     },
   };
 }

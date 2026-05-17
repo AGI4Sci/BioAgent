@@ -81,6 +81,25 @@ class GoalSnapshotTest(unittest.TestCase):
         self.assertIn("do-not-import-stale-prior-task-assumptions", snapshot["acceptanceCriteria"])
         self.assertNotIn("freshness", snapshot)
 
+    def test_future_report_followup_requirement_does_not_make_fresh_task_continuation(self) -> None:
+        snapshot = build_goal_snapshot(
+            {
+                "prompt": (
+                    "请做一份最新论文全文调研，生成中文报告 artifact。"
+                    "完成后我会点选报告继续追问；请确保 report follow-up 可用。"
+                ),
+                "session": {
+                    "messages": [],
+                    "executionUnits": [],
+                    "runs": [],
+                    "artifacts": [],
+                },
+            }
+        )
+
+        self.assertEqual(snapshot["taskRelation"], "new-task")
+        self.assertIn("do-not-import-stale-prior-task-assumptions", snapshot["acceptanceCriteria"])
+
     def test_scoped_no_rerun_repair_continuation_does_not_forbid_execution(self) -> None:
         snapshot = build_goal_snapshot(
             {

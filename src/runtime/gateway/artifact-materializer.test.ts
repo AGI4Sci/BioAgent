@@ -193,6 +193,54 @@ test('artifact delivery exposes file-backed csv and image artifacts as supportin
   }
 });
 
+test('artifact delivery materializes inline notebook checklist markdown as user-facing support', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-delivery-notebook-markdown-'));
+  try {
+    const request: GatewayRequest = {
+      skillDomain: 'literature',
+      prompt: 'create a protocol plus analysis checklist',
+      workspacePath: workspace,
+      artifacts: [],
+      uiState: { sessionId: 'session-1', sessionCreatedAt: '2026-05-12T00:00:00.000Z' },
+    };
+    const refs = backendPayloadRefs('direct-run', 'agentserver://direct-payload', '.sciforge/sessions/2026-05-12_literature_session-1');
+    const payload: ToolPayload = {
+      message: 'Protocol package complete.',
+      confidence: 0.84,
+      claimType: 'methodology-review',
+      evidenceLevel: 'expert-review',
+      reasoningTrace: 'delivery inline notebook markdown test',
+      claims: [],
+      uiManifest: [{ componentId: 'notebook-timeline', artifactRef: 'analysis-plan' }],
+      executionUnits: [{ id: 'direct', status: 'done', tool: 'agentserver.direct' }],
+      artifacts: [{
+        id: 'analysis-plan',
+        type: 'notebook-timeline',
+        title: 'Statistical Analysis Plan & Checklist',
+        content: '# Statistical Analysis Plan\n\n- Primary endpoint\n- Pre-registration checklist\n',
+      }],
+    };
+
+    const materialized = await materializeBackendPayloadOutput(workspace, request, payload, refs);
+    const artifact = materialized.artifacts[0];
+    const delivery = artifact.delivery as Record<string, unknown>;
+    const markdownRef = '.sciforge/sessions/2026-05-12_literature_session-1/task-results/direct-run-analysis-plan.md';
+
+    assert.equal(artifact.dataRef, markdownRef);
+    assert.equal(delivery.role, 'supporting-evidence');
+    assert.equal(delivery.readableRef, markdownRef);
+    assert.equal(delivery.previewPolicy, 'inline');
+    assert.equal(delivery.contentShape, 'raw-file');
+    assert.equal(delivery.declaredMediaType, 'text/markdown');
+    assert.equal((artifact.metadata as Record<string, unknown>).markdownRef, markdownRef);
+    assert.equal((artifact.data as Record<string, unknown>).markdown, '# Statistical Analysis Plan\n\n- Primary endpoint\n- Pre-registration checklist\n');
+    assert.equal(await readFile(join(workspace, markdownRef), 'utf8'), '# Statistical Analysis Plan\n\n- Primary endpoint\n- Pre-registration checklist\n');
+    assert.ok(materialized.objectReferences?.some((reference) => reference.ref === 'artifact:analysis-plan' && reference.presentationRole === 'supporting-evidence'));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test('artifact delivery prefers an existing markdown file over shorter inline summary text', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-delivery-existing-markdown-'));
   try {

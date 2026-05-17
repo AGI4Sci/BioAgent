@@ -377,6 +377,80 @@ test('generated Python syntax preflight blocks invalid source before executing w
   await assert.rejects(access(join(workspace, markerRel)));
 });
 
+test('generated Python syntax preflight attempts bounded repair before returning terminal payload', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-python-syntax-preflight-repair-'));
+  const markerRel = '.sciforge/marker-invalid-python-repair-should-not-run.txt';
+  const request: GatewayRequest = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'debug a generated paper reproduction task',
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-literature-python-syntax-preflight-repair',
+      sessionCreatedAt: '2026-05-12T02:35:00.000Z',
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+  };
+  let repairAttempted = false;
+
+  const result = await runGeneratedTaskExecutionLifecycle({
+    workspace,
+    request,
+    skill: providerTestSkill('2026-05-12T02:35:00.000Z'),
+    generation: {
+      ok: true,
+      runId: 'run-python-syntax-preflight-repair',
+      response: {
+        taskFiles: [{
+          path: 'tasks/invalid-python-repair.py',
+          language: 'python',
+          content: [
+            'from pathlib import Path',
+            `Path("${markerRel}").write_text("ran")`,
+            'value =',
+          ].join('\n'),
+        }],
+        entrypoint: { language: 'python', path: 'tasks/invalid-python-repair.py' },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: ['runtime-diagnostic'],
+      },
+    },
+    deps: {
+      repairNeededPayload,
+      attemptPlanRefs: () => ({}),
+      tryAgentServerRepairAndRerun: async (params) => {
+        repairAttempted = true;
+        assert.match(params.failureReason, /Generated Python entrypoint failed syntax preflight/i);
+        assert.match(params.run.stderr, /Generated Python entrypoint failed syntax preflight/i);
+        assert.equal(params.run.exitCode, 1);
+        assert.match(params.run.spec.taskRel, /invalid-python-repair\.py$/);
+        await access(join(workspace, params.run.spec.taskRel));
+        await access(join(workspace, params.run.stderrRef));
+        return {
+          message: 'Repair rerun completed after regenerating parseable task code.',
+          confidence: 0.82,
+          claimType: 'fact',
+          evidenceLevel: 'runtime',
+          reasoningTrace: 'bounded repair rerun',
+          claims: [],
+          uiManifest: [],
+          executionUnits: [{ id: 'EU-repair', tool: 'agentserver.repair', status: 'done' }],
+          artifacts: [],
+        };
+      },
+    },
+  });
+
+  assert.equal(repairAttempted, true);
+  assert.equal(result.kind, 'payload');
+  if (result.kind !== 'payload') return;
+  assert.match(result.payload.message, /Repair rerun completed/);
+  assert.doesNotMatch(result.payload.message, /syntax preflight before execution/i);
+  assert.equal(result.payload.executionUnits[0]?.status, 'done');
+  await assert.rejects(access(join(workspace, markerRel)));
+});
+
 test('generated task output shape preflight resolves same-file artifact variables before execution', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-preflight-artifact-vars-'));
   const request: GatewayRequest = {

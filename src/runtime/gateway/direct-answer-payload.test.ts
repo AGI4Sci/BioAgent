@@ -243,6 +243,27 @@ test('plain AgentServer text wraps human-facing prose in an audited ToolPayload'
   assert.deepEqual(schemaErrors(payload), []);
 });
 
+test('message-only AgentServer JSON explanations become user-facing failed-with-reason payloads', () => {
+  const payload = toolPayloadFromPlainAgentOutput(JSON.stringify({
+    message: 'Research task cannot be completed within the current harness budget. The requested review requires multiple network calls and PDF fetches.',
+    confidence: 1,
+    claimType: 'explanation',
+    evidenceLevel: 'system',
+    reasoningTrace: 'Harness budget constraints: maxNetworkCalls=1.',
+  }), {
+    skillDomain: 'literature',
+    prompt: 'Do a latest literature review with full-text checks and a Chinese report artifact.',
+    artifacts: [],
+  });
+
+  assert.equal(payload.claimType, 'explanation');
+  assert.equal(payload.displayIntent?.status, 'failed');
+  assert.equal(payload.executionUnits[0]?.status, 'failed-with-reason');
+  assert.match(String(payload.executionUnits[0]?.failureReason), /current harness budget/);
+  assert.notEqual(payload.artifacts[0]?.type, 'runtime-diagnostic');
+  assert.deepEqual(schemaErrors(payload), []);
+});
+
 test('plain AgentServer text exposes mentioned workspace files as artifacts', () => {
   const payload = toolPayloadFromPlainAgentOutput([
     'The task is complete. All outputs have been generated:',

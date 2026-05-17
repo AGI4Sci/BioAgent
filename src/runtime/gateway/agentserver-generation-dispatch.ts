@@ -775,7 +775,9 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         continue;
       }
       if (directText && looksLikeUnparsedGenerationResponseText(directText)) {
-        const malformedGenerationReason = 'AgentServer returned a malformed or incomplete AgentServerGenerationResponse-looking JSON payload; retry with compact executable taskFiles JSON and no markdown fences.';
+        const malformedGenerationReason = looksLikeTruncatedAgentServerResponseText(directText)
+          ? 'AgentServer returned a transport-truncated AgentServerGenerationResponse-looking JSON payload. Retry with terminal JSON under 6000 characters, one tiny executable task file under 3500 characters, no long comments/templates/tables, and no markdown fences; if the task cannot fit, return a valid failed-with-reason ToolPayload instead.'
+          : 'AgentServer returned a malformed or incomplete AgentServerGenerationResponse-looking JSON payload; retry with compact executable taskFiles JSON and no markdown fences.';
         emitBackendHandoffDrift(params.callbacks, {
           raw: run.output ?? run,
           text: directText,
@@ -789,7 +791,9 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
             source: 'workspace-runtime',
             status: 'running',
             message: malformedGenerationReason,
-            detail: 'Retrying AgentServer generation with a stricter taskFiles-only contract because the prior response looked like task code JSON but could not be parsed as a runnable generation response.',
+            detail: looksLikeTruncatedAgentServerResponseText(directText)
+              ? 'Retrying AgentServer generation with an ultra-compact taskFiles contract because the prior response was cut by transport compaction before it could be parsed.'
+              : 'Retrying AgentServer generation with a stricter taskFiles-only contract because the prior response looked like task code JSON but could not be parsed as a runnable generation response.',
           });
           continue;
         }

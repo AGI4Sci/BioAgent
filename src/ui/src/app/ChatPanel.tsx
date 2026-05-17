@@ -952,6 +952,19 @@ export function ChatPanel({
                     />
                   ) : (
                     <>
+                      <FinalMessageContent
+                        content={sanitizeUserProjectionText(message.content) ?? message.content}
+                        references={inlineObjectReferencesForMessage(message, session, messageRunId)}
+                        resultPresentation={resultPresentationForRun(session, messageRunId)}
+                        onObjectFocus={handleObjectReferenceClick}
+                      />
+                      {messageRunId ? (
+                        <RunKeyInfo
+                          runId={messageRunId}
+                          session={session}
+                          onObjectFocus={handleObjectReferenceClick}
+                        />
+                      ) : null}
                       {messageRunId ? (
                         <RunExecutionProcess
                           runId={messageRunId}
@@ -960,21 +973,8 @@ export function ChatPanel({
                           onObjectFocus={handleObjectReferenceClick}
                         />
                       ) : null}
-                      <FinalMessageContent
-                        content={sanitizeUserProjectionText(message.content) ?? message.content}
-                        references={inlineObjectReferencesForMessage(message, session, messageRunId)}
-                        resultPresentation={resultPresentationForRun(session, messageRunId)}
-                        onObjectFocus={handleObjectReferenceClick}
-                      />
                     </>
                   )}
-                  {messageRunId && message.role !== 'user' ? (
-                    <RunKeyInfo
-                      runId={messageRunId}
-                      session={session}
-                      onObjectFocus={handleObjectReferenceClick}
-                    />
-                  ) : null}
                 </>
               )}
               {message.references?.length ? (

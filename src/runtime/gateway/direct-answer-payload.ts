@@ -41,7 +41,10 @@ function artifactNeedsRepair(artifact: Record<string, unknown>) {
 }
 
 export function toolPayloadFromPlainAgentOutput(text: string, request: GatewayRequest): ToolPayload {
-  const structured = coerceAgentServerToolPayload(extractJson(text));
+  const extracted = extractJson(text);
+  const explanation = coerceAgentServerExplanationPayload(extracted, request);
+  if (explanation) return ensureDirectAnswerReportArtifact(explanation, request, directAnswerResultPolicyIds.structuredAnswerSource);
+  const structured = coerceAgentServerToolPayload(extracted);
   if (structured) return ensureDirectAnswerReportArtifact(structured, request, directAnswerResultPolicyIds.structuredAnswerSource);
   const nested = extractNestedAgentServerPayloadFromText(text);
   if (nested) return ensureDirectAnswerReportArtifact(nested, request, directAnswerResultPolicyIds.structuredAnswerSource);
@@ -52,6 +55,82 @@ export function toolPayloadFromPlainAgentOutput(text: string, request: GatewayRe
     return toolPayloadFromPlainHumanAnswer(text, request, directTextGuard);
   }
   return guardedDirectTextDiagnosticPayload(text, request, directTextGuard);
+}
+
+function coerceAgentServerExplanationPayload(value: unknown, request: GatewayRequest): ToolPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  if (Array.isArray(value.taskFiles) || isRecord(value.response) || isRecord(value.projectPlan)) return undefined;
+  if (['claims', 'uiManifest', 'executionUnits', 'artifacts', 'objectReferences'].some((key) => Array.isArray(value[key]))) return undefined;
+  const message = stringField(value.message);
+  if (!message) return undefined;
+  const claimType = stringField(value.claimType) ?? 'agentserver-explanation';
+  const evidenceLevel = stringField(value.evidenceLevel) ?? 'agentserver';
+  const reasoningTrace = typeof value.reasoningTrace === 'string'
+    ? value.reasoningTrace
+    : `AgentServer returned a structured explanation JSON without full ToolPayload arrays; SciForge normalized it at the direct-answer boundary.`;
+  const blocking = /\b(cannot|can't|unable|blocked|required|requires|missing|budget|quota|permission|credential|increase|refine|narrow|failed|failure)\b/i.test(message);
+  const status = blocking ? 'failed-with-reason' : 'needs-human';
+  const id = sha1(`agentserver-explanation:${message}`).slice(0, 10);
+  const expected = expectedArtifactTypesForRequest(request);
+  return {
+    message,
+    confidence: typeof value.confidence === 'number' ? value.confidence : 0.5,
+    claimType,
+    evidenceLevel,
+    reasoningTrace,
+    claims: [{
+      id: `claim-agentserver-explanation-${id}`,
+      text: message,
+      type: claimType,
+      confidence: typeof value.confidence === 'number' ? value.confidence : 0.5,
+      evidenceLevel,
+      supportingRefs: [],
+      opposingRefs: [],
+    }],
+    uiManifest: [{
+      componentId: reportViewerComponentId,
+      artifactRef: `agentserver-explanation-${id}`,
+      title: blocking ? 'Blocked result explanation' : 'AgentServer explanation',
+      priority: 1,
+    }],
+    executionUnits: [{
+      id: `agentserver-explanation-${id}`,
+      status,
+      tool: directAnswerResultPolicyIds.directTextTool,
+      params: JSON.stringify({ expectedArtifactTypes: expected, prompt: request.prompt.slice(0, 200) }),
+      failureReason: blocking ? message : undefined,
+      recoverActions: blocking
+        ? ['Narrow the request, increase the runtime budget, or retry with the missing provider/permission.']
+        : ['Ask the backend to return complete ToolPayload arrays if this explanation should include artifacts.'],
+      nextStep: blocking ? 'Adjust the request or runtime budget, then retry.' : 'Retry with complete structured output if artifacts are required.',
+    }],
+    artifacts: [{
+      id: `agentserver-explanation-${id}`,
+      type: blocking ? 'runtime-blocker' : 'agentserver-explanation',
+      format: 'markdown',
+      title: blocking ? 'Blocked result explanation' : 'AgentServer explanation',
+      content: [
+        blocking ? '# Blocked result explanation' : '# AgentServer explanation',
+        '',
+        message,
+        '',
+        '## Context',
+        '',
+        `- Expected artifacts: ${expected.length ? expected.join(', ') : 'none declared'}`,
+        `- Evidence level: ${evidenceLevel}`,
+      ].join('\n'),
+      data: {
+        message,
+        expectedArtifactTypes: expected,
+        normalizedFrom: 'agentserver-message-json',
+      },
+    }],
+    displayIntent: {
+      status: blocking ? 'failed' : 'needs-human',
+      reason: blocking ? 'agentserver-explanation-blocked' : 'agentserver-explanation-needs-structure',
+      primaryView: 'answer',
+    },
+  };
 }
 
 export type PlainAgentTextClassificationKind =

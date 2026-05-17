@@ -12,6 +12,7 @@ import {
   conversationProjectionAuditRefs,
   conversationProjectionForSession,
   conversationProjectionStatus,
+  sanitizeUserProjectionText,
   type UiConversationProjection,
 } from '../conversation-projection-view-model';
 import { executionStatusLabel, executionStatusShortLabel, executionVerificationPresentation } from '../results/executionStatusPresentation';
@@ -334,7 +335,7 @@ export function RunKeyInfo({
         <div className="message-key-list">
           {claims.map((claim, index) => (
             <p key={`${claim.id || 'claim'}-${index}`} className="message-key-row">
-              <span>判断：{claim.text}</span>
+              <span>判断：{sanitizeUserProjectionText(claim.text) ?? claim.text}</span>
               <small>{claim.evidenceLevel} · confidence {Math.round(claim.confidence * 100)}%</small>
             </p>
           ))}

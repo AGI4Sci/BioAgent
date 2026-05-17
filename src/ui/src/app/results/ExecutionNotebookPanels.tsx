@@ -236,12 +236,12 @@ function executionStatusDetail(unit: RuntimeExecutionUnit) {
     unit.verificationVerdict ? `verdict=${unit.verificationVerdict}` : undefined,
     `verificationStatus=${verification.detail}`,
   ].filter(Boolean);
-  return lines.length ? lines.join(' · ') : '';
+  return sanitizeUserProjectionText(lines.join(' · ')) ?? (lines.length ? lines.join(' · ') : '');
 }
 
 function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
   if (!rows.length) return 'No runtime execution units yet.';
-  return rows.map((unit) => [
+  const text = rows.map((unit) => [
     `id: ${unit.id}`,
     `tool: ${unit.tool}`,
     `language: ${unit.language || 'unspecified'}`,
@@ -266,6 +266,7 @@ function executionEnvironmentText(rows: RuntimeExecutionUnit[]) {
     `nextStep: ${unit.nextStep || 'n/a'}`,
     `databases: ${(unit.databaseVersions ?? []).join(', ') || 'n/a'}`,
   ].join('\n')).join('\n\n');
+  return sanitizeUserProjectionText(text) ?? text;
 }
 
 function auditMaterialLabel(unit: RuntimeExecutionUnit) {

@@ -126,17 +126,40 @@ export function normalizeLlmEndpoint(value: unknown): LlmEndpointConfig | undefi
 export function expectedArtifactTypesForRequest(request: GatewayRequest) {
   const constraints = normalizeTurnExecutionConstraints(request.uiState?.turnExecutionConstraints);
   if (constraints?.contextOnly && constraints.preferredCapabilityIds.includes('runtime.direct-context-answer')) return [];
+  if (isFreshCodeDebugExecutionPrompt(request.prompt)) return [];
   return uniqueStrings([
     ...(request.expectedArtifactTypes ?? []),
     ...toStringList(request.uiState?.expectedArtifactTypes),
   ]);
 }
 
-export function selectedComponentIdsForRequest(request: Pick<GatewayRequest, 'selectedComponentIds' | 'uiState'>) {
+export function selectedComponentIdsForRequest(request: Pick<GatewayRequest, 'selectedComponentIds' | 'uiState'> & { prompt?: string }) {
+  if ('prompt' in request && typeof request.prompt === 'string' && isFreshCodeDebugExecutionPrompt(request.prompt)) return [];
   return uniqueStrings([
     ...(request.selectedComponentIds ?? []),
     ...toStringList(request.uiState?.selectedComponentIds),
   ]);
+}
+
+function isFreshCodeDebugExecutionPrompt(prompt: string) {
+  const text = prompt.toLowerCase();
+  const codeSignals = [
+    /\bdebug\b/,
+    /\bbug\b/,
+    /\bpatch\b/,
+    /\bmodify\b/,
+    /\bedit\b/,
+    /\brepair\b/,
+    /\brerun\b/,
+    /\bpytest\b/,
+    /\bunit tests?\b/,
+    /\bfailing tests?\b/,
+    /\btest_[\w.-]+\.py\b/,
+    /\b[\w.-]+\.py\b/,
+    /读代码|调试|修复|修改代码|单测|运行测试|复跑/,
+  ];
+  const asksForScenarioArtifacts = /\b(evidence matrix|paper-list|paper list|notebook timeline|research report artifact)\b|证据矩阵|论文列表|全文|arxiv|pdf/.test(text);
+  return codeSignals.some((pattern) => pattern.test(text)) && !asksForScenarioArtifacts;
 }
 
 function finiteNumber(value: unknown) {

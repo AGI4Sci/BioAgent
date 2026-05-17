@@ -5,7 +5,7 @@ import { emitWorkspaceRuntimeEvent } from '../workspace-runtime-events.js';
 import { cleanUrl, errorMessage, headForAgentServer, isRecord, toRecordList, toStringList } from '../gateway-utils.js';
 import { normalizeBackendHandoff } from '../workspace-task-input.js';
 import { sessionBundleRelForRequest } from '../session-bundle.js';
-import { expectedArtifactTypesForRequest } from './gateway-request.js';
+import { expectedArtifactTypesForRequest, selectedComponentIdsForRequest } from './gateway-request.js';
 import { agentHarnessMetadata, requestWithoutInlineAgentHarness } from './agent-harness-shadow.js';
 import { buildContextEnvelope, expectedArtifactSchema, summarizeTaskAttemptsForAgentServer, workspaceTreeSummary } from './context-envelope.js';
 import { normalizeAgentServerWorkspaceEvent as normalizeAgentServerWorkspaceEventFromModule, withRequestContextWindowLimit as withRequestContextWindowLimitFromModule } from './workspace-event-normalizer.js';
@@ -24,7 +24,6 @@ import {
   type AgentServerWorkspaceSideEffectSnapshot,
 } from './agentserver-workspace-side-effects.js';
 import { hydrateGeneratedTaskResponseFromText } from './generated-task-response-text.js';
-import { hasRecoverableRecentAttempt } from './recoverable-attempts.js';
 import { repairNeededPayload } from './payload-validation.js';
 import { requestContextRefs } from './request-context-refs.js';
 import { AGENTSERVER_GENERATED_TASK_RETRY_EVENT_TYPE } from '../../../packages/skills/runtime-policy';
@@ -294,7 +293,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         skillPlanRef: promptRequest.skillPlanRef,
         prompt: promptRequest.prompt,
       });
-    const attachPriorAttempts = needsContinuity || hasRecoverableRecentAttempt(recentAttempts, promptRequest.prompt);
+    const attachPriorAttempts = needsContinuity || repairContinuation;
     const priorAttempts = currentTurnReferences(promptRequest).length || !attachPriorAttempts
       ? []
       : summarizeTaskAttemptsForAgentServer(recentAttempts);
@@ -348,7 +347,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
       artifacts: compactContext.artifacts,
       recentExecutionRefs: compactContext.recentExecutionRefs,
       expectedArtifactTypes: expectedArtifactTypesForRequest(promptRequest),
-      selectedComponentIds: promptRequest.selectedComponentIds ?? toStringList(promptRequest.uiState?.selectedComponentIds),
+      selectedComponentIds: selectedComponentIdsForGenerationRequest(promptRequest),
       priorAttempts: compactContext.priorAttempts,
       strictTaskFilesReason,
       retryAudit: contextRecovery?.retryAudit,
@@ -794,7 +793,12 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           });
           continue;
         }
-        return { ok: false, error: malformedGenerationReason };
+        return agentServerGenerationFailureWithWorkEvidence(
+          malformedGenerationReason,
+          params.request,
+          llmRuntime,
+          streamAndWorkspaceWorkEvidence,
+        );
       }
       if (directText) {
         const directTextClassification = classifyPlainAgentText(directText);
@@ -848,7 +852,12 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         callbacks: params.callbacks,
       });
       }
-      return { ok: false, error: 'AgentServer generation response did not include taskFiles and entrypoint or a SciForge ToolPayload.' };
+      return agentServerGenerationFailureWithWorkEvidence(
+        'AgentServer generation response did not include taskFiles and entrypoint or a SciForge ToolPayload.',
+        params.request,
+        llmRuntime,
+        streamAndWorkspaceWorkEvidence,
+      );
     }
     emitBackendHandoffDrift(params.callbacks, {
       raw: run.output ?? run,
@@ -912,6 +921,47 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     clearTimeout(timeout);
     params.callbacks?.signal?.removeEventListener('abort', abortGeneration);
   }
+}
+
+function agentServerGenerationFailureWithWorkEvidence(
+  error: string,
+  request: GatewayRequest,
+  llmRuntime: Awaited<ReturnType<typeof agentServerLlmRuntime>>,
+  workEvidence: WorkEvidence[],
+): AgentServerGenerationResult {
+  const diagnostic = diagnosticForFailure(error, {
+    backend: request.agentBackend,
+    provider: llmRuntime.llmEndpoint?.provider ?? request.modelProvider,
+    model: llmRuntime.llmEndpoint?.modelName ?? request.modelName,
+  });
+  return {
+    ok: false,
+    error,
+    diagnostics: {
+      kind: 'agentserver',
+      categories: diagnostic.categories,
+      retryAfterMs: diagnostic.retryAfterMs,
+      resetAt: diagnostic.resetAt,
+      backend: diagnostic.backend,
+      provider: diagnostic.provider,
+      model: diagnostic.model,
+      originalErrorSummary: diagnostic.userReason ?? error,
+      sideEffectWorkEvidence: workEvidence,
+    },
+  };
+}
+
+function selectedComponentIdsForGenerationRequest(request: GatewayRequest) {
+  const selected = request.selectedComponentIds ?? toStringList(request.uiState?.selectedComponentIds);
+  return selectedComponentIdsForPromptAwareRequest(request, selected);
+}
+
+function selectedComponentIdsForPromptAwareRequest(request: GatewayRequest, selectedComponentIds: string[]) {
+  return selectedComponentIdsForRequest({
+    prompt: request.prompt,
+    selectedComponentIds,
+    uiState: {},
+  });
 }
 
 function compactCapabilityDiscoveryToolResults(results: CapabilityDiscoveryToolResultEvent[] | undefined): Array<Record<string, unknown>> | undefined {

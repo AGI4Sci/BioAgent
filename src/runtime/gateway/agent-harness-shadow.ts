@@ -635,6 +635,7 @@ function stricterRiskLevel(
 
 function agentHarnessInputFromRequest(request: GatewayRequest): Record<string, unknown> {
   const uiState = isRecord(request.uiState) ? request.uiState : {};
+  const continuityDecision = agentHarnessContinuityDecision(request);
   const harness = isRecord(uiState.agentHarnessInput)
     ? uiState.agentHarnessInput
     : isRecord(uiState.harnessInput)
@@ -643,9 +644,10 @@ function agentHarnessInputFromRequest(request: GatewayRequest): Record<string, u
         ? uiState.harness
         : {};
   const input: Record<string, unknown> = {};
-  const intentMode = stringField(harness.intentMode)
-    ?? stringField(uiState.harnessIntentMode)
-    ?? intentModeFromContextReusePolicy(uiState);
+  const intentMode = continuitySafeIntentMode(
+    stringField(harness.intentMode) ?? stringField(uiState.harnessIntentMode),
+    continuityDecision.useContinuity,
+  ) ?? intentModeFromContextReusePolicy(uiState, continuityDecision.useContinuity);
   if (intentMode && ['fresh', 'continuation', 'repair', 'audit', 'file-grounded', 'interactive'].includes(intentMode)) {
     input.intentMode = intentMode;
   }
@@ -660,11 +662,16 @@ function agentHarnessInputFromRequest(request: GatewayRequest): Record<string, u
   return input;
 }
 
-function intentModeFromContextReusePolicy(uiState: Record<string, unknown>) {
+function continuitySafeIntentMode(intentMode: string | undefined, useContinuity: boolean) {
+  if ((intentMode === 'repair' || intentMode === 'continuation') && !useContinuity) return undefined;
+  return intentMode;
+}
+
+function intentModeFromContextReusePolicy(uiState: Record<string, unknown>, useContinuity: boolean) {
   const policy = isRecord(uiState.contextReusePolicy) ? uiState.contextReusePolicy : undefined;
   const mode = stringField(policy?.mode);
-  if (mode === 'continue') return 'continuation';
-  if (mode === 'repair') return 'repair';
+  if (mode === 'continue' && useContinuity) return 'continuation';
+  if (mode === 'repair' && useContinuity) return 'repair';
   if (mode === 'fresh' || mode === 'isolate') return 'fresh';
   return undefined;
 }

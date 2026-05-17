@@ -8,7 +8,12 @@ export function agentHarnessContinuityDecision(request: GatewayRequest) {
   const policy = isRecord(uiState.contextReusePolicy) ? uiState.contextReusePolicy : undefined;
   const policyMode = typeof policy?.mode === 'string' ? policy.mode : '';
   const historyReuse = isRecord(policy?.historyReuse) ? policy.historyReuse : {};
-  const policyAllowsReuse = (policyMode === 'continue' || policyMode === 'repair') && historyReuse.allowed !== false;
+  const repairTargetAvailable = requestHasConcreteRepairTarget(request, uiState);
+  const policyAllowsReuse = policyMode === 'continue'
+    ? historyReuse.allowed !== false
+    : policyMode === 'repair'
+      ? historyReuse.allowed !== false && repairTargetAvailable
+      : false;
   const currentReferenceCount = toRecordList(uiState.currentReferences).length;
   const recentRefCount = toRecordList(uiState.recentExecutionRefs).length;
   const artifactCount = Array.isArray(request.artifacts) ? request.artifacts.length : 0;
@@ -17,7 +22,9 @@ export function agentHarnessContinuityDecision(request: GatewayRequest) {
   const summary = isRecord(agentHarness.summary) ? agentHarness.summary : undefined;
   const trace = isRecord(agentHarness.trace) ? agentHarness.trace : undefined;
   const intentMode = stringField(contract?.intentMode) ?? stringField(summary?.intentMode);
-  const intentUseContinuity = intentMode === 'continuation' || intentMode === 'repair' || intentMode === 'audit';
+  const intentUseContinuity = intentMode === 'continuation'
+    || intentMode === 'audit'
+    || (intentMode === 'repair' && repairTargetAvailable);
   const useContinuity = intentUseContinuity || policyAllowsReuse;
   const reasons = [
     policyAllowsReuse ? 'reuse-policy-advisory' : undefined,
@@ -37,6 +44,7 @@ export function agentHarnessContinuityDecision(request: GatewayRequest) {
       policyMode: policyMode || undefined,
       policyAllowsReuse,
       policyDrivesContinuity: policyAllowsReuse ? true : undefined,
+      repairTargetAvailable: policyMode === 'repair' ? repairTargetAvailable : undefined,
       currentReferenceCount,
       recentExecutionRefCount: recentRefCount,
       artifactCount,
@@ -59,6 +67,33 @@ export function agentHarnessContinuityDecision(request: GatewayRequest) {
       artifacts: artifactCount,
     },
   };
+}
+
+const REPAIR_TARGET_STATUSES = new Set(['failed', 'error', 'repair-needed', 'failed-with-reason', 'needs-human']);
+
+function requestHasConcreteRepairTarget(request: GatewayRequest, uiState: Record<string, unknown>) {
+  return [
+    ...toRecordList(request.references),
+    ...toRecordList(uiState.currentReferences),
+    ...toRecordList(uiState.currentReferenceDigests),
+    ...toRecordList(uiState.recentExecutionRefs),
+    ...toRecordList(uiState.recentRuns),
+    ...toRecordList(uiState.recentExecutionUnits),
+    ...toRecordList(uiState.executionUnits),
+    isRecord(uiState.activeRun) ? uiState.activeRun : undefined,
+    isRecord(uiState.currentRun) ? uiState.currentRun : undefined,
+  ].filter((record): record is Record<string, unknown> => Boolean(record)).some(isRepairTargetRecord);
+}
+
+function isRepairTargetRecord(record: Record<string, unknown>) {
+  const source = stringField(record.source) ?? stringField(record.sourceId) ?? '';
+  const kind = stringField(record.kind) ?? '';
+  const status = (stringField(record.status) ?? '').toLowerCase();
+  return source.toLowerCase() === 'recover-action'
+    || source.toLowerCase() === 'failure-evidence'
+    || kind.toLowerCase() === 'recover-action'
+    || REPAIR_TARGET_STATUSES.has(status)
+    || Boolean(stringField(record.failureReason) || stringField(record.stderrRef) || stringField(record.errorRef));
 }
 
 function sourceCallbackIdForTraceField(trace: Record<string, unknown> | undefined, field: string) {

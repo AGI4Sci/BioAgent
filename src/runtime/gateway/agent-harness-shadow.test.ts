@@ -35,6 +35,11 @@ test('transport repair policy seeds Agent Harness repair intent', async () => {
         mode: 'repair',
         historyReuse: { allowed: true },
       },
+      recentExecutionRefs: [{
+        id: 'EU-failed',
+        status: 'repair-needed',
+        failureReason: 'previous failure',
+      }],
     },
   } as GatewayRequest, {}, { status: 'allowed' });
 
@@ -44,6 +49,47 @@ test('transport repair policy seeds Agent Harness repair intent', async () => {
   } | undefined;
   assert.equal(agentHarness?.contract?.intentMode, 'repair');
   assert.equal(agentHarness?.summary?.intentMode, 'repair');
+});
+
+test('stale repair policy without a current repair target does not seed repair intent', async () => {
+  const request = await requestWithAgentHarnessShadow({
+    skillDomain: 'literature',
+    prompt: 'Debug paper_metric_kernel.py and rerun pytest.',
+    artifacts: [],
+    uiState: {
+      contextReusePolicy: {
+        mode: 'repair',
+        historyReuse: { allowed: true },
+      },
+    },
+  } as GatewayRequest, {}, { status: 'allowed' });
+
+  const agentHarness = request.uiState?.agentHarness as {
+    contract?: { intentMode?: string };
+    summary?: { intentMode?: string };
+  } | undefined;
+  assert.equal(agentHarness?.contract?.intentMode, 'fresh');
+  assert.equal(agentHarness?.summary?.intentMode, 'fresh');
+});
+
+test('stale harness repair contract without a current repair target does not reseed repair intent', async () => {
+  const request = await requestWithAgentHarnessShadow({
+    skillDomain: 'literature',
+    prompt: 'Debug paper_metric_kernel.py and rerun pytest.',
+    artifacts: [],
+    uiState: {
+      agentHarnessInput: {
+        intentMode: 'repair',
+      },
+    },
+  } as GatewayRequest, {}, { status: 'allowed' });
+
+  const agentHarness = request.uiState?.agentHarness as {
+    contract?: { intentMode?: string };
+    summary?: { intentMode?: string };
+  } | undefined;
+  assert.equal(agentHarness?.contract?.intentMode, 'fresh');
+  assert.equal(agentHarness?.summary?.intentMode, 'fresh');
 });
 
 test('direct-context harness verification is visible but non-required for read-only answers', async () => {

@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeGatewayRequest, normalizeLlmEndpoint } from './gateway-request';
+import type { GatewayRequest } from '../runtime-types';
+import {
+  expectedArtifactTypesForRequest,
+  normalizeGatewayRequest,
+  normalizeLlmEndpoint,
+  selectedComponentIdsForRequest,
+} from './gateway-request';
 
 test('gateway request delegates LLM endpoint normalization to runtime contract policy', () => {
   assert.deepEqual(normalizeLlmEndpoint({
@@ -99,4 +105,33 @@ test('gateway request preserves versioned structured turn constraints', () => {
   });
 
   assert.equal((request.uiState?.turnExecutionConstraints as { agentServerForbidden?: boolean } | undefined)?.agentServerForbidden, true);
+});
+
+test('fresh code debug prompts do not inherit scenario default artifact views', () => {
+  const request = {
+    skillDomain: 'literature',
+    prompt: 'Debug paper_metric_kernel.py, run python -m pytest test_kernel_mmd.py -q, patch the bug, and rerun tests.',
+    expectedArtifactTypes: ['research-report', 'paper-list', 'evidence-matrix', 'notebook-timeline'],
+    selectedComponentIds: ['paper-card-list', 'report-viewer', 'evidence-matrix', 'notebook-timeline'],
+    uiState: {
+      expectedArtifactTypes: ['research-report'],
+      selectedComponentIds: ['execution-unit-table'],
+    },
+  } as unknown as GatewayRequest;
+
+  assert.deepEqual(expectedArtifactTypesForRequest(request), []);
+  assert.deepEqual(selectedComponentIdsForRequest(request), []);
+});
+
+test('literature prompts keep explicit scenario artifacts', () => {
+  const request = {
+    skillDomain: 'literature',
+    prompt: 'Find recent arXiv papers, read the PDF full text, and create an evidence matrix.',
+    expectedArtifactTypes: ['research-report', 'evidence-matrix'],
+    selectedComponentIds: ['report-viewer', 'evidence-matrix'],
+    uiState: {},
+  } as GatewayRequest;
+
+  assert.deepEqual(expectedArtifactTypesForRequest(request), ['research-report', 'evidence-matrix']);
+  assert.deepEqual(selectedComponentIdsForRequest(request), ['report-viewer', 'evidence-matrix']);
 });

@@ -307,6 +307,74 @@ test('AgentServer generation failure diagnostics include modified existing works
   }
 });
 
+test('malformed generation response diagnostics preserve workspace side effects', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-malformed-side-effect-'));
+  const sourceRel = 'paper_metric_kernel.py';
+  await writeFile(join(workspace, sourceRel), 'import fastmmd\nvalue = 1\n', 'utf8');
+
+  const server = createServer(async (req, res) => {
+    if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, data: { session: { id: 'malformed-side-effect', status: 'active' }, recentTurns: [], currentWorkEntries: [] } }));
+      return;
+    }
+    if (req.method !== 'POST' || String(req.url) !== '/api/agent-server/runs/stream') {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'not found' }));
+      return;
+    }
+    await readBody(req);
+    await writeFile(join(workspace, sourceRel), 'value = 2\n', 'utf8');
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(`${JSON.stringify({
+      result: {
+        ok: true,
+        data: {
+          run: {
+            id: 'run-malformed-side-effect',
+            status: 'completed',
+            result: {
+              finalText: '```json\n{ "kind": "AgentServerGenerationResponse", "taskFiles": [ { "path": "broken.py", "content": "unterminated',
+            },
+          },
+        },
+      },
+    })}\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address() as AddressInfo;
+    const result = await requestAgentServerGeneration({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      request: {
+        workspacePath: workspace,
+        skillDomain: 'literature',
+        prompt: 'Debug the current workspace code, patch the bug, and rerun tests.',
+        artifacts: [],
+        maxContextWindowTokens: 200000,
+        uiState: { sessionId: 'session-malformed-side-effect' },
+      } as GatewayRequest,
+      skill: testSkill(),
+      skills: [testSkill()],
+      workspace,
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(await readFile(join(workspace, sourceRel), 'utf8'), /value = 2/);
+    if (!result.ok) {
+      const sideEffects = result.diagnostics?.sideEffectWorkEvidence ?? [];
+      assert.equal(sideEffects.some((entry) => (
+        entry.kind === 'write'
+        && entry.status === 'success'
+        && entry.rawRef === sourceRel
+        && (entry.input as Record<string, unknown> | undefined)?.sideEffect === 'modified-existing-file'
+      )), true, JSON.stringify(sideEffects));
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {

@@ -12,8 +12,18 @@ import {
 } from '@sciforge-ui/runtime-contract/events';
 import {
   maybeHandleCapabilityDiscoveryToolCall,
+  type CapabilityDiscoveryToolResultEvent,
   type AgentServerCapabilityDiscoveryToolTransportOptions,
 } from './capability-discovery-tool-transport.js';
+
+export interface AgentServerRunStreamResult {
+  json: unknown;
+  run: Record<string, unknown>;
+  error?: string;
+  streamText?: string;
+  workEvidence: WorkEvidence[];
+  capabilityDiscoveryToolResults: CapabilityDiscoveryToolResultEvent[];
+}
 
 export async function readAgentServerRunStream(
   response: Response,
@@ -30,7 +40,7 @@ export async function readAgentServerRunStream(
     onSilentTimeout?: (message: string, audit: AgentServerSilentStreamGuardAudit) => void;
     capabilityDiscoveryToolTransport?: AgentServerCapabilityDiscoveryToolTransportOptions;
   } = {},
-): Promise<{ json: unknown; run: Record<string, unknown>; error?: string; streamText?: string; workEvidence: WorkEvidence[] }> {
+): Promise<AgentServerRunStreamResult> {
   if (!response.body) {
     const text = await response.text();
     let json: unknown = text;
@@ -45,6 +55,7 @@ export async function readAgentServerRunStream(
       run: isRecord(data.run) ? data.run : {},
       error: isRecord(json) ? String(json.error || '') : String(text).slice(0, 500),
       workEvidence: collectWorkEvidenceFromBackendEvent(json),
+      capabilityDiscoveryToolResults: [],
     };
   }
   const reader = response.body.getReader();
@@ -56,6 +67,7 @@ export async function readAgentServerRunStream(
   let lastEnvelopeAt = Date.now();
   const streamTextParts: string[] = [];
   const workEvidence: WorkEvidence[] = [];
+  const capabilityDiscoveryToolResults: CapabilityDiscoveryToolResultEvent[] = [];
   const silencePolicy = options.silencePolicy ?? silentPolicyFromTimeout(options.maxSilentMs);
   const silentTimeoutMs = silencePolicy?.timeoutMs;
   async function consumeLine(rawLine: string) {
@@ -78,6 +90,7 @@ export async function readAgentServerRunStream(
       onEvent(event);
       const discoveryToolResult = await maybeHandleCapabilityDiscoveryToolCall(event, options.capabilityDiscoveryToolTransport);
       if (discoveryToolResult) {
+        capabilityDiscoveryToolResults.push(discoveryToolResult);
         onEvent(discoveryToolResult);
       }
       const totalUsage = agentServerEventTotalUsage(event);
@@ -130,6 +143,7 @@ export async function readAgentServerRunStream(
     error: streamError || undefined,
     streamText: streamTextParts.join(''),
     workEvidence: dedupeWorkEvidence(workEvidence),
+    capabilityDiscoveryToolResults,
   };
 }
 

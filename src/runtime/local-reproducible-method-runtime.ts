@@ -9,6 +9,7 @@ export async function tryRunLocalReproducibleMethodRuntime(
   request: GatewayRequest,
   callbacks: WorkspaceRuntimeCallbacks = {},
 ): Promise<ToolPayload | undefined> {
+  if (requiresFreshCodeDebugOrExecution(request.prompt)) return undefined;
   if (!/(export|notebook|script|reproducible method|rerun|commands?|导出|脚本|笔记本|复现命令)/i.test(request.prompt)) return undefined;
   const scriptRef = findScriptRef(request);
   const datasetRef = findDatasetRef(request);
@@ -99,6 +100,13 @@ export async function tryRunLocalReproducibleMethodRuntime(
       status: 'available',
     })),
   };
+}
+
+function requiresFreshCodeDebugOrExecution(prompt: string) {
+  const normalized = prompt.replace(/[_-]+/g, ' ');
+  const explicitExecution = /debug|read\s+\S+\.(?:py|r|jl|m|js|ts)|pytest|unit tests?|failing tests?|test failure|run tests?|rerun tests?|root cause|调试|修复|补丁|修改|单测|测试失败|运行测试|复跑测试|定位/i;
+  const codeChangeAction = /(?:^|[^a-z])(?:fix|repair|patch|modify|edit|change|update|bug)(?:[^a-z]|$)/i;
+  return explicitExecution.test(normalized) || codeChangeAction.test(normalized);
 }
 
 function findBootstrapClaim(request: GatewayRequest) {

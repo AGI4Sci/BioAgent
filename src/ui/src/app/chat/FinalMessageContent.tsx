@@ -2,6 +2,7 @@ import type { ObjectReference } from '../../domain';
 import { mergeObjectReferences, normalizeObjectReferencePresentationRole } from '../../../../../packages/support/object-references';
 import { MessageContent } from './MessageContent';
 import { splitFinalMessagePresentation } from './finalMessagePresentation';
+import { sanitizeUserProjectionText } from '../conversation-projection-view-model';
 
 export function FinalMessageContent({
   content,
@@ -16,9 +17,11 @@ export function FinalMessageContent({
 }) {
   const presentation = splitFinalMessagePresentation(content, resultPresentation);
   const effectiveReferences = mergeResultPresentationReferences(references, resultPresentation);
+  const fallbackContent = presentation.primaryContent || content;
+  const primaryContent = sanitizeUserProjectionText(fallbackContent) ?? fallbackContent;
   return (
     <>
-      <MessageContent content={presentation.primaryContent || content} references={effectiveReferences} onObjectFocus={onObjectFocus} />
+      <MessageContent content={primaryContent} references={effectiveReferences} onObjectFocus={onObjectFocus} />
       {presentation.auditSections.length ? (
         <details className="message-fold depth-2 final-message-audit-fold" key={finalAuditFoldKey(content, presentation.summary)}>
           <summary>过程与诊断 · {presentation.summary}</summary>
@@ -29,7 +32,7 @@ export function FinalMessageContent({
                   <strong>{section.label}</strong>
                   <span>{section.evidenceType} · {section.importance}</span>
                 </div>
-                <MessageContent content={section.text} references={effectiveReferences} onObjectFocus={onObjectFocus} />
+                <MessageContent content={sanitizeUserProjectionText(section.text) ?? section.text} references={effectiveReferences} onObjectFocus={onObjectFocus} />
               </div>
             ))}
           </div>

@@ -246,6 +246,7 @@ test('ResultsRenderer keeps raw failure text out of the first-screen main summar
   assert.doesNotMatch(summaryHtml, /External retrieval returned zero results while the task marked itself completed/);
   assert.doesNotMatch(summaryHtml, /retry\/fallback attempts, rate-limit diagnostics, and durable refs/);
   assert.match(html, /retry\/fallback attempts, rate-limit diagnostics, and durable refs/);
+  assert.doesNotMatch(html, /raw payload|ToolPayload|stdout|stderr|task attempts|handoff JSON/i);
   assert.doesNotMatch(html, /<details class="result-details-panel audit-details-panel" open/);
 });
 

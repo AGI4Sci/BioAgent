@@ -760,7 +760,7 @@ function RunAuditOverview({
         <div className="run-status-lines">
           {blockers.map((line) => <span key={line}>{line}</span>)}
         </div>
-      ) : <p className="empty-state">没有阻塞项；完整执行单元、timeline 和 raw payload 已在下方保留。</p>}
+      ) : <p className="empty-state">没有阻塞项；结构化审计材料已在下方保留。</p>}
       {recoverActions.length ? (
         <div className="run-recover-actions">
           {recoverActions.map((action) => (

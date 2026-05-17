@@ -4,6 +4,8 @@ import {
   artifactForObjectReference,
   pathForObjectReference,
 } from '../../../../packages/support/object-references';
+import { createLocalUserActionApi, type UserActionApi } from './projectionApi';
+import type { SelectObjectUIAction } from './uiActionBoundary';
 
 type WorkspaceOpenObjectAction = Extract<ObjectAction, 'open-external' | 'reveal-in-folder'>;
 
@@ -47,6 +49,7 @@ export type ObjectReferenceActionResult = {
   notice?: string;
   pinnedObjectReferences?: ObjectReference[];
   resultTab?: 'primary';
+  sourceAction?: SelectObjectUIAction;
 };
 
 export type PerformObjectReferenceActionOptions = {
@@ -56,6 +59,7 @@ export type PerformObjectReferenceActionOptions = {
   reference: ObjectReference;
   session: SciForgeSession;
   openObject?: (config: SciForgeConfig, action: WorkspaceOpenObjectAction, path: string) => Promise<unknown>;
+  userActionApi?: Pick<UserActionApi, 'selectObject'>;
   writeClipboard?: (text: string) => Promise<void>;
 };
 
@@ -118,24 +122,28 @@ export async function performObjectReferenceAction({
   reference,
   session,
   openObject = openWorkspaceObject,
+  userActionApi = createLocalUserActionApi(),
   writeClipboard = writeClipboardText,
 }: PerformObjectReferenceActionOptions): Promise<ObjectReferenceActionResult> {
   const plan = resolveObjectReferenceActionPlan({ action, pinnedObjectReferences, reference, session });
+  const sourceAction = await selectedObjectActionForReference({ action, reference, session, userActionApi });
   if (plan.kind === 'focus-right-pane') {
     return {
       activeRunId: plan.activeRunId,
       focusReference: plan.reference,
       notice: plan.notice,
       resultTab: 'primary',
+      sourceAction,
     };
   }
-  if (plan.kind === 'inspect') return plan.artifact ? { inspectedArtifact: plan.artifact } : { error: plan.error };
+  if (plan.kind === 'inspect') return plan.artifact ? { inspectedArtifact: plan.artifact, sourceAction } : { error: plan.error, sourceAction };
   if (plan.kind === 'pin') {
     return {
       focusReference: plan.reference,
       notice: plan.notice,
       pinnedObjectReferences: plan.pinnedObjectReferences,
       resultTab: 'primary',
+      sourceAction,
     };
   }
   if (plan.kind === 'copy-path') {
@@ -154,6 +162,34 @@ export async function performObjectReferenceAction({
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function selectedObjectActionForReference({
+  action,
+  reference,
+  session,
+  userActionApi,
+}: {
+  action: ObjectAction;
+  reference: ObjectReference;
+  session: SciForgeSession;
+  userActionApi: Pick<UserActionApi, 'selectObject'>;
+}): Promise<SelectObjectUIAction | undefined> {
+  const intent = selectObjectIntentForObjectAction(action);
+  if (!intent) return undefined;
+  const result = await userActionApi.selectObject({
+    session,
+    objectRef: reference.ref,
+    intent,
+  });
+  return result.action?.type === 'select-object' ? result.action : undefined;
+}
+
+function selectObjectIntentForObjectAction(action: ObjectAction): SelectObjectUIAction['intent'] | undefined {
+  if (action === 'focus-right-pane' || action === 'inspect') return 'inspect';
+  if (action === 'compare') return 'compare';
+  if (action === 'pin') return 'pin';
+  return undefined;
 }
 
 export function objectActionLabel(action: ObjectAction) {

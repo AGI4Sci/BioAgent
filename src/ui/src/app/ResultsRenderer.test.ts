@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { backendRepairStates, coerceReportPayload, contractValidationFailures, renderRegisteredWorkbenchSlot, requestOpenDebugAuditThroughUserActionApi, requestRecoverActionThroughUserActionApi, ResultsRenderer, runAuditRefs, runRecoverActions, shouldOpenRunAuditDetails } from './ResultsRenderer';
 import { ArtifactInspectorDrawer } from './results-renderer-artifact-inspector';
-import { nextPinnedObjectReferences, resolveObjectReferenceActionPlan } from './results-renderer-object-actions';
+import { nextPinnedObjectReferences, performObjectReferenceAction, resolveObjectReferenceActionPlan } from './results-renderer-object-actions';
 import { RegistrySlot } from './results-renderer-registry-slot';
 import { createResultsRendererViewModel } from './results-renderer-view-model';
 import { applyBackgroundCompletionEventToSession } from './chat/sessionTransforms';
@@ -1048,6 +1048,80 @@ test('object reference action helper resolves pin and workspace path plans witho
   if (copyPlan.kind !== 'copy-path') assert.fail(`Expected copy-path plan, got ${copyPlan.kind}`);
   assert.equal(copyPlan.path, '.sciforge/artifacts/report.md');
   assert.equal(copyPlan.notice, '已复制路径：.sciforge/artifacts/report.md');
+});
+
+test('object reference selection actions route through UserActionApi', async () => {
+  const artifact: RuntimeArtifact = {
+    id: 'report-artifact',
+    type: 'research-report',
+    producerScenario: 'literature-evidence-review',
+    schemaVersion: '1',
+    path: '.sciforge/artifacts/report.md',
+    data: { markdown: '# Report' },
+  };
+  const session: SciForgeSession = {
+    ...emptySession(),
+    artifacts: [artifact],
+  };
+  const reference: ObjectReference = {
+    id: 'ref-report',
+    title: 'Report artifact',
+    kind: 'artifact',
+    ref: 'artifact:report-artifact',
+    artifactType: 'research-report',
+    actions: ['inspect', 'pin', 'copy-path'],
+  };
+  const calls: Array<{ objectRef: string; intent: string }> = [];
+
+  const result = await performObjectReferenceAction({
+    action: 'inspect',
+    config: testConfig(),
+    pinnedObjectReferences: [],
+    reference,
+    session,
+    userActionApi: {
+      async selectObject(input) {
+        calls.push({ objectRef: input.objectRef, intent: input.intent });
+        return {
+          accepted: true,
+          action: {
+            kind: 'UIAction',
+            type: 'select-object',
+            id: 'select-object-test',
+            sessionId: input.session.sessionId,
+            scenarioId: input.session.scenarioId,
+            createdAt: '2026-05-17T00:00:00.000Z',
+            objectRef: input.objectRef,
+            intent: input.intent,
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(result.inspectedArtifact?.id, 'report-artifact');
+  assert.equal(result.sourceAction?.type, 'select-object');
+  assert.deepEqual(calls, [{ objectRef: 'artifact:report-artifact', intent: 'inspect' }]);
+
+  const copiedPaths: string[] = [];
+  const copyResult = await performObjectReferenceAction({
+    action: 'copy-path',
+    config: testConfig(),
+    pinnedObjectReferences: [],
+    reference,
+    session,
+    userActionApi: {
+      async selectObject() {
+        assert.fail('copy-path must not be recorded as a selected-object action');
+      },
+    },
+    writeClipboard: async (text) => {
+      copiedPaths.push(text);
+    },
+  });
+
+  assert.equal(copyResult.sourceAction, undefined);
+  assert.deepEqual(copiedPaths, ['.sciforge/artifacts/report.md']);
 });
 
 test('artifact inspector drawer renders lineage, reproducible refs, preview, and handoff targets', () => {

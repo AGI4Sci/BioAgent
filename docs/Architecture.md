@@ -65,7 +65,7 @@ Event -> State -> Contract -> Decision -> Projection
 
 - `CapabilityManifest` 是核心能力真相源，`requiredCapabilities` 声明该 manifest/tool 需要的 provider-backed 能力；`CORE_CAPABILITY_MANIFESTS` 覆盖 AgentServer generation、artifact resolver/read/render、workspace read/write、command/python task、vision observe、computer-use action、report/evidence views 和 schema verifier。
 - Capability broker 默认只给 backend compact brief；schema、examples、repair hints、providers、failure history 和 ledger refs 只在选中能力或 repair 时按需展开。
-- `capability_discovery` 是 agent 可调用的原子能力，而不是 runtime 固定触发的隐藏检索流程；当前为 partial generated-task callable / blocked-on-AgentServer-tool-transport，完整 AgentServer tool-call transport / UI summary / persisted audit refs 仍按专项设计继续推进。专项设计见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
+- `capability_discovery` 是 agent 可调用的原子能力，而不是 runtime 固定触发的隐藏检索流程；当前为 partial backend retry consumption + ledger replay refs + minimal UI summary / blocked-on-full-UI-wiring-and-browser-validation，AgentServer stream-side tool-call、session audit record、session-bundle ledger event、bounded retry result consumption 和最小 UI summary projection 已落地，默认 Results UI 接线/debug folding 与 browser 验收仍按专项设计继续推进。专项设计见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
 - Workspace ledger 负责可恢复事实；AgentServer 负责 session memory/current work/recent turns/context compaction 的运行态编排；SciForge 生成 `contextPolicy`、`contextEnvelope`、current refs、digest、audit refs 和 cache-aware projection blocks。
 - Scenario package 已收敛为 policy-only：允许 artifact schema、默认 view、capability policy、domain vocabulary、verifier policy、privacy/safety boundaries；拒绝 execution code、prompt regex、provider branch、多轮 semantic judge、prompt special case 和 preset-answer/system-prompt 字段。
 - UI 是 projection shell：主状态、主按钮、visible answer、verification tag 和 recovery focus 只消费 `ConversationProjection` 与 ref preview；raw runs、task attempts、executionUnits、backend stream 和 validation trace 只能进入 audit/debug channel。目标状态下，网页端通过函数式 `ProjectionApi` / `UserActionApi` 读写 presentation 状态和用户动作，不绑定 HTTP 路由，专项设计见 [`UIExecutionDecoupling.md`](UIExecutionDecoupling.md)。
@@ -162,9 +162,9 @@ Capability 是抽象能力和协议真相源，回答“系统能做什么”。
 - `artifact_render`
 - `evidence_matrix_validate`
 
-### Capability Discovery Layer（partial generated-task callable / blocked-on-AgentServer-tool-transport）
+### Capability Discovery Layer（partial backend retry consumption + ledger replay refs + minimal UI summary / blocked-on-full-UI-wiring-and-browser-validation）
 
-详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。本层目标是提供 agent-callable `capability_discovery.search/expand/plan/explain` API，通过分层揭示让 backend 在能力不足时自主发现和组合能力。当前代码已具备 manifest registry、broker、provider preflight、harness candidate projection、`invoke_capability` authoring path、discovery service、tiny handoff brief、generated-task helper bridge 与 targeted tests；完整 AgentServer/backend direct tool-call transport、ledger-persisted audit refs 和 UI 摘要仍是后续任务。
+详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。本层目标是提供 agent-callable `capability_discovery.search/expand/plan/explain` API，通过分层揭示让 backend 在能力不足时自主发现和组合能力。当前代码已具备 manifest registry、broker、provider preflight、harness candidate projection、`invoke_capability` authoring path、discovery service、tiny handoff brief、generated-task helper bridge、AgentServer stream-side tool-call bridge、session-bundle audit record、ledger replay refs、bounded retry result consumption、最小 UI summary projection 与 targeted tests；默认 Results UI 接线/debug folding 和真实 browser 验收仍是后续任务。
 
 ### Provider Layer
 

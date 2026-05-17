@@ -20,7 +20,7 @@ Agent harness 解决的问题不是“系统有什么能力”，而是“每一
 
 - Harness 不替代 agent backend 的推理、规划和胶水代码生成。
 - Harness 不替代 capability manifest。能力声明仍由 capability registry 负责。
-- Harness 不硬编码所有能力检索触发时机。目标状态是把 `capability_discovery` 作为受控原子能力暴露给 AgentServer/backend，并记录/约束 discovery 调用；当前已具备 generated-task helper 与 AgentServer stream-side discovery tool-call bridge，backend 双向消费、UI plan summary 和 ledger replay 索引仍按专项设计推进，详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
+- Harness 不硬编码所有能力检索触发时机。目标状态是把 `capability_discovery` 作为受控原子能力暴露给 AgentServer/backend，并记录/约束 discovery 调用；当前已具备 generated-task helper、AgentServer stream-side discovery tool-call bridge、session-bundle ledger event、单向 stream 无终态时的 bounded retry result consumption 和最小 UI summary projection，默认 Results UI 接线/debug folding 与 browser 验收仍按专项设计推进，详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
 - Harness 不直接驱动 React UI 或解释 raw execution output。用户可见状态和用户干预应通过函数式 Projection/UserAction API 进入 presentation/runtime 边界；专项设计见 [`UIExecutionDecoupling.md`](UIExecutionDecoupling.md)。
 - Harness callback 不直接读写 workspace、不调用外部 API、不拼最终 prompt、不改 React state。
 
@@ -122,7 +122,7 @@ AgentServer handoff 使用 metadata-only 交接面：
 - payload metadata 必须带 `harnessProfileId`、`harnessContractRef`、`harnessTraceRef`、budget summary、decision owner。
 - 结构化 `agentHarnessHandoff` 必须可从 `HarnessContract` 和 refs 重建。
 - prompt text 不内联完整 contract、trace、promptDirectives、stage records 或完整 capability registry。
-- handoff 提供极简 `capability_discovery` API brief：可调用方法、输入/输出摘要、预算和何时考虑调用；schema/examples/provider 详情必须由 agent 按需 `expand`。当前已落地 tiny brief、prompt guidance、generated-task helper bridge 和 AgentServer stream-side tool-call bridge；backend 对 `tool-result` 的双向消费协议与 ledger replay 索引仍见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
+- handoff 提供极简 `capability_discovery` API brief：可调用方法、输入/输出摘要、预算和何时考虑调用；schema/examples/provider 详情必须由 agent 按需 `expand`。当前已落地 tiny brief、prompt guidance、generated-task helper bridge、AgentServer stream-side tool-call bridge、session-bundle ledger event 和 bounded retry result consumption；后续 UI/browser 验收仍见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
 - fresh/continuation/repair 的 refs 差异通过 contract/context refs 表达，并由 `npm run smoke:contract-driven-handoff` 覆盖。
 
 ## 分级 Hooks
@@ -189,9 +189,9 @@ export interface HarnessCandidate {
 
 用户显式选择能力可以提高优先级，但仍必须通过安全、配置和预算 gate。
 
-#### Capability Discovery Policy（partial AgentServer stream transport / blocked-on-backend-result-consumption）
+#### Capability Discovery Policy（partial backend retry consumption + ledger replay refs + minimal UI summary / blocked-on-full-UI-wiring-and-browser-validation）
 
-能力检索目标上是 agent 可调用的原子操作，不是 harness 固定时机表；当前已实现统一 discovery API 的 TypeScript service、tiny brief、generated-task helper、AgentServer stream-side tool-call bridge、session-bundle audit record 和 targeted tests。Harness 在 `selectCapabilities` 和 `beforePromptRender` 阶段最终只应做三件事：
+能力检索目标上是 agent 可调用的原子操作，不是 harness 固定时机表；当前已实现统一 discovery API 的 TypeScript service、tiny brief、generated-task helper、AgentServer stream-side tool-call bridge、session-bundle audit record、session-bundle ledger event、bounded retry result consumption、最小 UI summary projection 和 targeted tests。Harness 在 `selectCapabilities` 和 `beforePromptRender` 阶段最终只应做三件事：
 
 - 给 backend 一个小而稳定的 `capability_discovery` API brief，说明 `search`、`expand`、`plan`、`explain` 的用途、预算和 progressive disclosure 规则。
 - 从 profile、privacy、side effect、provider availability 和用户显式选择中派生 discovery 约束，例如 max candidates、允许展开的 schema 类型、是否允许 network/desktop/write 类能力。

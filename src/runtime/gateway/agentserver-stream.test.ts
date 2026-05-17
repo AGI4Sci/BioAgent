@@ -392,6 +392,14 @@ test('AgentServer stream executes capability discovery tool-call and persists sa
   assert.match(auditText, /sciforge\.capability-discovery\.audit-record\.v1/);
   assert.match(auditText, /not-evidence/);
   assert.doesNotMatch(auditText, /127\.0\.0\.1|abc123|\/Applications\/workspace|baseUrl|endpoint|token/i);
+  const ledgerRef = auditRefs.find((ref) => ref.endsWith('/ledger/events.jsonl'));
+  assert.ok(ledgerRef, `tool result should include replay ledger ref: ${JSON.stringify(auditRefs)}`);
+  const ledgerEvents = (await readFile(join(workspace, ledgerRef), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.equal(ledgerEvents.length, 1);
+  assert.equal(ledgerEvents[0]?.schemaVersion, 'sciforge.workspace-ledger-event.v1');
+  assert.equal(ledgerEvents[0]?.kind, 'decision-recorded');
+  assert.match(String(ledgerEvents[0]?.summary), /not-evidence/);
+  assert.doesNotMatch(JSON.stringify(ledgerEvents), /127\.0\.0\.1|abc123|\/Applications\/workspace|baseUrl|endpoint|token/i);
 });
 
 test('AgentServer stream reports malformed capability discovery calls as not-evidence tool results', async () => {

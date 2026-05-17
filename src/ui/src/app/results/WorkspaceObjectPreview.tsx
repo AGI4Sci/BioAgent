@@ -1,22 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Eye, Sparkles } from 'lucide-react';
 import type { SciForgeConfig, SciForgeReference, SciForgeSession, ObjectReference, PreviewDescriptor, RuntimeArtifact } from '../../domain';
-import { cachedWorkspaceFileReadError, readPreviewDerivative, readPreviewDescriptor, readWorkspaceFile, type WorkspaceFileContent } from '../../api/workspaceClient';
+import type { WorkspaceFileContent } from '../../api/workspaceClient';
 import { Badge, cx } from '../uiPrimitives';
 import { MarkdownBlock } from './reportContent';
 import { PreviewDescriptorActions } from './PreviewActions';
 import { lightweightPreviewNoticeForDescriptor, unsupportedPreviewNoticeModel } from '../../../../../packages/support/artifact-preview';
 import {
   descriptorCanUseWorkspacePreview,
-  descriptorDerivativeKind,
-  descriptorWithDiagnostic,
   fileKindForPath,
-  mergePreviewDescriptors,
-  normalizeArtifactPreviewDescriptor,
   previewNeedsPackage,
-  shouldHydratePreviewDescriptor,
   uploadedArtifactPreview,
 } from './previewDescriptor';
+import { createWorkspacePreviewHydrationApi, type ArtifactPreviewHydrationApi } from './artifactPreviewHydrationApi';
 import { resolvePresentationInputForArtifact } from '../../../../../packages/presentation/interactive-views';
 import { createLocalUserActionApi, type UserActionApi } from '../projectionApi';
 import {
@@ -30,7 +26,6 @@ import {
   withRegionLocator,
 } from '../../../../../packages/support/object-references';
 
-const WORKSPACE_OBJECT_PREVIEW_TIMEOUT_MS = 8_000;
 const WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES = 1024 * 1024;
 
 export function WorkspaceObjectPreview({
@@ -39,12 +34,14 @@ export function WorkspaceObjectPreview({
   config,
   onPreviewPackageRequest,
   userActionApi,
+  hydrationApi,
 }: {
   reference: ObjectReference;
   session: SciForgeSession;
   config: SciForgeConfig;
   onPreviewPackageRequest?: (reference: ObjectReference, path?: string, descriptor?: PreviewDescriptor) => void;
   userActionApi?: UserActionApi;
+  hydrationApi?: ArtifactPreviewHydrationApi;
 }) {
   const artifact = artifactForObjectReference(reference, session);
   const inlinePreview = useMemo(() => uploadedArtifactPreview(artifact), [artifact]);
@@ -52,6 +49,7 @@ export function WorkspaceObjectPreview({
   const path = presentationInput?.ref ?? pathForObjectReference(reference, session);
   const previewConfig = useMemo(() => config, [config.workspacePath, config.workspaceWriterBaseUrl]);
   const resolvedUserActionApi = useMemo(() => userActionApi ?? createLocalUserActionApi(), [userActionApi]);
+  const resolvedHydrationApi = useMemo(() => hydrationApi ?? createWorkspacePreviewHydrationApi(), [hydrationApi]);
   const [descriptor, setDescriptor] = useState<PreviewDescriptor | undefined>();
   const [file, setFile] = useState<WorkspaceFileContent | undefined>();
   const [loadingPath, setLoadingPath] = useState('');
@@ -64,40 +62,14 @@ export function WorkspaceObjectPreview({
     if (presentationInput?.kind === 'binary' || presentationInput?.kind === 'unsupported') return undefined;
     if (!path || (reference.kind !== 'file' && reference.kind !== 'artifact') || /^https?:\/\//i.test(path)) return undefined;
     let cancelled = false;
-    const staticDescriptor = normalizeArtifactPreviewDescriptor(artifact, path);
-    if (staticDescriptor) {
-      setDescriptor(staticDescriptor);
-      if (!shouldHydratePreviewDescriptor(staticDescriptor, path)) {
-        setLoadingPath('');
-        return () => {
-          cancelled = true;
-        };
-      }
-    }
-    const cachedFileError = staticDescriptor ? undefined : cachedWorkspaceFileReadError(path, previewConfig);
-    if (cachedFileError) {
-      setError(workspacePreviewReadErrorMessage(undefined, cachedFileError, true));
-      setLoadingPath('');
-      return undefined;
-    }
     setLoadingPath(path);
-    void withWorkspacePreviewTimeout(readPreviewDescriptor(path, previewConfig), `preview descriptor ${path}`)
-      .then((nextDescriptor) => {
-        if (!cancelled) setDescriptor(staticDescriptor ? mergePreviewDescriptors(staticDescriptor, nextDescriptor) : nextDescriptor);
-      })
-      .catch(async (descriptorError) => {
-        if (staticDescriptor) {
-          if (!cancelled) setDescriptor(descriptorWithDiagnostic(staticDescriptor, descriptorError));
-          return;
-        }
-        try {
-          const nextFile = await withWorkspacePreviewTimeout(readWorkspaceFile(path, previewConfig), `workspace file ${path}`);
-          if (!cancelled) setFile(nextFile);
-        } catch (fileError) {
-          if (!cancelled) {
-            setError(workspacePreviewReadErrorMessage(descriptorError, fileError));
-          }
-        }
+    void resolvedHydrationApi.hydrateWorkspaceObjectPreview({ artifact, path, config: previewConfig })
+      .then((hydration) => {
+        if (cancelled) return;
+        if (hydration.staticDescriptor) setDescriptor(hydration.staticDescriptor);
+        if (hydration.descriptor) setDescriptor(hydration.descriptor);
+        if (hydration.file) setFile(hydration.file);
+        if (hydration.error) setError(hydration.error);
       })
       .finally(() => {
         if (!cancelled) setLoadingPath('');
@@ -105,7 +77,7 @@ export function WorkspaceObjectPreview({
     return () => {
       cancelled = true;
     };
-  }, [artifact, inlinePreview, path, previewConfig, presentationInput?.kind, reference.kind]);
+  }, [artifact, inlinePreview, path, previewConfig, presentationInput?.kind, reference.kind, resolvedHydrationApi]);
 
   if (reference.kind === 'url') {
     const url = reference.ref.replace(/^url:/i, '');
@@ -211,6 +183,7 @@ export function WorkspaceObjectPreview({
             objectReference={reference}
             session={session}
             userActionApi={resolvedUserActionApi}
+            hydrationApi={resolvedHydrationApi}
           />
         )}
       </div>
@@ -329,6 +302,7 @@ function DescriptorPreview({
   objectReference,
   session,
   userActionApi,
+  hydrationApi,
 }: {
   descriptor: PreviewDescriptor;
   config: SciForgeConfig;
@@ -336,6 +310,7 @@ function DescriptorPreview({
   objectReference: ObjectReference;
   session: SciForgeSession;
   userActionApi: UserActionApi;
+  hydrationApi: ArtifactPreviewHydrationApi;
 }) {
   const previewConfig = useMemo(() => config, [config.workspacePath, config.workspaceWriterBaseUrl]);
   const descriptorLoadKey = `${descriptor.kind}:${descriptor.inlinePolicy}:${descriptor.sizeBytes ?? 'unknown'}:${descriptor.ref}`;
@@ -365,7 +340,7 @@ function DescriptorPreview({
     setDerivedFile(undefined);
     setDerivedError('');
     setDerivedLoading(true);
-    void withWorkspacePreviewTimeout(loadDescriptorPreviewFile(descriptor, previewConfig), `derived preview ${descriptor.ref}`)
+    void hydrationApi.loadDescriptorPreviewFile({ descriptor, config: previewConfig })
       .then(({ file, label }) => {
         if (cancelled) return;
         setDerivedFile(file);
@@ -380,7 +355,7 @@ function DescriptorPreview({
     return () => {
       cancelled = true;
     };
-  }, [descriptor, descriptorLoadKey, loadAttempt, needsManualLoad, previewConfig, requestedLoadKey]);
+  }, [descriptor, descriptorLoadKey, hydrationApi, loadAttempt, needsManualLoad, previewConfig, requestedLoadKey]);
 
   if ((descriptor.kind === 'pdf' || descriptor.kind === 'image') && descriptor.rawUrl) {
     return (
@@ -454,34 +429,6 @@ export function descriptorNeedsManualPreviewLoad(descriptor: PreviewDescriptor) 
   if (!descriptorCanUseWorkspacePreview(descriptor)) return false;
   if (descriptor.inlinePolicy !== 'inline') return true;
   return (descriptor.sizeBytes ?? 0) > WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES;
-}
-
-async function loadDescriptorPreviewFile(descriptor: PreviewDescriptor, config: SciForgeConfig) {
-  const shouldReadInline = descriptor.inlinePolicy === 'inline' && (descriptor.sizeBytes ?? 0) <= WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES;
-  if (shouldReadInline) {
-    try {
-      return { file: await readWorkspaceFile(descriptor.ref, config), label: 'inline' };
-    } catch {
-      // Fall through to derived preview; the descriptor endpoint may point at a file outside the normal workspace route.
-    }
-  }
-  const derivativeKind = descriptorDerivativeKind(descriptor);
-  const derivative = await readPreviewDerivative(descriptor.ref, derivativeKind, config);
-  return { file: await readWorkspaceFile(derivative.ref, config), label: `${derivative.kind} derivative` };
-}
-
-async function withWorkspacePreviewTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error(`${label} 超过 ${Math.round(WORKSPACE_OBJECT_PREVIEW_TIMEOUT_MS / 1000)} 秒仍未返回。`));
-    }, WORKSPACE_OBJECT_PREVIEW_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 function UnsupportedPreviewPackageNotice({
@@ -771,14 +718,6 @@ function artifactFallbackTitle(reference: ObjectReference, artifact?: RuntimeArt
   const metadataTitle = typeof artifact?.metadata?.title === 'string' ? artifact.metadata.title : undefined;
   const metadataName = typeof artifact?.metadata?.name === 'string' ? artifact.metadata.name : undefined;
   return metadataTitle || metadataName || reference.title || path || artifact?.id || reference.ref;
-}
-
-function workspacePreviewReadErrorMessage(descriptorError: unknown, fileError: unknown, cached = false) {
-  const fileMessage = fileError instanceof Error ? fileError.message : String(fileError);
-  const cachedNote = cached ? '（已缓存 stale 结果，避免重复请求）' : '';
-  if (!descriptorError) return `已切换到备用预览，但仍无法读取：${fileMessage}${cachedNote}`;
-  const descriptorMessage = descriptorError instanceof Error ? descriptorError.message : String(descriptorError);
-  return `已切换到备用预览，但仍无法读取：${fileMessage}${cachedNote}；descriptor diagnostic: ${descriptorMessage}`;
 }
 
 function formatBytes(value: number) {

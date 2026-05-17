@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -120,6 +122,15 @@ describe('WorkspaceObjectPreview presentation input', () => {
 
     assert.equal(result, undefined);
     assert.equal(called, false);
+  });
+
+  it('delegates workspace preview hydration to the functional hydration API', async () => {
+    const source = await readFile(join(process.cwd(), 'src/ui/src/app/results/WorkspaceObjectPreview.tsx'), 'utf8');
+
+    assert.match(source, /createWorkspacePreviewHydrationApi/);
+    assert.doesNotMatch(source, /readWorkspaceFile\s*\(/);
+    assert.doesNotMatch(source, /readPreviewDescriptor\s*\(/);
+    assert.doesNotMatch(source, /readPreviewDerivative\s*\(/);
   });
 
   it('renders markdown reports with GFM tables and task lists', () => {

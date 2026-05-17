@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -14,6 +14,7 @@ import { errorMessage, isRecord, safeWorkspaceRel } from '../gateway-utils.js';
 
 export const CAPABILITY_DISCOVERY_AGENTSERVER_TOOL_TRANSPORT_SCHEMA_VERSION = 'sciforge.capability-discovery.agentserver-tool-transport.v1' as const;
 export const CAPABILITY_DISCOVERY_AUDIT_RECORD_SCHEMA_VERSION = 'sciforge.capability-discovery.audit-record.v1' as const;
+export const CAPABILITY_DISCOVERY_LEDGER_EVENT_SCHEMA_VERSION = 'sciforge.workspace-ledger-event.v1' as const;
 
 export type CapabilityDiscoveryToolMethod = 'search' | 'expand' | 'plan' | 'explain';
 
@@ -87,9 +88,18 @@ export async function maybeHandleCapabilityDiscoveryToolCall(
       result,
       sourceEvent: event,
     });
+    const ledgerRef = await appendDiscoveryLedgerEvent(options, {
+      method: call.method,
+      callId: call.callId,
+      status: 'done',
+      discoveryRef: refs.discoveryRef,
+      auditRef: refs.auditRef,
+      persistedAuditRef,
+    });
     const auditRefs = uniqueStrings([
       refs.auditRef,
       persistedAuditRef,
+      ledgerRef,
     ].filter((ref): ref is string => Boolean(ref)));
     return {
       type: 'tool-result',
@@ -111,6 +121,7 @@ export async function maybeHandleCapabilityDiscoveryToolCall(
         auditRefs,
         discoveryRef: refs.discoveryRef,
         persistedAuditRef,
+        ledgerRef,
         executionRequiresInvokeCapability: true,
       }) as Record<string, unknown>,
     };
@@ -123,6 +134,14 @@ export async function maybeHandleCapabilityDiscoveryToolCall(
       error: reason,
       sourceEvent: event,
     });
+    const ledgerRef = await appendDiscoveryLedgerEvent(options, {
+      method: call.method,
+      callId: call.callId,
+      status: 'failed-with-reason',
+      error: reason,
+      persistedAuditRef,
+    });
+    const auditRefs = uniqueStrings([persistedAuditRef, ledgerRef].filter((ref): ref is string => Boolean(ref)));
     return {
       type: 'tool-result',
       source: 'workspace-runtime',
@@ -133,13 +152,14 @@ export async function maybeHandleCapabilityDiscoveryToolCall(
       callId: call.callId,
       error: reason,
       auditRef: persistedAuditRef,
-      auditRefs: persistedAuditRef ? [persistedAuditRef] : [],
+      auditRefs,
       completionEvidence: 'not-evidence',
       raw: sanitizeForDiscoveryAudit({
         schemaVersion: CAPABILITY_DISCOVERY_AGENTSERVER_TOOL_TRANSPORT_SCHEMA_VERSION,
         method: call.method,
         callId: call.callId,
         persistedAuditRef,
+        ledgerRef,
         error: reason,
         executionRequiresInvokeCapability: true,
       }) as Record<string, unknown>,
@@ -271,6 +291,74 @@ async function persistDiscoveryAuditRecord(
   await mkdir(dirname(join(options.workspace, rel)), { recursive: true });
   await writeFile(join(options.workspace, rel), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
   return rel;
+}
+
+async function appendDiscoveryLedgerEvent(
+  options: AgentServerCapabilityDiscoveryToolTransportOptions,
+  input: {
+    method: CapabilityDiscoveryToolMethod;
+    callId?: string;
+    status: CapabilityDiscoveryToolResultEvent['status'];
+    discoveryRef?: string;
+    auditRef?: string;
+    persistedAuditRef?: string;
+    error?: string;
+  },
+): Promise<string | undefined> {
+  if (!options.workspace || !options.sessionBundleRel) return undefined;
+  const bundleRel = safeWorkspaceRel(options.sessionBundleRel.replace(/\/+$/, ''));
+  const ledgerRef = safeWorkspaceRel(`${bundleRel}/ledger/events.jsonl`);
+  const eventId = `capability-discovery:${input.method}:${createHash('sha256')
+    .update(options.auditSeed ?? 'agentserver-tool-call')
+    .update(input.callId ?? '')
+    .update(input.persistedAuditRef ?? '')
+    .digest('hex')
+    .slice(0, 16)}`;
+  const refs = [
+    input.persistedAuditRef ? ledgerMemoryRef(input.persistedAuditRef, 'run-audit', 'Persisted capability discovery audit record.') : undefined,
+    input.auditRef ? ledgerMemoryRef(input.auditRef, 'run-audit', 'Deterministic capability discovery audit ref.') : undefined,
+    input.discoveryRef ? ledgerMemoryRef(input.discoveryRef, 'retrieval', 'Capability discovery result ref.') : undefined,
+  ].filter(Boolean);
+  const event = sanitizeForDiscoveryAudit({
+    schemaVersion: CAPABILITY_DISCOVERY_LEDGER_EVENT_SCHEMA_VERSION,
+    eventId,
+    sessionId: sessionIdFromBundleRel(bundleRel),
+    createdAt: new Date().toISOString(),
+    actor: 'runtime',
+    kind: 'decision-recorded',
+    summary: `Capability discovery ${input.method} ${input.status}; recommendation remains not-evidence until executed through invoke_capability.`,
+    refs,
+    metadata: {
+      capability: `capability_discovery.${input.method}`,
+      callId: input.callId,
+      status: input.status,
+      error: input.error,
+      completionEvidence: 'not-evidence',
+      executionRequiresInvokeCapability: true,
+      source: 'agentserver-tool-call-transport',
+    },
+  });
+  await mkdir(dirname(join(options.workspace, ledgerRef)), { recursive: true });
+  await appendFile(join(options.workspace, ledgerRef), `${JSON.stringify(event)}\n`, 'utf8');
+  return ledgerRef;
+}
+
+function ledgerMemoryRef(ref: string, kind: 'run-audit' | 'retrieval', preview: string) {
+  const sizeBytes = Buffer.byteLength(preview || ref, 'utf8');
+  return {
+    ref,
+    kind,
+    digest: `sha256:${createHash('sha256').update(JSON.stringify({ ref, kind, preview, sizeBytes })).digest('hex')}`,
+    sizeBytes,
+    preview,
+    retention: kind === 'run-audit' ? 'audit-only' : 'warm',
+  };
+}
+
+function sessionIdFromBundleRel(bundleRel: string) {
+  const tail = bundleRel.split('/').filter(Boolean).at(-1) ?? 'session-unknown';
+  const match = /^\d{4}-\d{2}-\d{2}_.+?_(.+)$/.exec(tail);
+  return match?.[1] ?? tail;
 }
 
 function refsFromDiscoveryResult(result: unknown) {

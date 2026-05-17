@@ -288,6 +288,7 @@ export function validateCapabilityManifestRegistry(manifests: CapabilityManifest
 }
 
 export const CORE_CAPABILITY_MANIFESTS: CapabilityManifest[] = [
+  coreCapabilityManifest('capability_discovery', 'Discover, expand, plan, and explain available capabilities without executing user work. Execution still requires invoke_capability through the Capability Gateway.', 'runtime-adapter', 'src/runtime/capability-discovery.ts', ['none']),
   toolPrimitiveCapabilityManifest({
     id: 'pdf_extract',
     name: 'PDF extract',
@@ -537,7 +538,7 @@ function coreCapabilityManifest(
   return {
     contract: CAPABILITY_MANIFEST_CONTRACT_ID,
     id,
-    name: id.split('.').slice(1).join(' '),
+    name: id.includes('.') ? id.split('.').slice(1).join(' ') : id.replaceAll('_', ' '),
     version: '0.1.0',
     ownerPackage: sourceRef.startsWith('packages/') ? sourceRef.split('/').slice(0, 3).join('/') : 'src/runtime',
     kind,

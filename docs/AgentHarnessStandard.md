@@ -1,6 +1,6 @@
 # Agent Harness Standard
 
-最后更新：2026-05-10
+最后更新：2026-05-17
 
 本文是 SciForge agent harness 的编程标准。它面向未来的 harness 研究和实现，作用类似 PyTorch Lightning 对训练循环、callbacks、profiles 和 logger 的标准化：研究者可以新增策略、实验 profile 和能力预算，但不能改散落的 gateway、prompt、UI 或 repair 分支。
 
@@ -20,6 +20,8 @@ Agent harness 解决的问题不是“系统有什么能力”，而是“每一
 
 - Harness 不替代 agent backend 的推理、规划和胶水代码生成。
 - Harness 不替代 capability manifest。能力声明仍由 capability registry 负责。
+- Harness 不硬编码所有能力检索触发时机。目标状态是把 `capability_discovery` 作为受控原子能力暴露给 AgentServer/backend，并记录/约束 discovery 调用；当前为 partial generated-task callable，完整 AgentServer tool-call transport / UI / audit 持久化仍按专项设计推进，详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
+- Harness 不直接驱动 React UI 或解释 raw execution output。用户可见状态和用户干预应通过函数式 Projection/UserAction API 进入 presentation/runtime 边界；专项设计见 [`UIExecutionDecoupling.md`](UIExecutionDecoupling.md)。
 - Harness callback 不直接读写 workspace、不调用外部 API、不拼最终 prompt、不改 React state。
 
 ## 主逻辑
@@ -39,12 +41,15 @@ raw request
        -> build HarnessContract
        -> record HarnessTrace
   -> build context envelope from HarnessContract
-  -> build capability broker brief from HarnessContract
+  -> build compact capability broker brief
+  -> expose tiny capability_discovery API brief from HarnessContract/context envelope
   -> render prompt/payload from HarnessContract
   -> dispatch agent backend
+  -> backend may call capability_discovery.search/expand/plan/explain when current brief is insufficient
   -> enforce stream/tool budgets
   -> validate result
   -> decide repair or finalization
+  -> derive ProjectionApi/UserActionApi view models
   -> audit trace, ledger, verification refs and UI progress
 ```
 
@@ -116,7 +121,8 @@ AgentServer handoff 使用 metadata-only 交接面：
 
 - payload metadata 必须带 `harnessProfileId`、`harnessContractRef`、`harnessTraceRef`、budget summary、decision owner。
 - 结构化 `agentHarnessHandoff` 必须可从 `HarnessContract` 和 refs 重建。
-- prompt text 不内联完整 contract、trace、promptDirectives 或 stage records。
+- prompt text 不内联完整 contract、trace、promptDirectives、stage records 或完整 capability registry。
+- handoff 提供极简 `capability_discovery` API brief：可调用方法、输入/输出摘要、预算和何时考虑调用；schema/examples/provider 详情必须由 agent 按需 `expand`。当前已落地 tiny brief、prompt guidance 和 generated-task helper bridge；真实 AgentServer/backend tool-call transport 和 ledger audit 持久化仍见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
 - fresh/continuation/repair 的 refs 差异通过 contract/context refs 表达，并由 `npm run smoke:contract-driven-handoff` 覆盖。
 
 ## 分级 Hooks
@@ -151,7 +157,7 @@ Conversation policy 在这里是输入信号源，不是最终决策者。它输
 | Hook | 作用 | 典型输出 |
 | --- | --- | --- |
 | `onRegistryBuild` | 将 skills/tools/actions/observe/verifiers 投影成统一 manifest | registry facts |
-| `selectCapabilities` | 输出候选能力和 broker policy | `HarnessCandidate[]` |
+| `selectCapabilities` | 输出紧凑候选能力、broker policy 和 discovery 可见性 | `HarnessCandidate[]` / discovery policy |
 | `onBeforeCapabilityBroker` | 注入 scenario/user/history/provider/budget 信号 | broker input |
 | `onAfterCapabilityBroker` | 审计 broker 结果和 lazy expansion | broker audit |
 | `onToolPolicy` | 决定工具可见性、side effects 和 provider constraints | tool policy |
@@ -182,6 +188,28 @@ export interface HarnessCandidate {
 - `UserIntentOverrideCallback`
 
 用户显式选择能力可以提高优先级，但仍必须通过安全、配置和预算 gate。
+
+#### Capability Discovery Policy（partial generated-task callable / blocked-on-AgentServer-tool-transport）
+
+能力检索目标上是 agent 可调用的原子操作，不是 harness 固定时机表；当前已实现统一 discovery API 的 TypeScript service、tiny brief 和 targeted tests。Harness 在 `selectCapabilities` 和 `beforePromptRender` 阶段最终只应做三件事：
+
+- 给 backend 一个小而稳定的 `capability_discovery` API brief，说明 `search`、`expand`、`plan`、`explain` 的用途、预算和 progressive disclosure 规则。
+- 从 profile、privacy、side effect、provider availability 和用户显式选择中派生 discovery 约束，例如 max candidates、允许展开的 schema 类型、是否允许 network/desktop/write 类能力。
+- 记录 discovery 调用和结果 refs，让 replay/audit 能看到 agent 为什么增加或排除某些能力。
+
+推荐 discovery lifecycle：
+
+```text
+compact brief sufficient
+  -> backend proceeds with existing candidates
+compact brief insufficient / ambiguous / provider failed / validation failed
+  -> backend calls capability_discovery.search
+  -> optionally expand top candidates
+  -> optionally plan a capability composition
+  -> use invoke_capability or ask user for missing permission/input
+```
+
+Harness 不应把“PDF 就触发 pdf_extract 检索”“检索失败就固定选某 provider”等规则写死。那些知识属于 manifest routing tags、provider health、discovery scoring、backend reasoning 和 Gateway preflight。Harness 只保留安全兜底：预算、side effects、人类确认、no-secret/no-endpoint leakage、provider-first bypass guard。API 细节和实现任务见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
 
 ### Bounded Parallel Orchestration
 

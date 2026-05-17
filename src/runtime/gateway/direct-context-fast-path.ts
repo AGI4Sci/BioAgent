@@ -279,7 +279,7 @@ export async function requestWithDirectContextReadableArtifactData(request: Gate
   if (!decision || !policyRequestsDirectContext(request, decision)) return request;
 
   const workspace = resolve(request.workspacePath || process.cwd());
-  let artifacts = await Promise.all(request.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)));
+  let artifacts = (await Promise.all(request.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)))).filter(isRecord);
   const hydratedUiArtifacts = Array.isArray(uiState.artifacts)
     ? await Promise.all(uiState.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)))
     : uiState.artifacts;

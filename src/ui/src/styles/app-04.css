@@ -2491,7 +2491,8 @@
 }
 
 .workspace-object-reference-hint button,
-.workspace-object-media-note button {
+.workspace-object-media-note button,
+.workspace-object-load-preview-action {
   min-height: 28px;
   padding: 0 9px;
   color: var(--accent);
@@ -2501,6 +2502,19 @@
   cursor: pointer;
   font-size: 11px;
   font-weight: 900;
+}
+
+.workspace-object-load-preview-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  justify-self: start;
+}
+
+.workspace-object-load-preview-action:disabled {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 .workspace-object-region-layer {

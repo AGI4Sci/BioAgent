@@ -5,13 +5,18 @@ import test from 'node:test';
 import type { SciForgeSession } from '../domain';
 import {
   appendUIActionAuditLog,
+  createApproveResultUIAction,
   compactUIActionPromptPreview,
   createCancelRunUIAction,
   createConcurrencyDecisionUIAction,
+  createLoadArtifactPreviewUIAction,
   createOpenDebugAuditUIAction,
+  createRequestRetryUIAction,
+  createSelectObjectUIAction,
   createUIAction,
   createSubmitTurnUIAction,
   createTriggerRecoverUIAction,
+  createUpdateCapabilityPreferenceUIAction,
   recordUIActionInSession,
   uiActionAuditLogForSession,
   uiActionReferenceRefs,
@@ -87,6 +92,42 @@ test('UIAction creators cover every final write intent and can be recorded on th
       recoverAction: 'Resume from projection refs and inspect audit first.',
       auditRefs: ['audit:run', 'audit:run'],
     }),
+    createSelectObjectUIAction({
+      id: 'ui-action-select',
+      session,
+      createdAt: '2026-05-16T00:01:01.100Z',
+      objectRef: 'artifact:report',
+      intent: 'ask-followup',
+    }),
+    createLoadArtifactPreviewUIAction({
+      id: 'ui-action-load-preview',
+      session,
+      createdAt: '2026-05-16T00:01:01.200Z',
+      artifactRef: 'artifact:large-report',
+      byteLimit: 4096,
+    }),
+    createRequestRetryUIAction({
+      id: 'ui-action-request-retry',
+      session,
+      createdAt: '2026-05-16T00:01:01.300Z',
+      runId: 'run-failed',
+      scope: 'with-repair-evidence',
+      auditRefs: ['artifact:candidate', 'artifact:candidate'],
+    }),
+    createApproveResultUIAction({
+      id: 'ui-action-approve',
+      session,
+      createdAt: '2026-05-16T00:01:01.400Z',
+      runId: 'run-candidate',
+      approval: 'reject-result',
+      note: 'needs verification before final answer',
+    }),
+    createUpdateCapabilityPreferenceUIAction({
+      id: 'ui-action-capability',
+      session,
+      createdAt: '2026-05-16T00:01:01.500Z',
+      preference: { prefer: 'web_search', apiKey: 'SHOULD_NOT_PERSIST' },
+    }),
     createCancelRunUIAction({
       id: 'ui-action-cancel',
       session,
@@ -111,19 +152,29 @@ test('UIAction creators cover every final write intent and can be recorded on th
     }),
   ];
 
-  const sessionWithLog = actions.reduce((current, action) => recordUIActionInSession(current, action, 8), session);
+  const sessionWithLog = actions.reduce((current, action) => recordUIActionInSession(current, action, 16), session);
   const log = uiActionAuditLogForSession(sessionWithLog);
 
   assert.deepEqual(log.map((action) => action.type), [
     'submit-turn',
     'trigger-recover',
+    'select-object',
+    'load-artifact-preview',
+    'request-retry',
+    'approve-result',
+    'update-capability-preference',
     'cancel-run',
     'concurrency-decision',
     'open-debug-audit',
   ]);
   assert.deepEqual(log[1].type === 'trigger-recover' ? log[1].auditRefs : [], ['audit:run']);
-  assert.deepEqual(log[2].type === 'cancel-run' ? log[2].rejectedGuidanceIds : [], ['guidance-1']);
-  assert.deepEqual(log[4].type === 'open-debug-audit' ? log[4].auditRefs : [], ['execution-unit:EU-1']);
+  assert.equal(log[2].type === 'select-object' ? log[2].intent : '', 'ask-followup');
+  assert.equal(log[3].type === 'load-artifact-preview' ? log[3].byteLimit : 0, 4096);
+  assert.deepEqual(log[4].type === 'request-retry' ? log[4].auditRefs : [], ['artifact:candidate']);
+  assert.equal(log[5].type === 'approve-result' ? log[5].approval : '', 'reject-result');
+  assert.deepEqual(log[6].type === 'update-capability-preference' ? log[6].preference : {}, { prefer: 'web_search' });
+  assert.deepEqual(log[7].type === 'cancel-run' ? log[7].rejectedGuidanceIds : [], ['guidance-1']);
+  assert.deepEqual(log[9].type === 'open-debug-audit' ? log[9].auditRefs : [], ['execution-unit:EU-1']);
 });
 
 test('UI action boundary is the only app-level creator surface for final write intents', async () => {

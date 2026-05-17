@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Eye, Sparkles } from 'lucide-react';
 import type { SciForgeConfig, SciForgeReference, SciForgeSession, ObjectReference, PreviewDescriptor, RuntimeArtifact } from '../../domain';
 import { cachedWorkspaceFileReadError, readPreviewDerivative, readPreviewDescriptor, readWorkspaceFile, type WorkspaceFileContent } from '../../api/workspaceClient';
 import { Badge, cx } from '../uiPrimitives';
@@ -30,6 +30,7 @@ import {
 } from '../../../../../packages/support/object-references';
 
 const WORKSPACE_OBJECT_PREVIEW_TIMEOUT_MS = 8_000;
+const WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES = 1024 * 1024;
 
 export function WorkspaceObjectPreview({
   reference,
@@ -312,12 +313,23 @@ function artifactFallbackReasonLabel(reason: 'missing-path' | 'read-failed' | 'i
 
 function DescriptorPreview({ descriptor, config, reference }: { descriptor: PreviewDescriptor; config: SciForgeConfig; reference: SciForgeReference }) {
   const previewConfig = useMemo(() => config, [config.workspacePath, config.workspaceWriterBaseUrl]);
+  const descriptorLoadKey = `${descriptor.kind}:${descriptor.inlinePolicy}:${descriptor.sizeBytes ?? 'unknown'}:${descriptor.ref}`;
+  const needsManualLoad = descriptorNeedsManualPreviewLoad(descriptor);
   const [derivedFile, setDerivedFile] = useState<WorkspaceFileContent | undefined>();
   const [derivedLabel, setDerivedLabel] = useState('');
   const [derivedError, setDerivedError] = useState('');
   const [derivedLoading, setDerivedLoading] = useState(false);
+  const [requestedLoadKey, setRequestedLoadKey] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     if (!descriptorCanUseWorkspacePreview(descriptor)) {
+      setDerivedFile(undefined);
+      setDerivedLabel('');
+      setDerivedError('');
+      setDerivedLoading(false);
+      return undefined;
+    }
+    if (needsManualLoad && requestedLoadKey !== descriptorLoadKey) {
       setDerivedFile(undefined);
       setDerivedLabel('');
       setDerivedError('');
@@ -343,7 +355,7 @@ function DescriptorPreview({ descriptor, config, reference }: { descriptor: Prev
     return () => {
       cancelled = true;
     };
-  }, [descriptor, previewConfig]);
+  }, [descriptor, descriptorLoadKey, loadAttempt, needsManualLoad, previewConfig, requestedLoadKey]);
 
   if ((descriptor.kind === 'pdf' || descriptor.kind === 'image') && descriptor.rawUrl) {
     return (
@@ -360,6 +372,20 @@ function DescriptorPreview({ descriptor, config, reference }: { descriptor: Prev
     return (
       <div className="workspace-object-media-note">
         <p>此 artifact 使用 workspace descriptor 预览；小文件直接读取，大文件按需生成 text/schema 派生预览。这只调用本地 workspace 函数，不增加 LLM token 开销。</p>
+        {needsManualLoad && !derivedFile ? (
+          <button
+            type="button"
+            className="workspace-object-load-preview-action"
+            onClick={() => {
+              setRequestedLoadKey(descriptorLoadKey);
+              setLoadAttempt((attempt) => attempt + 1);
+            }}
+            disabled={derivedLoading}
+          >
+            <Eye size={14} />
+            {derivedLoading ? '正在加载预览' : '加载预览'}
+          </button>
+        ) : null}
         {derivedLoading ? <p>正在生成或读取预览...</p> : null}
         {derivedFile ? (
           <div className="descriptor-derived-preview">
@@ -380,8 +406,14 @@ function DescriptorPreview({ descriptor, config, reference }: { descriptor: Prev
   );
 }
 
+export function descriptorNeedsManualPreviewLoad(descriptor: PreviewDescriptor) {
+  if (!descriptorCanUseWorkspacePreview(descriptor)) return false;
+  if (descriptor.inlinePolicy !== 'inline') return true;
+  return (descriptor.sizeBytes ?? 0) > WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES;
+}
+
 async function loadDescriptorPreviewFile(descriptor: PreviewDescriptor, config: SciForgeConfig) {
-  const shouldReadInline = descriptor.inlinePolicy === 'inline' && (descriptor.sizeBytes ?? 0) <= 1024 * 1024;
+  const shouldReadInline = descriptor.inlinePolicy === 'inline' && (descriptor.sizeBytes ?? 0) <= WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES;
   if (shouldReadInline) {
     try {
       return { file: await readWorkspaceFile(descriptor.ref, config), label: 'inline' };

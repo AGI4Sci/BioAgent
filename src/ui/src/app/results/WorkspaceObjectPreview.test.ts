@@ -4,10 +4,29 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { ObjectReference, RuntimeArtifact, SciForgeConfig, SciForgeSession } from '../../domain';
-import { WorkspaceObjectPreview } from './WorkspaceObjectPreview';
+import { descriptorNeedsManualPreviewLoad, WorkspaceObjectPreview } from './WorkspaceObjectPreview';
 import { MarkdownBlock } from './reportContent';
 
 describe('WorkspaceObjectPreview presentation input', () => {
+  it('requires an explicit load action before previewing large descriptor-backed text artifacts', () => {
+    assert.equal(descriptorNeedsManualPreviewLoad({
+      kind: 'markdown',
+      source: 'path',
+      ref: '.sciforge/artifacts/large-report.md',
+      sizeBytes: 2 * 1024 * 1024,
+      inlinePolicy: 'extract',
+      actions: ['extract-text'],
+    }), true);
+    assert.equal(descriptorNeedsManualPreviewLoad({
+      kind: 'markdown',
+      source: 'path',
+      ref: '.sciforge/artifacts/small-report.md',
+      sizeBytes: 154,
+      inlinePolicy: 'inline',
+      actions: ['copy-ref'],
+    }), false);
+  });
+
   it('uses markdown delivery refs instead of rendering artifact JSON fallback', () => {
     const artifact: RuntimeArtifact = {
       id: 'report-1',

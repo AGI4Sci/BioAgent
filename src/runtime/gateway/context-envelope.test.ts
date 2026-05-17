@@ -188,6 +188,22 @@ test('context envelope handoff carries public provider route shape only', () => 
   assertNoProviderRouteLeaks(providerRoutes);
 });
 
+test('context envelope exposes only tiny capability discovery API brief', () => {
+  const envelope = buildContextEnvelope({
+    skillDomain: 'literature',
+    prompt: 'Search papers and plan missing tools.',
+    artifacts: [],
+    uiState: {},
+  } as GatewayRequest, { workspace: '/tmp/sciforge-test' });
+
+  const discovery = record(envelope.scenarioFacts.capabilityDiscovery);
+  assert.equal(discovery.schemaVersion, 'sciforge.capability-discovery.tiny-brief.v1');
+  assert.deepEqual(discovery.api, ['search', 'expand', 'plan', 'explain']);
+  assert.equal(discovery.progressiveDisclosure, true);
+  assert.equal(record(discovery.safety).executionRequiresInvokeCapability, true);
+  assert.doesNotMatch(JSON.stringify(discovery), /inputSchema|outputSchema|examples|"providers"|endpoint_value|workspace_root_value|auth_value|token_value|secret_value/i);
+});
+
 test('context envelope carries compact state digest refs after history compaction', () => {
   const envelope = buildContextEnvelope({
     skillDomain: 'knowledge',

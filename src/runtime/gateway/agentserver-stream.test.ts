@@ -98,7 +98,7 @@ test('silent stream guard consumes harness progressPlan silencePolicy for timeou
   assert.ok(capturedAudit.detail.includes('status=Retrying compact AgentServer stream'));
 });
 
-test('generation token budget is disabled so long AgentServer streams can complete', async () => {
+test('generation token guard allows large streams up to a bounded fallback ceiling', async () => {
   const request = {
     skillDomain: 'literature',
     prompt: 'guard runaway generation',
@@ -106,11 +106,11 @@ test('generation token budget is disabled so long AgentServer streams can comple
     maxContextWindowTokens: 200_000,
     uiState: {},
   } satisfies GatewayRequest;
-  assert.equal(agentServerGenerationTokenGuardLimit(request), undefined);
+  assert.equal(agentServerGenerationTokenGuardLimit(request), 400_000);
   assert.equal(agentServerGenerationTokenGuardLimit({
     ...request,
     uiState: { currentReferenceDigests: [{ ref: 'refs/current/a.json' }] },
-  }), undefined);
+  }), 400_000);
 
   const encoder = new TextEncoder();
   const response = new Response(new ReadableStream<Uint8Array>({
@@ -141,7 +141,48 @@ test('generation token budget is disabled so long AgentServer streams can comple
   assert.equal(result.run.id, 'run-large-total-usage');
 });
 
-test('repair continuation token budget is disabled while stream silence guard remains responsible for stalls', async () => {
+test('bounded harness generation token guard stops runaway streams before projectionless waits', async () => {
+  const request = {
+    skillDomain: 'literature',
+    prompt: 'bounded repair should not consume unlimited generation tokens',
+    artifacts: [],
+    maxContextWindowTokens: 200_000,
+    uiState: {
+      agentHarness: {
+        contract: {
+          toolBudget: {
+            maxWallMs: 30_000,
+            maxToolCalls: 2,
+            costUnits: 2,
+          },
+        },
+      },
+    },
+  } satisfies GatewayRequest;
+  assert.equal(agentServerGenerationTokenGuardLimit(request), 180_000);
+
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify({
+        event: {
+          type: 'usage-update',
+          usage: { input: 181_000, output: 5_001, total: 186_001, provider: 'codex' },
+        },
+      })}\n`));
+      controller.close();
+    },
+  }));
+  await assert.rejects(
+    readAgentServerRunStream(response, () => {}, {
+      maxTotalUsage: agentServerGenerationTokenGuardLimit(request),
+      convergenceGuardMode: 'generation',
+    }),
+    /convergence guard after 186001 total tokens/,
+  );
+});
+
+test('repair continuation token guard keeps repair loops bounded while stream silence guard handles stalls', async () => {
   const request = {
     skillDomain: 'literature',
     prompt: 'continue the failed run using compact repair refs',
@@ -158,7 +199,7 @@ test('repair continuation token budget is disabled while stream silence guard re
       }],
     },
   } satisfies GatewayRequest;
-  assert.equal(agentServerGenerationTokenGuardLimit(request, { repairContinuation: true }), undefined);
+  assert.equal(agentServerGenerationTokenGuardLimit(request, { repairContinuation: true }), 100_000);
 
   const encoder = new TextEncoder();
   const response = new Response(new ReadableStream<Uint8Array>({

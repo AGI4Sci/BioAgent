@@ -109,6 +109,14 @@ test('pre-output generated task failure preserves session-bundle partial artifac
   assert.match(serialized, /paper-a\.pdf/);
   assert.match(serialized, /paper-a\.metadata\.json/);
   assert.ok(payload.objectReferences?.some((ref) => ref.ref === partialPdfRel));
+  const completionCandidate = isRecord(payload.displayIntent)
+    ? payload.displayIntent.completionCandidate as Record<string, unknown> | undefined
+    : undefined;
+  assert.equal(completionCandidate?.schemaVersion, 'sciforge.completion-candidate.v1');
+  assert.equal(completionCandidate?.status, 'unverified');
+  assert.deepEqual(completionCandidate?.artifactRefs, ['artifact:paper-a']);
+  assert.ok((completionCandidate?.recoverActions as string[]).some((action) => /导入并验证候选结果/.test(action)));
+  assert.doesNotMatch(String(completionCandidate?.summary), /stdout|stderr|ToolPayload|raw/i);
 });
 
 test('partial PDF retrieval failures keep downloaded full text and metadata instead of rerunning repair', async () => {

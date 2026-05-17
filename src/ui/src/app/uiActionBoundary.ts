@@ -2,7 +2,12 @@ import type { ScenarioInstanceId, SciForgeReference, SciForgeSession } from '../
 
 export type UIActionType =
   | 'submit-turn'
+  | 'select-object'
+  | 'load-artifact-preview'
+  | 'request-retry'
   | 'trigger-recover'
+  | 'approve-result'
+  | 'update-capability-preference'
   | 'cancel-run'
   | 'concurrency-decision'
   | 'open-debug-audit';
@@ -23,10 +28,37 @@ export type UIAction =
     referenceRefs: string[];
   })
   | (UIActionBase & {
+    type: 'select-object';
+    objectRef: string;
+    intent: 'inspect' | 'ask-followup' | 'compare' | 'pin';
+  })
+  | (UIActionBase & {
+    type: 'load-artifact-preview';
+    artifactRef: string;
+    byteLimit?: number;
+  })
+  | (UIActionBase & {
+    type: 'request-retry';
+    runId?: string;
+    reason?: string;
+    scope: 'same-input' | 'with-repair-evidence' | 'rediscover-capabilities';
+    auditRefs: string[];
+  })
+  | (UIActionBase & {
     type: 'trigger-recover';
     runId?: string;
     recoverAction: string;
     auditRefs: string[];
+  })
+  | (UIActionBase & {
+    type: 'approve-result';
+    runId?: string;
+    approval: 'human-approved' | 'reject-result';
+    notePreview?: string;
+  })
+  | (UIActionBase & {
+    type: 'update-capability-preference';
+    preference: Record<string, unknown>;
   })
   | (UIActionBase & {
     type: 'cancel-run';
@@ -46,7 +78,12 @@ export type UIAction =
   });
 
 export type SubmitTurnUIAction = Extract<UIAction, { type: 'submit-turn' }>;
+export type SelectObjectUIAction = Extract<UIAction, { type: 'select-object' }>;
+export type LoadArtifactPreviewUIAction = Extract<UIAction, { type: 'load-artifact-preview' }>;
+export type RequestRetryUIAction = Extract<UIAction, { type: 'request-retry' }>;
 export type TriggerRecoverUIAction = Extract<UIAction, { type: 'trigger-recover' }>;
+export type ApproveResultUIAction = Extract<UIAction, { type: 'approve-result' }>;
+export type UpdateCapabilityPreferenceUIAction = Extract<UIAction, { type: 'update-capability-preference' }>;
 export type CancelRunUIAction = Extract<UIAction, { type: 'cancel-run' }>;
 export type ConcurrencyDecisionUIAction = Extract<UIAction, { type: 'concurrency-decision' }>;
 export type OpenDebugAuditUIAction = Extract<UIAction, { type: 'open-debug-audit' }>;
@@ -94,6 +131,61 @@ export function createSubmitTurnUIAction(input: {
   }) as SubmitTurnUIAction;
 }
 
+export function createSelectObjectUIAction(input: {
+  session: SciForgeSession;
+  id: string;
+  createdAt: string;
+  objectRef: string;
+  intent: SelectObjectUIAction['intent'];
+}): SelectObjectUIAction {
+  return createUIAction({
+    id: input.id,
+    session: input.session,
+    createdAt: input.createdAt,
+    type: 'select-object',
+    objectRef: input.objectRef,
+    intent: input.intent,
+  }) as SelectObjectUIAction;
+}
+
+export function createLoadArtifactPreviewUIAction(input: {
+  session: SciForgeSession;
+  id: string;
+  createdAt: string;
+  artifactRef: string;
+  byteLimit?: number;
+}): LoadArtifactPreviewUIAction {
+  return createUIAction({
+    id: input.id,
+    session: input.session,
+    createdAt: input.createdAt,
+    type: 'load-artifact-preview',
+    artifactRef: input.artifactRef,
+    byteLimit: input.byteLimit,
+  }) as LoadArtifactPreviewUIAction;
+}
+
+export function createRequestRetryUIAction(input: {
+  session: SciForgeSession;
+  id: string;
+  createdAt: string;
+  runId?: string;
+  reason?: string;
+  scope: RequestRetryUIAction['scope'];
+  auditRefs?: string[];
+}): RequestRetryUIAction {
+  return createUIAction({
+    id: input.id,
+    session: input.session,
+    createdAt: input.createdAt,
+    type: 'request-retry',
+    runId: input.runId,
+    reason: input.reason,
+    scope: input.scope,
+    auditRefs: uniqueStringList(input.auditRefs ?? []),
+  }) as RequestRetryUIAction;
+}
+
 export function createTriggerRecoverUIAction(input: {
   session: SciForgeSession;
   id: string;
@@ -111,6 +203,40 @@ export function createTriggerRecoverUIAction(input: {
     recoverAction: input.recoverAction,
     auditRefs: uniqueStringList(input.auditRefs ?? []),
   }) as TriggerRecoverUIAction;
+}
+
+export function createApproveResultUIAction(input: {
+  session: SciForgeSession;
+  id: string;
+  createdAt: string;
+  runId?: string;
+  approval: ApproveResultUIAction['approval'];
+  note?: string;
+}): ApproveResultUIAction {
+  return createUIAction({
+    id: input.id,
+    session: input.session,
+    createdAt: input.createdAt,
+    type: 'approve-result',
+    runId: input.runId,
+    approval: input.approval,
+    notePreview: input.note ? compactUIActionPromptPreview(input.note) : undefined,
+  }) as ApproveResultUIAction;
+}
+
+export function createUpdateCapabilityPreferenceUIAction(input: {
+  session: SciForgeSession;
+  id: string;
+  createdAt: string;
+  preference: Record<string, unknown>;
+}): UpdateCapabilityPreferenceUIAction {
+  return createUIAction({
+    id: input.id,
+    session: input.session,
+    createdAt: input.createdAt,
+    type: 'update-capability-preference',
+    preference: scrubPreference(input.preference),
+  }) as UpdateCapabilityPreferenceUIAction;
 }
 
 export function createCancelRunUIAction(input: {
@@ -207,5 +333,9 @@ function isUIAction(value: unknown): value is UIAction {
     && typeof record.scenarioId === 'string'
     && typeof record.createdAt === 'string'
     && typeof record.type === 'string'
-    && ['submit-turn', 'trigger-recover', 'cancel-run', 'concurrency-decision', 'open-debug-audit'].includes(record.type);
+    && ['submit-turn', 'select-object', 'load-artifact-preview', 'request-retry', 'trigger-recover', 'approve-result', 'update-capability-preference', 'cancel-run', 'concurrency-decision', 'open-debug-audit'].includes(record.type);
+}
+
+function scrubPreference(preference: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(preference).filter(([key]) => !/secret|token|api.?key|authorization|password/i.test(key)));
 }

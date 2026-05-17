@@ -28,6 +28,7 @@ import {
 } from './capability-broker-harness-input.js';
 import { capabilityProviderRoutesForHandoff } from './capability-provider-preflight.js';
 import { contextProjectionForEnvelope } from './context-envelope-projection.js';
+import { capabilityDiscoveryTinyBrief } from '../capability-discovery.js';
 export { workspaceTreeSummary } from './context-envelope-workspace-tree.js';
 
 export type AgentServerContextMode = 'full' | 'delta';
@@ -76,6 +77,7 @@ export function buildContextEnvelope(
   const executionModeDecision = executionModeDecisionForEnvelope(uiState);
   const conversationPolicySummary = summarizeConversationPolicyForAgentServer(uiState.conversationPolicy ?? uiState);
   const capabilityBrokerBrief = buildCapabilityBrokerBriefForAgentServer(request);
+  const capabilityDiscovery = capabilityDiscoveryTinyBrief();
   const capabilityProviderRoutes = capabilityProviderRoutesForHandoff(request);
   const sessionBundleRef = sessionBundleRelForRequest(request);
   const capabilityBrief = capabilityBriefProjectionFromBrokerBrief(capabilityBrokerBrief, uiState.capabilityBrief);
@@ -168,6 +170,7 @@ export function buildContextEnvelope(
       referencePolicy: request.referencePolicy ?? (isRecord(uiState.referencePolicy) ? uiState.referencePolicy : undefined),
       failureRecoveryPolicy: summarizeFailureRecoveryPolicy(failureRecoveryPolicy),
       capabilityBrokerBrief,
+      capabilityDiscovery,
       capabilityProviderRoutes,
       capabilityBrief,
       verificationPolicy,

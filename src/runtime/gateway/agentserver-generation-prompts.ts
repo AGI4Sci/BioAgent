@@ -6,6 +6,7 @@ import { CAPABILITY_ROUTE_SUMMARY_SCHEMA_VERSION, agentServerBackendDecisionProm
 import { summarizeArtifactRefs, summarizeConversationPolicyForAgentServer, summarizeExecutionRefs, summarizeTaskAttemptsForAgentServer, summarizeVerificationRecordForEnvelope, summarizeVerificationResultRecords } from './context-envelope.js';
 import { AGENTSERVER_BACKEND_HANDOFF_VERSION, validateBackendHandoffPacket, type BackendHandoffPacket } from './agentserver-context-contract.js';
 import { clipForAgentServerJson, clipForAgentServerPrompt, hashJson, isRecord, toRecordList, toStringList, uniqueStrings } from '../gateway-utils.js';
+import { capabilityDiscoveryTinyBrief } from '../capability-discovery.js';
 
 function stringField(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined;
@@ -73,6 +74,7 @@ export function buildAgentServerGenerationPrompt(request: {
       ? request.availableRuntimeCapabilities
       : undefined;
   const capabilityBrokerRouteSummary = compactCapabilityBrokerRouteSummary(capabilityBrokerBrief);
+  const capabilityDiscoveryBrief = compactCapabilityDiscoveryBrief(scenarioFacts.capabilityDiscovery);
   const capabilityProviderRouteSummary = compactCapabilityProviderRouteSummary(scenarioFacts.capabilityProviderRoutes);
   const capabilityFirstPolicy = capabilityFirstPolicyForAgentServer(capabilityProviderRouteSummary);
   const backendHandoffPacket = backendHandoffPacketForPrompt(request, contextEnvelope);
@@ -88,6 +90,7 @@ export function buildAgentServerGenerationPrompt(request: {
     conversationPolicySummary,
     executionMode,
     capabilityBrokerRouteSummary,
+    capabilityDiscoveryBrief,
     capabilityProviderRouteSummary,
     capabilityFirstPolicy,
     contextProjection,
@@ -150,6 +153,7 @@ function agentServerCurrentTurnSnapshotFromHandoff(params: {
   conversationPolicySummary: Record<string, unknown> | undefined;
   executionMode: ReturnType<typeof executionModeDecisionForPrompt>;
   capabilityBrokerRouteSummary: Record<string, unknown> | undefined;
+  capabilityDiscoveryBrief: Record<string, unknown>;
   capabilityProviderRouteSummary: Record<string, unknown> | undefined;
   capabilityFirstPolicy: Record<string, unknown> | undefined;
   contextProjection: Record<string, unknown> | undefined;
@@ -190,6 +194,7 @@ function agentServerCurrentTurnSnapshotFromHandoff(params: {
       } : undefined,
     } : undefined,
     capabilityBrokerBrief: params.capabilityBrokerRouteSummary,
+    capabilityDiscovery: params.capabilityDiscoveryBrief,
     capabilityProviderRoutes: params.capabilityProviderRouteSummary,
     capabilityFirstPolicy: params.capabilityFirstPolicy,
     promptRenderPlanSummary: params.promptRenderPlanSummary,
@@ -214,6 +219,23 @@ function agentServerCurrentTurnSnapshotFromHandoff(params: {
       ],
     } : undefined,
     outputContract: agentServerGenerationOutputContract(),
+  };
+}
+
+function compactCapabilityDiscoveryBrief(value: unknown) {
+  const candidate = isRecord(value) ? value : capabilityDiscoveryTinyBrief();
+  return {
+    schemaVersion: stringField(candidate.schemaVersion) ?? 'sciforge.capability-discovery.tiny-brief.v1',
+    status: stringField(candidate.status) ?? 'available',
+    api: toStringList(candidate.api).filter((item) => ['search', 'expand', 'plan', 'explain'].includes(item)),
+    progressiveDisclosure: candidate.progressiveDisclosure !== false,
+    useWhen: toStringList(candidate.useWhen).slice(0, 6),
+    safety: {
+      noSecrets: true,
+      noInternalEndpoints: true,
+      noWorkspaceRoots: true,
+      executionRequiresInvokeCapability: true,
+    },
   };
 }
 
@@ -669,6 +691,10 @@ function sanitizeContextFactsForPrompt(value: unknown, source: string) {
     if (key === 'recentExecutionRefs' || key === 'executionUnits') {
       const refs = summarizeExecutionRefs(toRecordList(entry));
       if (refs.length) out[key] = refs;
+      continue;
+    }
+    if (key === 'capabilityDiscovery') {
+      out[key] = compactCapabilityDiscoveryBrief(entry);
       continue;
     }
     out[key] = sanitizePromptHandoffValue(entry, `${source}.${key}`);

@@ -86,12 +86,7 @@ export function shouldOpenRunAuditDetails(session: SciForgeSession, activeRun?: 
 }
 
 export function shouldDefaultOpenRunAuditDetails(session: SciForgeSession, activeRun?: SciForgeRun) {
-  const run = activeRun ?? session.runs.at(-1);
-  const projection = conversationProjectionForSession(session, run);
-  if (!projection) return false;
-  return conversationProjectionStatus(projection) !== 'satisfied'
-    || projection.diagnostics.length > 0
-    || projection.executionProcess.length > 0;
+  return false;
 }
 
 export function runPresentationState(session: SciForgeSession, activeRun?: SciForgeRun, viewPlan?: RuntimeResolvedViewPlan): RunPresentationState {

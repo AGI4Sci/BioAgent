@@ -10,6 +10,7 @@ import {
   runAuditRefs,
   runPresentationState,
   runRecoverActions,
+  shouldDefaultOpenRunAuditDetails,
   shouldOpenRunAuditDetails,
 } from './results-renderer-execution-model';
 import type { SciForgeSession } from '../domain';
@@ -50,6 +51,7 @@ test('results renderer execution model keeps response JSON failures audit-only',
   const failures = contractValidationFailures(session, activeRun);
 
   assert.equal(shouldOpenRunAuditDetails(session, activeRun), true);
+  assert.equal(shouldDefaultOpenRunAuditDetails(session, activeRun), false);
   assert.equal(failures.length, 0);
   assert.deepEqual(runRecoverActions(session, activeRun), []);
   assert.deepEqual(runAuditRefs(session, activeRun), [

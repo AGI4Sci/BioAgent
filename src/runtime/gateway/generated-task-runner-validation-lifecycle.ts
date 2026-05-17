@@ -532,7 +532,25 @@ export async function buildGeneratedTaskRunInputLifecycle(
         schemaVersion: 'sciforge.generated-task-helper.v1',
         moduleName: 'sciforge_task',
         helperRef: input.taskHelperRel,
-        importHint: 'from sciforge_task import load_input, write_payload, provider_route, has_ready_provider, require_provider_first, invoke_capability, invoke_provider, provider_result_is_empty, empty_result_payload',
+        importHint: 'from sciforge_task import load_input, write_payload, provider_route, has_ready_provider, require_provider_first, invoke_capability, invoke_provider, capability_discovery_search, capability_discovery_expand, capability_discovery_plan, capability_discovery_explain, provider_result_is_empty, empty_result_payload',
+      },
+      capabilityDiscovery: {
+        schemaVersion: 'sciforge.capability-discovery.tiny-brief.v1',
+        status: 'available',
+        api: ['search', 'expand', 'plan', 'explain'],
+        progressiveDisclosure: true,
+        rules: [
+          'Use capability_discovery.search when compact capabilityProviderRoutes/capabilityBrokerBrief are insufficient or a provider/verification/repair route needs alternatives.',
+          'Use capability_discovery.expand only for selected capability ids; full schemas/examples/providers are not present in the initial handoff.',
+          'Use capability_discovery.plan for composition, fallback, missing provider, missing permission, and expected artifact planning.',
+          'Discovery output is audit/planning evidence only; complete the actual task through invoke_capability or an honest failed-with-reason ToolPayload.',
+        ],
+        safety: {
+          noSecrets: true,
+          noInternalEndpoints: true,
+          noWorkspaceRoots: true,
+          executionRequiresInvokeCapability: true,
+        },
       },
       capabilityProviderRoutes: {
         requiredCapabilityIds: providerRoutes.requiredCapabilityIds,

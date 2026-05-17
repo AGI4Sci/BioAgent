@@ -83,12 +83,17 @@ export async function completeGeneratedTaskRunOutputLifecycle(
       tryAgentServerRepairAndRerun: deps.tryAgentServerRepairAndRerun,
     });
     if (repair.repaired) return repair.repaired;
-    return deps.failedTaskPayload(
-      request,
-      skill,
-      run,
-      repair.failureReason,
-      failedTaskPartialEvidenceRefs(await collectGeneratedTaskPartialEvidenceRefs(workspace, refs), 'pre-output-failure'),
+    const partialRefs = await collectGeneratedTaskPartialEvidenceRefs(workspace, refs);
+    return attachGeneratedTaskCompletionCandidate(
+      deps.failedTaskPayload(
+        request,
+        skill,
+        run,
+        repair.failureReason,
+        failedTaskPartialEvidenceRefs(partialRefs, 'pre-output-failure'),
+      ),
+      partialRefs,
+      'pre-output-failure',
     );
   }
 
@@ -351,12 +356,17 @@ export async function completeGeneratedTaskRunOutputLifecycle(
       tryAgentServerRepairAndRerun: deps.tryAgentServerRepairAndRerun,
     });
     if (repair.repaired) return repair.repaired;
-    return deps.failedTaskPayload(
-      request,
-      skill,
-      run,
-      repair.failureReason,
-      failedTaskPartialEvidenceRefs(await collectGeneratedTaskPartialEvidenceRefs(workspace, refs), 'parse-output-failure'),
+    const partialRefs = await collectGeneratedTaskPartialEvidenceRefs(workspace, refs);
+    return attachGeneratedTaskCompletionCandidate(
+      deps.failedTaskPayload(
+        request,
+        skill,
+        run,
+        repair.failureReason,
+        failedTaskPartialEvidenceRefs(partialRefs, 'parse-output-failure'),
+      ),
+      partialRefs,
+      'parse-output-failure',
     );
   }
 }
@@ -368,9 +378,10 @@ async function completeTransientExternalBlockedLifecycle(
   options: { writeDiagnosticOutput?: boolean } = {},
 ): Promise<ToolPayload> {
   const { deps, request, run, skill, taskId, workspace } = input;
+  const partialRefs = await collectGeneratedTaskPartialEvidenceRefs(workspace, refs);
   const payload = withGeneratedTaskPartialEvidence(
     transientExternalDependencyPayload({ request, skill, run, reason }),
-    await collectGeneratedTaskPartialEvidenceRefs(workspace, refs),
+    partialRefs,
     'transient-external-failure',
   );
   if (options.writeDiagnosticOutput) {
@@ -396,7 +407,7 @@ async function completeTransientExternalBlockedLifecycle(
     workEvidenceSummary: summarizeWorkEvidenceForHandoff(normalized ?? payload),
     failureReason: reason,
   });
-  return normalized ?? payload;
+  return attachGeneratedTaskCompletionCandidate(normalized ?? payload, partialRefs, 'transient-external-failure');
 }
 
 async function completeSuccessfulGeneratedTaskPayload(
@@ -719,6 +730,36 @@ function withGeneratedTaskPartialEvidence(
   };
 }
 
+function attachGeneratedTaskCompletionCandidate(
+  payload: ToolPayload,
+  partialRefs: string[],
+  failureKind: 'pre-output-failure' | 'parse-output-failure' | 'transient-external-failure',
+): ToolPayload {
+  const artifactRefs = partialRefs
+    .filter((ref) => !/\.json$/i.test(ref))
+    .map((ref) => `artifact:${artifactIdFromPartialRef(ref)}`);
+  if (!artifactRefs.length) return payload;
+  const displayIntent = isRecord(payload.displayIntent) ? payload.displayIntent : {};
+  return {
+    ...payload,
+    displayIntent: {
+      ...displayIntent,
+      completionCandidate: {
+        schemaVersion: 'sciforge.completion-candidate.v1',
+        status: 'unverified',
+        failureKind,
+        summary: '发现可用结果，待导入、验证或人工确认后才能作为最终答案。',
+        artifactRefs: Array.from(new Set(artifactRefs)),
+        auditRefs: partialRefs,
+        recoverActions: [
+          '导入并验证候选结果',
+          'Inspect preserved partial refs before rerunning expensive external work.',
+        ],
+      },
+    },
+  };
+}
+
 async function collectGeneratedTaskPartialEvidenceRefs(
   workspace: string,
   refs: GeneratedTaskRuntimeRefs,
@@ -796,6 +837,16 @@ function objectReferenceForPartialRef(ref: string) {
     actions: ['inspect', 'reveal-in-folder', 'copy-path'],
     provenance: { preservedFromFailedGeneratedTask: true },
   };
+}
+
+function artifactIdFromPartialRef(ref: string) {
+  const name = ref.split('/').filter(Boolean).pop() ?? ref;
+  return name
+    .replace(/\.[a-z0-9]{1,12}$/i, '')
+    .replace(/[^a-z0-9_.-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    || 'completion-candidate';
 }
 
 function toStringArrayLocal(value: unknown) {

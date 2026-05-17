@@ -300,8 +300,36 @@ export function currentReferenceDigestGuardLimit(request: GatewayRequest) {
 }
 
 export function agentServerGenerationTokenGuardLimit(request: GatewayRequest, options: { repairContinuation?: boolean } = {}) {
-  void request;
-  void options;
+  const configuredWindow = typeof request.maxContextWindowTokens === 'number' && Number.isFinite(request.maxContextWindowTokens)
+    ? request.maxContextWindowTokens
+    : 200_000;
+  const harnessToolBudget = agentHarnessToolBudget(request);
+  const maxWallMs = positiveNumberField(harnessToolBudget?.maxWallMs);
+  const maxToolCalls = positiveNumberField(harnessToolBudget?.maxToolCalls);
+  const costUnits = positiveNumberField(harnessToolBudget?.costUnits);
+  if (options.repairContinuation) {
+    return Math.max(60_000, Math.min(120_000, Math.floor(configuredWindow * 0.5)));
+  }
+  const boundedByHarness = (maxWallMs !== undefined && maxWallMs <= 60_000)
+    || (maxToolCalls !== undefined && maxToolCalls <= 4)
+    || (costUnits !== undefined && costUnits <= 4);
+  if (boundedByHarness) {
+    return Math.max(80_000, Math.min(180_000, Math.floor(configuredWindow * 0.9)));
+  }
+  return Math.max(160_000, Math.min(400_000, Math.floor(configuredWindow * 2)));
+}
+
+function agentHarnessToolBudget(request: GatewayRequest) {
+  const uiState = isRecord(request.uiState) ? request.uiState : {};
+  const harness = isRecord(uiState.agentHarness) ? uiState.agentHarness : undefined;
+  const contract = isRecord(harness?.contract) ? harness.contract : undefined;
+  if (isRecord(contract?.toolBudget)) return contract.toolBudget;
+  const summary = isRecord(harness?.summary) ? harness.summary : undefined;
+  const summaryBudget = isRecord(summary?.budgetSummary) ? summary.budgetSummary : undefined;
+  if (isRecord(summaryBudget?.tool)) return summaryBudget.tool;
+  const handoff = isRecord(uiState.agentHarnessHandoff) ? uiState.agentHarnessHandoff : undefined;
+  const handoffBudget = isRecord(handoff?.budgetSummary) ? handoff.budgetSummary : undefined;
+  if (isRecord(handoffBudget?.tool)) return handoffBudget.tool;
   return undefined;
 }
 

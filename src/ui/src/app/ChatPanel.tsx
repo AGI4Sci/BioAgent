@@ -33,6 +33,7 @@ import { ContextWindowMeter } from './chat/ContextWindowMeter';
 import { SciForgeReferenceChips } from './chat/ReferenceChips';
 import { CURRENT_TARGET_INSTANCE_VALUE, enabledPeerInstances, selectedPeerInstance } from './chat/targetInstance';
 import { MessageContent, inlineObjectReferencesForMessage } from './chat/MessageContent';
+import { sanitizeUserProjectionText } from './conversation-projection-view-model';
 import { addComposerReferenceWithMarker, addPendingComposerReference, composerReferenceForObjectReference, promptForComposerSend, removeComposerReference } from './chat/composerReferences';
 import { runPromptOrchestrator } from './chat/runOrchestrator';
 import { appendRunningGuidanceRecord, appendUploadMessageToSession, applyHistoricalUserMessageEdit, attachGuidanceQueueToSessionRun, createGuidanceQueueRecord, mergeAgentResponseIntoSession, resolveGuidanceQueueAfterRun, updateGuidanceQueueRecords } from './chat/sessionTransforms';
@@ -945,7 +946,7 @@ export function ChatPanel({
                 <>
                   {message.role === 'user' ? (
                     <MessageContent
-                      content={message.content}
+                      content={sanitizeUserProjectionText(message.content) ?? message.content}
                       references={inlineObjectReferencesForMessage(message, session)}
                       onObjectFocus={handleObjectReferenceClick}
                     />
@@ -960,7 +961,7 @@ export function ChatPanel({
                         />
                       ) : null}
                       <FinalMessageContent
-                        content={message.content}
+                        content={sanitizeUserProjectionText(message.content) ?? message.content}
                         references={inlineObjectReferencesForMessage(message, session, messageRunId)}
                         resultPresentation={resultPresentationForRun(session, messageRunId)}
                         onObjectFocus={handleObjectReferenceClick}

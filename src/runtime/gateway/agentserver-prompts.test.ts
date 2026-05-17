@@ -195,6 +195,45 @@ test('AgentServer generation prompt requires provider-first code when ready web 
   assert.match(prompt, /Do not generate task code that bypasses ready provider routes/);
 });
 
+test('AgentServer generation prompt carries tiny capability discovery brief and keeps execution gated', () => {
+  const prompt = buildAgentServerGenerationPrompt({
+    prompt: 'Find the right capability route for PDF evidence extraction.',
+    skillDomain: 'literature',
+    freshCurrentTurn: true,
+    contextEnvelope: {
+      scenarioFacts: {
+        capabilityDiscovery: {
+          schemaVersion: 'sciforge.capability-discovery.tiny-brief.v1',
+          status: 'available',
+          api: ['search', 'expand', 'plan', 'explain'],
+          progressiveDisclosure: true,
+          useWhen: ['current capability brief is insufficient'],
+          safety: {
+            noSecrets: true,
+            noInternalEndpoints: true,
+            noWorkspaceRoots: true,
+            executionRequiresInvokeCapability: true,
+          },
+          inputSchema: 'FULL_SCHEMA_SHOULD_NOT_LEAK',
+          providers: [{ endpoint: 'https://private-provider.example.test' }],
+        },
+      },
+    },
+    workspaceTreeSummary: [],
+    availableSkills: [],
+    artifactSchema: {},
+    uiManifestContract: {},
+    priorAttempts: [],
+  });
+
+  assert.match(prompt, /"capabilityDiscovery"/);
+  assert.match(prompt, /"api": \[\s+"search",\s+"expand",\s+"plan",\s+"explain"/);
+  assert.match(prompt, /"executionRequiresInvokeCapability": true/);
+  assert.match(prompt, /Capability discovery API contract/);
+  assert.match(prompt, /Discovery never executes the task and is never task completion evidence/);
+  assert.doesNotMatch(prompt, /FULL_SCHEMA_SHOULD_NOT_LEAK|private-provider\.example\.test/);
+});
+
 test('AgentServer generation prompt applies provider-first helper contract to any ready capability route', () => {
   const prompt = buildAgentServerGenerationPrompt({
     prompt: 'fresh package run: enrich metadata through a ready provider route.',

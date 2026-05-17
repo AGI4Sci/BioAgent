@@ -9,6 +9,7 @@ import { exportJsonFile } from '../exportUtils';
 import { ActionButton, Badge, Card, ClaimTag, ConfidenceBar, EmptyArtifactState, EvidenceTag, SectionHeader } from '../uiPrimitives';
 import { UploadedDataUrlPreview } from './WorkspaceObjectPreview';
 import { executionStatusLabel, executionVerificationPresentation, type ExecutionPresentationVariant } from './executionStatusPresentation';
+import { sanitizeUserProjectionText } from '../conversation-projection-view-model';
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
@@ -63,7 +64,7 @@ export function EvidenceMatrix({ claims, artifacts = [] }: { claims: EvidenceCla
   const uploads = uploadedInteractiveEvidenceArtifacts(artifacts);
   const rows = claims.map((claim, index) => ({
     id: `${claim.id || 'claim'}-${index}`,
-    claim: claim.text,
+    claim: sanitizeUserProjectionText(claim.text) ?? claim.text,
     support: `${claim.supportingRefs.length} 条支持`,
     oppose: `${claim.opposingRefs.length} 条反向`,
     level: claim.evidenceLevel,
@@ -71,7 +72,7 @@ export function EvidenceMatrix({ claims, artifacts = [] }: { claims: EvidenceCla
     supportingRefs: claim.supportingRefs,
     opposingRefs: claim.opposingRefs,
     dependencyRefs: claim.dependencyRefs ?? [],
-    updateReason: claim.updateReason,
+    updateReason: sanitizeUserProjectionText(claim.updateReason) ?? claim.updateReason,
   }));
   return (
     <div className="stack">

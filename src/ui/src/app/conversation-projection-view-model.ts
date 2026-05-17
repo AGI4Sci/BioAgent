@@ -1,6 +1,7 @@
 import type { SciForgeRun, SciForgeSession } from '../domain';
 import { isConversationEventLog } from '../../../runtime/conversation-kernel/event-log';
 import { projectConversation } from '../../../runtime/conversation-kernel/projection';
+import { runtimeDebugValueHasRawLeak } from '../runtimeDebugScrubber';
 
 export type UiConversationProjectionStatus =
   | 'idle'
@@ -155,7 +156,8 @@ function conversationProjectionFromRun(run?: SciForgeRun): UiConversationProject
     displayResultPresentation?.conversationProjection,
     taskOutcomeProjection?.conversationProjection,
     responseResultPresentation?.conversationProjection,
-  ].map((candidate) => normalizeConversationProjection(candidate, fallbackTimestamp)).find(Boolean);
+  ].map((candidate) => normalizeConversationProjection(candidate, fallbackTimestamp)).find(Boolean)
+    ?? completionCandidateProjectionFromRun(run, fallbackTimestamp);
 }
 
 function projectionFromSessionProjectionMap(value: unknown, run?: SciForgeRun): unknown {
@@ -253,9 +255,9 @@ function normalizeConversationProjection(value: unknown, fallbackTimestamp?: str
   const visibleAnswer = isRecord(value.visibleAnswer)
     ? {
       status,
-      text: asString(value.visibleAnswer.text),
+      text: sanitizeUserProjectionText(asString(value.visibleAnswer.text)),
       artifactRefs: asStringList(value.visibleAnswer.artifactRefs),
-      diagnostic: asString(value.visibleAnswer.diagnostic),
+      diagnostic: sanitizeUserProjectionText(asString(value.visibleAnswer.diagnostic)),
     }
     : undefined;
   return {
@@ -274,13 +276,13 @@ function normalizeConversationProjection(value: unknown, fallbackTimestamp?: str
     executionProcess: recordList(value.executionProcess).map((event) => ({
       eventId: asString(event.eventId) ?? asString(event.id) ?? 'event',
       type: asString(event.type) ?? 'event',
-      summary: asString(event.summary) ?? '',
+      summary: sanitizeUserProjectionText(asString(event.summary)) ?? '',
       timestamp: normalizeProjectionTimestamp(
         asString(event.timestamp) ?? asString(event.createdAt) ?? asString(event.completedAt) ?? asString(event.updatedAt),
         fallbackTimestamp,
       ),
     })),
-    recoverActions: asStringList(value.recoverActions),
+    recoverActions: asStringList(value.recoverActions).map((action) => sanitizeUserProjectionText(action) ?? action),
     verificationState: isRecord(value.verificationState) ? {
       status: asString(value.verificationState.status),
       verifierRef: asString(value.verificationState.verifierRef),
@@ -289,16 +291,77 @@ function normalizeConversationProjection(value: unknown, fallbackTimestamp?: str
     backgroundState: isRecord(value.backgroundState) ? {
       status: asString(value.backgroundState.status),
       checkpointRefs: asStringList(value.backgroundState.checkpointRefs),
-      revisionPlan: asString(value.backgroundState.revisionPlan),
+      revisionPlan: sanitizeUserProjectionText(asString(value.backgroundState.revisionPlan)),
     } : undefined,
     auditRefs: asStringList(value.auditRefs),
     diagnostics: recordList(value.diagnostics).map((diagnostic) => ({
       severity: asString(diagnostic.severity),
       code: asString(diagnostic.code),
-      message: asString(diagnostic.message) ?? asString(diagnostic.code) ?? 'Conversation projection diagnostic.',
+      message: sanitizeUserProjectionText(asString(diagnostic.message)) ?? asString(diagnostic.code) ?? 'Conversation projection diagnostic.',
       refs: recordList(diagnostic.refs).map((ref) => ({ ref: asString(ref.ref) })),
     })),
   };
+}
+
+function completionCandidateProjectionFromRun(run: SciForgeRun | undefined, fallbackTimestamp?: string): UiConversationProjection | undefined {
+  const raw = isRecord(run?.raw) ? run.raw : undefined;
+  const displayIntent = isRecord(raw?.displayIntent) ? raw.displayIntent : undefined;
+  const resultPresentation = isRecord(raw?.resultPresentation) ? raw.resultPresentation : undefined;
+  const candidates = [
+    raw?.completionCandidate,
+    displayIntent?.completionCandidate,
+    resultPresentation?.completionCandidate,
+  ];
+  const candidate = candidates.find(isRecord);
+  if (!candidate || !run) return undefined;
+  const artifactRefs = uniqueStrings([
+    ...asStringList(candidate.artifactRefs),
+    ...recordList(candidate.artifacts).map((artifact) => asString(artifact.ref) ?? (asString(artifact.id) ? `artifact:${asString(artifact.id)}` : undefined)).filter((ref): ref is string => Boolean(ref)),
+  ].filter((ref) => /^artifact::?[^/\s]+$/i.test(ref)));
+  if (!artifactRefs.length) return undefined;
+  const summary = safeCandidateSummary(candidate.summary) ?? '发现可用结果，待导入、验证或人工确认后才能作为最终答案。';
+  const recoverActions = uniqueStrings([
+    ...asStringList(candidate.recoverActions),
+    ...asStringList(candidate.actions),
+    '导入并验证候选结果',
+  ]);
+  const timestamp = normalizeProjectionTimestamp(asString(candidate.createdAt) ?? run.completedAt ?? run.createdAt, fallbackTimestamp);
+  return {
+    schemaVersion: 'sciforge.conversation-projection.v1',
+    conversationId: `completion-candidate:${run.id}`,
+    currentTurn: run.prompt ? { id: run.id, prompt: run.prompt } : undefined,
+    visibleAnswer: {
+      status: 'repair-needed',
+      text: summary,
+      artifactRefs,
+      diagnostic: 'completion-candidate',
+    },
+    activeRun: { id: run.id, status: 'repair-needed' },
+    artifacts: artifactRefs.map((ref) => ({ ref, label: ref.replace(/^artifact::?/, '') })),
+    executionProcess: [{
+      eventId: `completion-candidate:${run.id}`,
+      type: 'completion-candidate',
+      summary,
+      timestamp,
+    }],
+    recoverActions,
+    verificationState: { status: 'unverified' },
+    backgroundState: undefined,
+    auditRefs: uniqueStrings([...artifactRefs, ...asStringList(candidate.auditRefs)]),
+    diagnostics: [{
+      severity: 'warning',
+      code: 'completion-candidate',
+      message: 'Runtime found candidate artifacts after a failed or drifted handoff; UI must offer import/verify actions instead of inferring success from raw output.',
+    }],
+  };
+}
+
+function safeCandidateSummary(value: unknown): string | undefined {
+  const summary = asString(value);
+  if (!summary) return undefined;
+  if (/^\s*[\[{]/.test(summary) || /\b(?:rawPayload|ToolPayload|stdout|stderr|handoff|task attempts?)\b/i.test(summary)) return undefined;
+  if (runtimeDebugValueHasRawLeak({ summary })) return undefined;
+  return summary.length > 320 ? `${summary.slice(0, 317).trim()}...` : summary;
 }
 
 function projectionFallbackTimestamp(run?: SciForgeRun) {
@@ -359,6 +422,18 @@ function asStringList(value: unknown): string[] {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+export function sanitizeUserProjectionText(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value
+    .replace(/\bSciForge ToolPayload\b/g, 'SciForge structured task result')
+    .replace(/\bToolPayload\b/g, 'structured task result')
+    .replace(/\btaskFiles\b/g, 'generated task files')
+    .replace(/\braw payload\b/gi, 'debug payload')
+    .replace(/\bstdout\/stderr\b/gi, 'execution logs')
+    .replace(/\bstdout\b/gi, 'execution log')
+    .replace(/\bstderr\b/gi, 'execution log');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

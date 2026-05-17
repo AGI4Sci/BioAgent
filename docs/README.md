@@ -1,6 +1,6 @@
 # SciForge 文档
 
-最后更新：2026-05-16
+最后更新：2026-05-17
 
 `docs/` 只保留项目级真相源。模块内部的 API、renderer、skill、provider 或 package 细节继续放在对应 package 的 README 或源码旁边，避免同一个 contract 在多处漂移。
 
@@ -13,6 +13,8 @@
 | [`Usage.md`](Usage.md) | 当前操作手册 | 启动、配置、常用工作流、双实例互修、Computer Use 和验证命令。 |
 | [`AgentHarnessStandard.md`](AgentHarnessStandard.md) | 专项标准 | Lightning-style agent harness 编程标准、分级 hooks、contract schema、merge 规则和最小实验案例。 |
 | [`HarnessResearchGuide.md`](HarnessResearchGuide.md) | 专项研究入口 | harness prompt/policy 研究入口、module directive preview 和 AgentServer prompt 边界。 |
+| [`CapabilityDiscovery.md`](CapabilityDiscovery.md) | Partial generated-task callable / blocked-on-AgentServer-tool-transport | 层次化能力检索与集成模块，定义 agent-callable discovery 函数、分层揭示、审计和实现任务。 |
+| [`UIExecutionDecoupling.md`](UIExecutionDecoupling.md) | Partial / in progress | UI 与执行层解耦方案，定义函数式 Projection/UserAction API、canonical view models、completion-candidate 和 debug folding 边界。 |
 
 Archive/historical 清理状态：
 
@@ -42,7 +44,7 @@ Archive/historical 清理状态：
 
 SciForge 是活跃研发原型，但架构主线已经收敛为 **backend-first / contract-enforced / capability-driven / harness-governed / single-agent multiturn**。2026-05-16 起，项目级多轮运行时的最终设计入口是 [`SciForge-SingleAgent-Architecture.md`](SciForge-SingleAgent-Architecture.md)：它明确 Workspace Kernel 是可恢复事实源，AgentServer Context Core 负责上下文编排和 backend handoff，Agent Backend 负责推理/规划/修复，Capability Gateway 负责受控执行，Runtime Bridge 只做 transport、run lifecycle、event relay 和 failure normalization。
 
-[`Architecture.md`](Architecture.md) 继续作为当前实现背景和产品架构地图，保留 backend-first、capability-driven、harness-governed、package boundary、worker protocol、runtime 请求链路和 UI 投影边界。若它与 `SciForge-SingleAgent-Architecture.md` 的 runtime contract 冲突，以后者为准。
+[`Architecture.md`](Architecture.md) 继续作为当前实现背景和产品架构地图，保留 backend-first、capability-driven、harness-governed、package boundary、worker protocol、runtime 请求链路和 UI 投影边界。能力检索专项见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)，UI/执行层函数边界专项见 [`UIExecutionDecoupling.md`](UIExecutionDecoupling.md)。若它与 `SciForge-SingleAgent-Architecture.md` 的 runtime contract 冲突，以后者为准。
 
 Harness 编程标准见 [`AgentHarnessStandard.md`](AgentHarnessStandard.md)：`HarnessRuntime` 负责生命周期，`HarnessProfile` 负责策略组合，`HarnessCallback` 只返回结构化 decision，`HarnessContract` 驱动 context/broker/prompt/validation/UI。
 

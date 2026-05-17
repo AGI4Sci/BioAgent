@@ -122,6 +122,25 @@ export type {
   ConfiguredAgentServerLlmEndpoint,
 } from './agentserver-prompt-policy';
 export {
+  CAPABILITY_DISCOVERY_CONTRACT_ID,
+  CAPABILITY_DISCOVERY_TINY_BRIEF_SCHEMA_VERSION,
+  tinyCapabilityDiscoveryBrief,
+} from './capability-discovery';
+export type {
+  CapabilityDiscoveryAudience,
+  CapabilityDiscoveryAvailability,
+  CapabilityDiscoveryTinyBrief,
+  CapabilityExpandQuery,
+  CapabilityExpansionResult,
+  CapabilityExplainQuery,
+  CapabilityExplainResult,
+  CapabilityPlanQuery,
+  CapabilityPlanResult,
+  CapabilitySearchCandidate,
+  CapabilitySearchQuery,
+  CapabilitySearchResult,
+} from './capability-discovery';
+export {
   BACKEND_HANDOFF_DRIFT_EVENT_TYPE,
   BACKEND_HANDOFF_DRIFT_SCHEMA_VERSION,
   backendHandoffDriftEvent,

@@ -185,6 +185,77 @@ test('generated task input carries ready web routes for evidence-matrix artifact
   assert.deepEqual(taskInput.providerInvocation.adapters.map((adapter: Record<string, unknown>) => adapter.capabilityId).sort(), ['web_fetch', 'web_search']);
 });
 
+test('generated Python helper exposes callable capability discovery without treating it as completion evidence', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-discovery-helper-'));
+  const request: GatewayRequest = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'discover the right web capability before searching',
+    selectedToolIds: ['web_search'],
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-literature-discovery-helper',
+      sessionCreatedAt: '2026-05-12T01:30:00.000Z',
+      capabilityProviderAvailability: [
+        { id: 'sciforge.web-worker.web_search', available: true, status: 'available' },
+      ],
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+  };
+
+  const result = await runGeneratedTaskExecutionLifecycle({
+    workspace,
+    request,
+    skill: providerTestSkill('2026-05-12T01:30:00.000Z'),
+    generation: {
+      ok: true,
+      runId: 'run-discovery-helper',
+      response: {
+        taskFiles: [{
+          path: 'tasks/discover-capability.py',
+          language: 'python',
+          content: [
+            'import json, sys',
+            'from sciforge_task import load_input, write_payload, invoke_capability',
+            '_, input_path, output_path = sys.argv',
+            'task_input = load_input(input_path)',
+            'search = invoke_capability(task_input, "capability_discovery.search", {"goal": "search web", "constraints": {"maxCandidates": 3}})',
+            'candidate_ids = [item["capabilityId"] for item in search["candidates"]]',
+            'plan = invoke_capability(task_input, "capability_discovery.plan", {"goal": "search web", "candidateIds": candidate_ids})',
+            'write_payload(output_path, {',
+            '  "message": "Discovery completed but did not execute user work.",',
+            '  "confidence": 0.7,',
+            '  "claimType": "runtime-diagnostic",',
+            '  "evidenceLevel": "runtime",',
+            '  "reasoningTrace": json.dumps({"search": search, "plan": plan}),',
+            '  "claims": [{"id": "discovery-not-evidence", "type": "observation", "text": plan["completionEvidence"], "confidence": 0.9, "evidenceLevel": "runtime", "supportingRefs": [plan["auditRef"]], "opposingRefs": []}],',
+            '  "uiManifest": [],',
+            '  "executionUnits": [{"id": "capability-discovery", "tool": "capability_discovery.plan", "status": "failed-with-reason", "failureReason": "discovery-is-not-task-completion"}],',
+            '  "artifacts": [{"id": "capability-discovery-plan", "type": "runtime-diagnostic", "data": plan}],',
+            '})',
+          ].join('\n'),
+        }],
+        entrypoint: { language: 'python', path: 'tasks/discover-capability.py' },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: ['runtime-diagnostic'],
+      },
+    },
+    deps: { repairNeededPayload },
+  });
+
+  assert.equal(result.kind, 'run');
+  if (result.kind !== 'run') return;
+  assert.equal(result.execution.run.exitCode, 0);
+  const taskInput = JSON.parse(await readFile(join(workspace, result.execution.inputRel ?? ''), 'utf8'));
+  assert.match(taskInput.taskHelperSdk.importHint, /capability_discovery_search/);
+  const output = JSON.parse(await readFile(join(workspace, result.execution.run.outputRef), 'utf8'));
+  assert.equal(output.artifacts[0]?.data?.completionEvidence, 'not-evidence');
+  assert.equal(output.executionUnits[0]?.status, 'failed-with-reason');
+  assert.match(output.reasoningTrace, /capability-discovery:search:generated-task/);
+  assert.doesNotMatch(output.reasoningTrace, new RegExp('endpoint|baseUrl|invokeUrl|workspaceRoots|auth|token|secret|/Applications/workspace', 'i'));
+});
+
 test('generated task output shape preflight blocks obvious malformed payload writers before execution', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-preflight-'));
   const request: GatewayRequest = {

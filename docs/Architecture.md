@@ -164,7 +164,7 @@ Capability 是抽象能力和协议真相源，回答“系统能做什么”。
 
 ### Capability Discovery Layer（partial backend retry consumption + ledger replay refs + default UI summary card / blocked-on-debug-folding-and-browser-validation）
 
-详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。本层目标是提供 agent-callable `capability_discovery.search/expand/plan/explain` API，通过分层揭示让 backend 在能力不足时自主发现和组合能力。当前代码已具备 manifest registry、broker、provider preflight、harness candidate projection、`invoke_capability` authoring path、discovery service、tiny handoff brief、generated-task helper bridge、AgentServer stream-side tool-call bridge、session-bundle audit record、ledger replay refs、bounded retry result consumption、最小 UI summary projection 与 targeted tests；默认 Results UI 能力计划卡、debug folding 和真实 browser 验收仍是后续任务。
+详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。本层目标是提供 agent-callable `capability_discovery.search/expand/plan/explain` API，通过分层揭示让 backend 在能力不足时自主发现和组合能力。当前代码已具备 manifest registry、broker、provider preflight、harness candidate projection、`invoke_capability` authoring path、discovery service、tiny handoff brief、generated-task helper bridge、AgentServer stream-side tool-call bridge、session-bundle audit record、ledger replay refs、bounded retry result consumption、最小 UI summary projection 与 targeted tests；默认 Results UI 能力计划卡已接入，debug folding 和真实 browser 验收仍是后续任务。
 
 ### Provider Layer
 

@@ -18,6 +18,11 @@ import { diagnosticForFailure, sanitizeAgentServerError } from './backend-failur
 import { finalizeAgentServerGenerationSuccess, recoverOrReturnAgentServerGenerationFailure, type AgentServerGenerationFailureDiagnostics, type AgentServerGenerationResult } from './agentserver-generation-recovery.js';
 import { isAgentServerRepairContinuationBoundedStopError, agentServerGenerationTokenGuardLimit, agentServerSilentStreamGuardAudit, currentReferenceDigestSilentGuardPolicy, dedupeWorkEvidence, mergeBackendStreamWorkEvidence, readAgentServerRunStream, silentStreamDecisionFromGatewayRequest } from './agentserver-stream.js';
 import { collectWorkEvidenceFromBackendEvent, type WorkEvidence } from './work-evidence-types.js';
+import {
+  captureAgentServerWorkspaceSideEffectSnapshot,
+  workEvidenceFromAgentServerWorkspaceSideEffects,
+  type AgentServerWorkspaceSideEffectSnapshot,
+} from './agentserver-workspace-side-effects.js';
 import { hydrateGeneratedTaskResponseFromText } from './generated-task-response-text.js';
 import { hasRecoverableRecentAttempt } from './recoverable-attempts.js';
 import { repairNeededPayload } from './payload-validation.js';
@@ -259,6 +264,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
   let contextRecovery: AgentServerGenerationFailureDiagnostics | undefined;
   let strictTaskFilesReason = params.strictTaskFilesReason;
   let partialStreamWorkEvidence: WorkEvidence[] = [];
+  let sideEffectSnapshot: AgentServerWorkspaceSideEffectSnapshot | undefined;
   let capabilityDiscoveryToolResultsForRetry: CapabilityDiscoveryToolResultEvent[] = [];
   try {
     const request = params.request;
@@ -602,6 +608,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     }, silentGuardPolicy.timeoutMs);
     let response: Response;
     try {
+      sideEffectSnapshot = await captureAgentServerWorkspaceSideEffectSnapshot(params.workspace);
       response = await fetch(`${params.baseUrl}/api/agent-server/runs/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -645,6 +652,8 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
       },
     });
     await writeAgentServerDebugArtifact(params.workspace, 'generation', runPayload, response.status, json, sessionBundleRelForRequest(request));
+    const workspaceSideEffectEvidence = await workEvidenceFromAgentServerWorkspaceSideEffects(sideEffectSnapshot, params.workspace);
+    const streamAndWorkspaceWorkEvidence = dedupeWorkEvidence([...workEvidence, ...workspaceSideEffectEvidence]);
     if (!response.ok) {
       const detail = isRecord(json) ? String(json.error || json.message || '') : '';
       const failure = await recoverOrReturnAgentServerGenerationFailure({
@@ -664,7 +673,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         httpStatus: response.status,
         headers: response.headers,
         priorHandoff: normalizedHandoff,
-        workEvidence,
+        workEvidence: streamAndWorkspaceWorkEvidence,
       });
       if (failure.retry) {
         contextRecovery = failure.diagnostics;
@@ -688,7 +697,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         skill: params.skill,
         callbacks: params.callbacks,
         priorHandoff: normalizedHandoff,
-        workEvidence,
+        workEvidence: streamAndWorkspaceWorkEvidence,
       });
       if (failure.retry) {
         contextRecovery = failure.diagnostics;
@@ -713,7 +722,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         skill: params.skill,
         callbacks: params.callbacks,
         priorHandoff: normalizedHandoff,
-        workEvidence,
+        workEvidence: streamAndWorkspaceWorkEvidence,
       });
       if (failure.retry) {
         contextRecovery = failure.diagnostics;
@@ -729,7 +738,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         source: 'agentserver-run-output',
         runId: typeof run.id === 'string' ? run.id : undefined,
       });
-      const payload = mergeBackendStreamWorkEvidence(directPayload, workEvidence);
+      const payload = mergeBackendStreamWorkEvidence(directPayload, streamAndWorkspaceWorkEvidence);
       return await finalizeAgentServerGenerationSuccess({
         result: {
         ok: true,
@@ -811,7 +820,10 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           });
           continue;
         }
-        const directPayload = toolPayloadFromPlainAgentOutput(directText, request);
+        const directPayload = mergeBackendStreamWorkEvidence(
+          toolPayloadFromPlainAgentOutput(directText, request),
+          streamAndWorkspaceWorkEvidence,
+        );
         if (!strictTaskFilesReason && dispatchAttempt < 2 && directPayloadNeedsStrictTaskFilesRetry(directPayload)) {
           strictTaskFilesReason = directTextStrictTaskFilesRetryReason(directPayload);
           emitWorkspaceRuntimeEvent(params.callbacks, {
@@ -865,6 +877,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     };
   } catch (error) {
     const requestFailure = agentServerRequestFailureMessage('generation', error, timeoutMs);
+    const workspaceSideEffectEvidence = await workEvidenceFromAgentServerWorkspaceSideEffects(sideEffectSnapshot, params.workspace);
     const diagnostic = diagnosticForFailure(requestFailure, {
       backend: params.request.agentBackend,
       provider: params.request.modelProvider,
@@ -892,7 +905,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         provider: diagnostic.provider,
         model: diagnostic.model,
         originalErrorSummary: diagnostic.userReason ?? requestFailure,
-        sideEffectWorkEvidence: dedupeWorkEvidence(partialStreamWorkEvidence),
+        sideEffectWorkEvidence: dedupeWorkEvidence([...partialStreamWorkEvidence, ...workspaceSideEffectEvidence]),
       },
     };
   } finally {

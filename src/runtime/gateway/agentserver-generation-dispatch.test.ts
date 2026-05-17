@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -247,6 +247,61 @@ test('AgentServer generation retries once with capability discovery tool results
       assert.match(result.directPayload.message, /Discovery result was consumed/);
     }
     assert.doesNotMatch(requestBodies[0] ?? '', /capabilityDiscoveryToolResults/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('AgentServer generation failure diagnostics include modified existing workspace files', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-existing-file-side-effect-'));
+  const sourceRel = 'weighted_survival_auc.py';
+  await writeFile(join(workspace, sourceRel), 'pair_weight = censoring_weights[i] + censoring_weights[j]\n', 'utf8');
+
+  const server = createServer(async (req, res) => {
+    if (req.method === 'GET' && String(req.url).includes('/api/agent-server/agents/') && String(req.url).endsWith('/context')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, data: { session: { id: 'side-effect', status: 'active' }, recentTurns: [], currentWorkEntries: [] } }));
+      return;
+    }
+    if (req.method !== 'POST' || String(req.url) !== '/api/agent-server/runs/stream') {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'not found' }));
+      return;
+    }
+    await readBody(req);
+    await writeFile(join(workspace, sourceRel), 'pair_weight = censoring_weights[i] * censoring_weights[j]\n', 'utf8');
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end(`${JSON.stringify({ event: { type: 'status', usage: { total: 999999 }, message: 'still generating' } })}\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address() as AddressInfo;
+    const result = await requestAgentServerGeneration({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      request: {
+        workspacePath: workspace,
+        skillDomain: 'literature',
+        prompt: 'Debug the current workspace code, patch the bug, and rerun tests.',
+        artifacts: [],
+        maxContextWindowTokens: 200000,
+        uiState: { sessionId: 'session-existing-file-side-effect' },
+      } as GatewayRequest,
+      skill: testSkill(),
+      skills: [testSkill()],
+      workspace,
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(await readFile(join(workspace, sourceRel), 'utf8'), /\*/);
+    if (!result.ok) {
+      const sideEffects = result.diagnostics?.sideEffectWorkEvidence ?? [];
+      assert.equal(sideEffects.some((entry) => (
+        entry.kind === 'write'
+        && entry.status === 'success'
+        && entry.rawRef === sourceRel
+        && (entry.input as Record<string, unknown> | undefined)?.sideEffect === 'modified-existing-file'
+      )), true, JSON.stringify(sideEffects));
+    }
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

@@ -20,7 +20,7 @@ Agent harness 解决的问题不是“系统有什么能力”，而是“每一
 
 - Harness 不替代 agent backend 的推理、规划和胶水代码生成。
 - Harness 不替代 capability manifest。能力声明仍由 capability registry 负责。
-- Harness 不硬编码所有能力检索触发时机。目标状态是把 `capability_discovery` 作为受控原子能力暴露给 AgentServer/backend，并记录/约束 discovery 调用；当前已具备 generated-task helper、AgentServer stream-side discovery tool-call bridge、session-bundle ledger event、单向 stream 无终态时的 bounded retry result consumption 和最小 UI summary projection，默认 Results UI 接线/debug folding 与 browser 验收仍按专项设计推进，详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
+- Harness 不硬编码所有能力检索触发时机。目标状态是把 `capability_discovery` 作为受控原子能力暴露给 AgentServer/backend，并记录/约束 discovery 调用；当前已具备 generated-task helper、AgentServer stream-side discovery tool-call bridge、session-bundle ledger event、单向 stream 无终态时的 bounded retry result consumption、最小 UI summary projection 和默认 Results UI 能力计划卡，debug folding 与 browser 验收仍按专项设计推进，详见 [`CapabilityDiscovery.md`](CapabilityDiscovery.md)。
 - Harness 不直接驱动 React UI 或解释 raw execution output。用户可见状态和用户干预应通过函数式 Projection/UserAction API 进入 presentation/runtime 边界；专项设计见 [`UIExecutionDecoupling.md`](UIExecutionDecoupling.md)。
 - Harness callback 不直接读写 workspace、不调用外部 API、不拼最终 prompt、不改 React state。
 

@@ -501,10 +501,20 @@ async function retryGeneratedTaskInterfaceContract(
   }
   const retryInterfaceReason = await generatedTaskInterfaceContractReason(input.workspace, retriedGeneration.response);
   if (retryInterfaceReason) {
-    return repairNeeded(
-      input,
-      `AgentServer generation contract violation: ${taskInterfaceReason}. Strict retry still returned a static/non-interface task: ${retryInterfaceReason}`,
+    const recoveryReason = `AgentServer generation contract violation: ${taskInterfaceReason}. Strict retry still returned a static/non-interface task: ${retryInterfaceReason}`;
+    emitGenerationRetryEvent(
+      input.callbacks,
+      `Strict retry still failed the generated task interface contract; using deterministic contract-failure adapter. ${retryInterfaceReason}`,
+      'task-interface',
     );
+    return {
+      kind: 'task-files',
+      generation: {
+        ok: true,
+        runId: retriedGeneration.runId,
+        response: contractFailureAdapterGeneration(input.request, recoveryReason),
+      },
+    };
   }
   return { kind: 'task-files', generation: retriedGeneration };
 }
@@ -667,6 +677,88 @@ function providerFirstRecoveryAdapterGeneration(
     expectedArtifacts: request.expectedArtifactTypes ?? [],
     patchSummary: 'Recovered AgentServer provider-first contract violation with a deterministic SciForge provider-route adapter.',
   };
+}
+
+function contractFailureAdapterGeneration(
+  request: GatewayRequest,
+  reason: string,
+): AgentServerGenerationResponse {
+  const taskPath = `.sciforge/generated-tasks/contract-failure-${sha1(`${request.prompt}:${reason}`).slice(0, 12)}.py`;
+  return {
+    taskFiles: [{
+      path: taskPath,
+      language: 'python',
+      content: contractFailureAdapterSource(reason),
+    }],
+    entrypoint: { language: 'python', path: taskPath },
+    environmentRequirements: {},
+    validationCommand: '',
+    expectedArtifacts: request.expectedArtifactTypes ?? [],
+    patchSummary: 'Recovered invalid AgentServer generated task interface with a deterministic failed-with-reason ToolPayload adapter.',
+  };
+}
+
+function contractFailureAdapterSource(reason: string) {
+  return [
+    'import json',
+    'import sys',
+    '',
+    `FAILURE_REASON = ${JSON.stringify(reason)}`,
+    '',
+    'def main() -> None:',
+    '    _, input_path, output_path = sys.argv',
+    '    try:',
+    '        with open(input_path, "r", encoding="utf-8") as handle:',
+    '            task_input = json.load(handle)',
+    '    except Exception:',
+    '        task_input = {}',
+    '    prompt = str(task_input.get("prompt", ""))[:500] if isinstance(task_input, dict) else ""',
+    '    message = "Generated task contract recovery: AgentServer did not return reusable task code, so SciForge wrote a valid failed-with-reason ToolPayload instead of executing static or non-contract code."',
+    '    payload = {',
+    '        "message": message,',
+    '        "confidence": 0.0,',
+    '        "claimType": "failed-with-reason",',
+    '        "evidenceLevel": "runtime-contract",',
+    '        "reasoningTrace": FAILURE_REASON,',
+    '        "claims": [{',
+    '            "statement": FAILURE_REASON,',
+    '            "confidence": 0.0,',
+    '            "evidenceRefs": ["runtime://generated-task-interface-contract"],',
+    '        }],',
+    '        "uiManifest": [],',
+    '        "executionUnits": [{',
+    '            "id": "generated-task-interface-contract",',
+    '            "status": "failed-with-reason",',
+    '            "tool": "sciforge.generated-task-contract-failure-adapter",',
+    '            "summary": "Converted invalid AgentServer task code into a valid failed-with-reason ToolPayload.",',
+    '            "failureReason": FAILURE_REASON,',
+    '            "recoverActions": [',
+    '                "Regenerate the task with code that reads argv inputPath and writes argv outputPath.",',
+    '                "Return a direct ToolPayload for report-only answers that were already reasoned by AgentServer.",',
+    '            ],',
+    '        }],',
+    '        "artifacts": [{',
+    '            "id": "generated-task-contract-failure",',
+    '            "type": "runtime-diagnostic",',
+    '            "data": {',
+    '                "reason": FAILURE_REASON,',
+    '                "promptPreview": prompt,',
+    '                "contract": "generated task entrypoint must read inputPath and write outputPath",',
+    '            },',
+    '        }],',
+    '        "recoverActions": [',
+    '            "Regenerate with the generated task interface contract enforced before execution.",',
+    '            "Use a direct ToolPayload when no reusable workspace task is needed.",',
+    '        ],',
+    '        "nextStep": "Retry generation with a compact executable adapter or direct failed-with-reason ToolPayload.",',
+    '    }',
+    '    with open(output_path, "w", encoding="utf-8") as handle:',
+    '        json.dump(payload, handle, ensure_ascii=False, indent=2)',
+    '',
+    'if __name__ == "__main__":',
+    '    main()',
+    '',
+  ].join('\n');
 }
 
 function providerFirstRecoveryAdapterSource(initialReason: string, retryReason: string) {

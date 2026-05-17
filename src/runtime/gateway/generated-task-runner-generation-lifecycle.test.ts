@@ -222,6 +222,61 @@ test('generation lifecycle retries generic payload preflight violations before e
   assert.equal(events.some((event) => /complete ToolPayload envelope/.test(event.detail ?? '')), true);
 });
 
+test('generation lifecycle converts repeated task-interface failures into deterministic contract payload adapter', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-interface-contract-adapter-'));
+  const events: WorkspaceRuntimeEvent[] = [];
+  const strictRetryReasons: string[] = [];
+
+  const result = await resolveGeneratedTaskGenerationRetryLifecycle({
+    baseUrl: 'http://127.0.0.1:18080',
+    request: {
+      skillDomain: 'literature',
+      prompt: 'write a full text literature report with evidence matrix',
+      artifacts: [],
+      expectedArtifactTypes: ['research-report', 'evidence-matrix'],
+      uiState: { sessionId: 'interface-contract-adapter' },
+    },
+    skill,
+    skills: [skill],
+    workspace,
+    generation: {
+      ok: true,
+      runId: 'initial-static-report',
+      response: generation('literature_review_task.py', [
+        'import json',
+        'papers = [{"title": "static paper"}]',
+        'print(json.dumps({"message": "static report", "papers": papers}))',
+      ].join('\n')),
+    },
+    callbacks: {
+      onEvent: (event) => events.push(event),
+    },
+    deps: depsWithRetry(async (params) => {
+      strictRetryReasons.push(params.strictTaskFilesReason ?? '');
+      return {
+        ok: true,
+        runId: 'retry-still-static-report',
+        response: generation('literature_review_task.py', [
+          'report = "# Static report"',
+          'print(report)',
+        ].join('\n')),
+      };
+    }),
+  });
+
+  assert.equal(result.kind, 'task-files');
+  assert.equal(result.generation.runId, 'retry-still-static-report');
+  assert.match(result.generation.response.patchSummary ?? '', /deterministic failed-with-reason ToolPayload adapter/i);
+  const source = result.generation.response.taskFiles[0]?.content ?? '';
+  assert.match(source, /input_path/);
+  assert.match(source, /output_path/);
+  assert.match(source, /failed-with-reason/);
+  assert.match(source, /generated-task-interface-contract/);
+  assert.doesNotMatch(source, /static paper/);
+  assert.match(strictRetryReasons[0] ?? '', /write the SciForge outputPath argument/);
+  assert.equal(events.some((event) => /deterministic contract-failure adapter/i.test(event.message ?? '')), true);
+});
+
 test('generation lifecycle retries Python syntax preflight violations before execution', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-syntax-preflight-retry-'));
   const events: WorkspaceRuntimeEvent[] = [];

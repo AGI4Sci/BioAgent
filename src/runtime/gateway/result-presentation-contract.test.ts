@@ -1176,6 +1176,43 @@ test('attachResultPresentationContract recomputes stale needs-work projection wh
   assert.equal(visibleAnswer?.status, 'satisfied');
 });
 
+test('attachResultPresentationContract does not satisfy edit requests from current-reference digest recovery', () => {
+  const attached = attachResultPresentationContract(payload({
+    message: 'Current Reference Digest Recovery Report',
+    claimType: 'current-reference-digest-recovery',
+    evidenceLevel: 'bounded-current-reference-digest',
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      title: 'Recovered digest',
+      dataRef: '.sciforge/task-results/p6-mini-grant/timeline-budget.md',
+    }],
+    executionUnits: [{
+      id: 'current-reference-digest-recovery',
+      status: 'self-healed',
+      tool: 'sciforge.current-reference-digest-recovery',
+      outputRef: '.sciforge/task-results/recovery.json',
+      stdoutRef: 'file:p6-mini-grant/timeline-budget.md',
+    }],
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: 'Selected artifact: p6-mini-grant/timeline-budget.md. Rewrite the selected artifact and update workspace refs.',
+      artifacts: [{ ref: 'file:p6-mini-grant/timeline-budget.md', label: 'timeline-budget.md' }],
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, unknown> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, unknown> | undefined;
+  const conversationProjection = projection?.conversationProjection as Record<string, unknown> | undefined;
+  const visibleAnswer = conversationProjection?.visibleAnswer as Record<string, unknown> | undefined;
+
+  assert.equal(projection?.taskSuccess, false);
+  assert.equal(card?.taskOutcome, 'needs-work');
+  assert.equal(visibleAnswer?.status, 'degraded-result');
+  assert.match(String(card?.nextStep), /verifier|approval|refs|evidence/i);
+});
+
 test('attachResultPresentationContract attributes transient failure next step to external provider', () => {
   const attached = attachResultPresentationContract(payload({
     message: 'External provider returned 429 Too Many Requests; partial metadata is preserved.',

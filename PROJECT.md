@@ -353,9 +353,18 @@ Root boundary：generated-task execution syntax preflight / bounded repair rerun
 
 ### P6 Long-Context / Deliverable Iteration
 
-状态：ready-for-next-milestone
+状态：partial / strict-eval-fail / targeted-fixes-landed
 建议任务：多轮 research package / mini grant / reproducibility audit，要求跨轮约束变更、selected artifact 追问、reload 后继续。
 重点挑战：ledger/context projection、旧约束污染、direct read-only vs durable writeback 边界。
+最新 P6 证据：
+- browser session：`session-literature-evidence-review-mpa25q1t-u5181a`，runs `project-literature-evidence-review-mpa26uwz-qzfrk8`、`project-literature-evidence-review-mpa2amo7-ley2ny`、`project-literature-evidence-review-mpa2df82-n4v4rm`。
+- round 1：生成 `p6-mini-grant/{project-brief.md,methods-plan.md,risk-register.md,timeline-budget.md}`，refs 可点击，reload 后当前 run 和 conversation projection 可恢复；但状态为 partial / verification unverified，且 timeline team FTE 初稿违反固定团队约束。
+- round 2：要求把 `$120,000`/`12 months` 替换为 `$80,000`/`9 months`；AgentServer 触发 convergence guard 后进入 current-reference digest recovery，主回复退化为 `Current Reference Digest Recovery Report`，没有说明保留/替换约束；workspace 后续部分更新 project brief/timeline，但 `risk-register.md` 仍残留 `0.5 FTE`。
+- round 3：selected artifact `p6-mini-grant/timeline-budget.md` 追问被标为 satisfied，但实际仍是 digest recovery；timeline 保留 `$80,000`/`9 months`/新 FTE，但没有按要求重写为 personnel/compute/data-validation/contingency 四类。
+- 修复动作：限制 vision-sense CJK intent 误路由；AgentServer taskFiles prompt 禁止 raw quoted prose 破坏 JSON；generated task helper 允许缺省 optional array envelope；current-reference digest recovery 结果现在强制 partial/needs-work，避免失败恢复伪装成已满足编辑交付。
+- 验证：`node --import tsx tests/smoke/smoke-vision-sense-intent-routing.ts`；`node --import tsx packages/skills/runtime-policy.test.ts`；`node --import tsx --test src/runtime/gateway/generated-task-runner-execution-lifecycle.test.ts`；`node --import tsx --test src/runtime/gateway/result-presentation-contract.test.ts packages/contracts/runtime/artifact-policy.test.ts`；`node --import tsx --test src/ui/src/app/projectionApi.test.ts src/ui/src/app/ResultsRenderer.test.ts`；`npm run smoke:complex-multiturn-chat`；`npm run typecheck`；`git diff --check`。
+- 失败验证：`npm run smoke:web-multiturn-final` fails at SA-WEB-05 provider-ready transition because ready provider health is still surfaced as visible Runtime preflight stage.
+- 剩余风险：long-context continuation still overfeeds AgentServer and trips convergence guard; digest recovery can preserve refs but does not perform requested rewrites or answer with change summary.
 
 ## Discovered Queue
 
@@ -408,6 +417,23 @@ Todo：
 - [ ] targeted tests / 必要 browser 复验证据
 - [x] 更新 Activity Log
 
+### DISC-20260518-P6-001 Current-reference digest recovery can mask failed artifact rewrite
+
+状态：partial / targeted-fix-landed / needs-browser-recheck
+发现者：P6
+轻量证据：P6 mini grant session `session-literature-evidence-review-mpa25q1t-u5181a`；round 2 run `project-literature-evidence-review-mpa2amo7-ley2ny` and round 3 run `project-literature-evidence-review-mpa2df82-n4v4rm`；AgentServer convergence guard forced `sciforge.current-reference-digest-recovery` and the visible answer became `Current Reference Digest Recovery Report` instead of requested constraint replacement/change summary. Round 3 was marked satisfied even though requested budget categories were not rewritten.
+升级证据：workspace `workspace/parallel/p6/p6-mini-grant/timeline-budget.md` partially updated to `$80,000` / `9 months`, but still used old category shape; `risk-register.md` still had `0.5 FTE`; task result refs `task-results/agentserver-digest-recovery-literature-2d143defe9d9.json` and `...-ee0e8723de2b.json` record convergence guard recovery.
+通用性说明：任何 selected artifact edit/rewrite/constraint-change turn can hit bounded digest recovery after context growth; digest recovery is useful as evidence salvage but must not be projected as task success for durable writeback requests.
+疑似边界：AgentServer context projection / current-reference digest recovery / task outcome projection / durable writeback
+
+Todo：
+- [x] 最小复现
+- [x] 定位 root boundary
+- [x] 通用修复
+- [x] targeted tests
+- [ ] browser recheck after restart
+- [x] 更新 Activity Log
+
 ### New Discovered Task Template
 
 ```markdown
@@ -445,6 +471,9 @@ docs/archive/
 
 ## Activity Log
 
+- 2026-05-18 01:54 P6：mini grant/research package 三轮 browser strict-eval fail/partial；修复 vision-sense CJK 误路由、AgentServer taskFiles raw quote policy、generated-task optional envelope、current-reference digest recovery 伪 satisfied；refs `session-literature-evidence-review-mpa25q1t-u5181a` / `project-literature-evidence-review-mpa26uwz-qzfrk8` / `project-literature-evidence-review-mpa2amo7-ley2ny` / `project-literature-evidence-review-mpa2df82-n4v4rm`；验证：vision-sense smoke、runtime-policy、generated-task lifecycle、result-presentation/artifact-policy、ProjectionApi/ResultsRenderer、complex-multiturn smoke、typecheck、diff-check pass；`smoke:web-multiturn-final` still fails SA-WEB-05 provider health preflight.
+
+- 2026-05-18 01:45 Integration Worker：`git fetch --all --prune` 后确认远端 `codex/*` 与本地 worker 分支均无新提交可合并；集成本地 generated-task helper / result presentation 小修复：`write_payload` 现在补齐缺省数组 envelope 字段但仍校验数组类型，runtime policy 提醒避免 raw double quotes 破坏 AgentServerGenerationResponse JSON，strict retry 仍违反 task interface 时改走 deterministic failed-with-reason adapter，current-reference digest recovery 被标为 partial 不再满足 artifact rewrite 请求；验证：generated-task generation/execution lifecycle、runtime-policy、result-presentation-contract、`npm run typecheck`、`git diff --check` 通过；剩余风险：P1 outputPath contract / P2-P3 browser success 仍需真实端到端复验。
 - 2026-05-18 01:30 Integration Worker：`git fetch --all --prune` 后确认远端 `codex/*` 均已是 `origin/main` 祖先；审查并集成当前 `codex/p6-long-context` 本地 P2/P3/P6 修复包，补修 message-only blocker JSON 保持 failed displayIntent 与 ChatPanel typecheck 窄化；验证：generated-task lifecycle、direct-answer/artifact/dispatch、ResultsRenderer、ChatPanel、vision-sense smoke、Python goal snapshot、`npm run typecheck`、`git diff --check` 全通过；剩余风险：P2/P3 真实 browser 仍未获得完整用户任务成功，下一轮继续修 scenario routing / malformed generation response。
 - 2026-05-18 00:58 Integration Worker：`git fetch --all --prune` 后审查 `origin/codex/m13-complex-multiturn`、`origin/codex/result-presentation-r015`、`origin/codex/sciforge-paper-reproduction-loop`、`origin/codex/t122-boundary-smoke`；四个分支均已是 `origin/main` 祖先，无新增合并；验证：`git diff --check`、`npm run typecheck` 通过；剩余风险：下一轮需等待新 worker branch 或 P1-P6 browser evidence。
 - 2026-05-18 01:00 Integration Worker：最终状态检查时检测到并行写入 `packages/skills/runtime-policy*`、`src/runtime/gateway/agentserver-generation-dispatch.ts`、`src/runtime/gateway/artifact-materializer*`、`src/runtime/gateway/generated-task-runner-*`；本轮未合并/未改这些文件；`git diff --check` 仍通过，但上述并行代码改动未纳入先前 `npm run typecheck` 结论。

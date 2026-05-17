@@ -62,6 +62,8 @@ test('skills runtime policy owns AgentServer retrieval and task prompt snippets'
   assert.match(taskPolicy, /inputPath argument/);
   assert.match(taskPolicy, /outputPath is a JSON file path/);
   assert.match(taskPolicy, /Generated task compactness contract/);
+  assert.match(taskPolicy, /raw double quotes/);
+  assert.match(taskPolicy, /valid JSON/);
   assert.match(taskPolicy, /failed-with-reason ToolPayload/);
   assert.match(taskPolicy, /Generated Python dependency contract/);
   assert.match(taskPolicy, /DataFrame\.to_markdown requires tabulate/);

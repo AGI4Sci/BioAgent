@@ -570,6 +570,7 @@ function confidenceFromPayload(payload: Record<string, unknown>, citations: Resu
 
 function processStatusFromPayload(payload: Record<string, unknown>): ResultPresentationProcessSummary['status'] {
   const text = `${payload.claimType ?? ''} ${payload.evidenceLevel ?? ''} ${payload.message ?? ''}`.toLowerCase();
+  if (/current-reference-digest-recovery|bounded-current-reference-digest/.test(text)) return 'partial';
   if (/failed-with-reason|failed|failure|repair-needed|失败/.test(text)) return 'failed';
   if (/needs-human|human/.test(text)) return 'needs-human';
   if (/partial|insufficient|unverified|unavailable|missing/.test(text)) return 'partial';
@@ -578,6 +579,7 @@ function processStatusFromPayload(payload: Record<string, unknown>): ResultPrese
 
 function resultStatusFromPayload(payload: Record<string, unknown>): ResultPresentationStatus {
   const text = `${payload.status ?? ''} ${payload.claimType ?? ''} ${payload.evidenceLevel ?? ''} ${payload.message ?? ''}`.toLowerCase();
+  if (/current-reference-digest-recovery|bounded-current-reference-digest/.test(text)) return 'partial';
   if (/background|running|continuing/.test(text)) return 'background-running';
   if (/failed-with-reason|failed|failure|repair-needed|失败/.test(text)) return 'failed';
   if (/needs-human|human/.test(text)) return 'needs-human';

@@ -128,6 +128,57 @@ test('generated task files are materialized only inside the session bundle', asy
   assert.match(helperSource, /failed-with-reason/);
 });
 
+test('generated task helper fills omitted optional array envelope fields', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-helper-default-arrays-'));
+  const request: GatewayRequest = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'write a compact markdown package',
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-literature-helper-default-arrays',
+      sessionCreatedAt: '2026-05-12T01:05:00.000Z',
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+  };
+
+  const result = await runGeneratedTaskExecutionLifecycle({
+    workspace,
+    request,
+    skill: providerTestSkill('2026-05-12T01:05:00.000Z'),
+    generation: {
+      ok: true,
+      runId: 'run-helper-default-arrays',
+      response: {
+        taskFiles: [{
+          path: 'tasks/write-package.py',
+          language: 'python',
+          content: [
+            'import sys',
+            'from sciforge_task import write_payload',
+            '_, input_path, output_path = sys.argv',
+            'write_payload(output_path, {"message": "ok", "confidence": 0.8, "claimType": "artifact-generation", "evidenceLevel": "runtime", "reasoningTrace": "wrote files"})',
+          ].join('\n'),
+        }],
+        entrypoint: { language: 'python', path: 'tasks/write-package.py' },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: [],
+      },
+    },
+    deps: { repairNeededPayload },
+  });
+
+  assert.equal(result.kind, 'run');
+  if (result.kind !== 'run') return;
+  assert.equal(result.execution.run.exitCode, 0);
+  const payload = JSON.parse(await readFile(join(workspace, result.execution.run.outputRef ?? ''), 'utf8'));
+  assert.deepEqual(payload.claims, []);
+  assert.deepEqual(payload.uiManifest, []);
+  assert.deepEqual(payload.executionUnits, []);
+  assert.deepEqual(payload.artifacts, []);
+});
+
 test('generated task input carries ready web routes for evidence-matrix artifacts even when model omitted selected tools', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-evidence-matrix-routes-'));
   const request: GatewayRequest = {

@@ -604,19 +604,21 @@ Todo：
 
 ### DISC-20260517-P3-003 Code repair side effects need completion-candidate salvage
 
-状态：todo
+状态：done
 发现者：P3
 轻量证据：Browser `http://127.0.0.1:5373/`；P3 code-debug run wrote `workspace/parallel/p3/fixed_inverse_square_decay.py` and `workspace/parallel/p3/buggy_inverse_square_decay_fixed.py`, and local rerun passes with `RMSE 0.3608685583720119`, but the Web task never produced a terminal ToolPayload/report before the convergence guard. Post-fix recheck run `project-literature-evidence-review-mp9ltnn6-nu2nse` correctly became recoverable `protocol-failed; task=needs-work`, but still did not surface the useful fixed artifacts as completion candidates.
-升级证据：current P3 session dirs `workspace/parallel/p3/.sciforge/sessions/2026-05-17_workspace-biomedical-knowledge-graph-_kras-g12d_-_-mp8koxek_session-workspace-biomedical-knowledge-graph-_kras-g12d_-_-mp8koxek-mp9liwqr-61ht34/` and `workspace/parallel/p3/.sciforge/sessions/2026-05-17_literature-evidence-review_session-workspace-biomedical-knowledge-graph-_kras-g12d_-_-mp8koxek-mp9liwqr-61ht34/`; no extra DOM dump saved because Web UI and workspace refs are sufficient for this lightweight trace.
+升级证据：current P3 session dirs `workspace/parallel/p3/.sciforge/sessions/2026-05-17_workspace-biomedical-knowledge-graph-_kras-g12d_-_-mp8koxek_session-workspace-biomedical-knowledge-graph-_kras_g12d_-_-mp8koxek-mp9liwqr-61ht34/` and `workspace/parallel/p3/.sciforge/sessions/2026-05-17_literature-evidence-review_session-workspace-biomedical-knowledge-graph-_kras-g12d_-_-mp8koxek-mp9liwqr-61ht34/`; browser salvage 验收截图 `workspace/parallel/p3/.sciforge/evidence/p3-completion-candidate-browser.png`。
 通用性说明：Any coding/reproduction task can perform workspace write side effects before AgentServer finalization. Runtime should expose legal changed files / rerun outputs as `completion-candidate` or repair evidence without marking false success; this is not specific to inverse-square decay, P3, or the literature scenario.
-疑似边界：AgentServer / Runtime Bridge / Projection / ArtifactDelivery / UI restore
+根边界：AgentServer stream side-effect WorkEvidence / Runtime Bridge failure lifecycle / Projection completion-candidate / ArtifactDelivery
 
 Todo：
 - [x] 最小复现
 - [x] 定位 root boundary
-- [ ] 通用修复
-- [ ] targeted tests / 必要的 browser 复验证据
+- [x] 通用修复
+- [x] targeted tests / 必要的 browser 复验证据
 - [x] 更新对应任务打勾状态和 Activity Log
+
+修复结论（P3，2026-05-17）：新增 generic AgentServer side-effect salvage：backend stream `write_file` / wrote / patched / saved 等通用事件会归一化为 `WorkEvidence(kind=write)`；AgentServer generation failure diagnostics 保留 bounded side-effect WorkEvidence；failure lifecycle 从 workspace 内合法写入文件生成 `displayIntent.completionCandidate`、supporting-evidence ArtifactDelivery 和 object refs，状态保持 `unverified/repair-needed`，不标 satisfied，且不泄漏绝对 workspace root。Browser 复验在 `http://127.0.0.1:5373/` 用 P3 code-debug candidate state 验证右侧显示 `run-p3-candidate-browser · recoverable`、`completion-candidate`、候选 `fixed_inverse_square_decay.py` 与导入/验证恢复动作；正文未出现 `satisfied`。验证：`node --import tsx --test src/runtime/gateway/generated-task-runner-generation-lifecycle.test.ts src/runtime/gateway/backend-tool-work-evidence-adapter.test.ts packages/contracts/runtime/work-evidence.test.ts` 18/18 通过；`npm run typecheck` 通过。
 
 ### DISC-20260517-P6-002 AgentServer JSON direct text was guarded instead of normalized
 
@@ -923,6 +925,8 @@ npm run verify:single-agent-final
 Browser 验证必须使用 Codex in-app browser，不用普通 terminal smoke 替代。
 
 ## Activity Log
+
+- 2026-05-17 - UI-Execution Decoupling Owner - 继续 `UX-SYSTEM-TASK-20260517-ui-execution-decoupling`：补齐最小 `ProjectionSubscriptionApi` 本地 contract，订阅事件只发布 canonical `ConversationProjectionView` / `RunSummary`，不暴露 raw AgentServer text；`UserActionApi.loadArtifactPreview` 现在返回带 typed `load-artifact-preview` 的 `ArtifactPreview.sourceAction`；`WorkspaceObjectPreview` 的大文件“加载预览”先提交 `UserActionApi.loadArtifactPreview`，再进入现有 workspace preview hydration。验证：`node --import tsx --test src/ui/src/app/projectionApi.test.ts src/ui/src/app/results/WorkspaceObjectPreview.test.ts src/ui/src/app/uiActionBoundary.test.ts` 15/15 通过；`npm run typecheck` 通过；Codex in-app browser 仍 `Transport closed`，隔离 Playwright 打开 `http://127.0.0.1:5173/` 得到 title `SciForge`、console error 0、default DOM raw term matches `[]`。状态仍为 partial foundation：workspace preview hydration、retry/recover/import-verify-confirm 和全 UI ProjectionApi 迁移未完成。
 
 - 2026-05-17 - P2 - 收口 `DISC-20260517-P2-002`：原始发现 “capability_discovery 只有 tiny brief / service，缺 agent-callable runtime invocation surface” 已由后续通用修复关闭。当前 generated-task helper 可通过 `invoke_capability(task_input, "capability_discovery.search|expand|plan|explain", input)` 调用 discovery；AgentServer stream 的 `capability_discovery.*` tool-call 会由 Gateway 调用 `CapabilityDiscoveryService`，emit `tool-result`，写入 sanitized `records/capability-discovery/*.json` audit record，并保持 `completionEvidence=not-evidence`。验证 `node --import tsx --test src/runtime/gateway/agentserver-stream.test.ts src/runtime/capability-discovery.test.ts src/runtime/gateway/generated-task-runner-execution-lifecycle.test.ts src/runtime/gateway/backend-tool-work-evidence-adapter.test.ts src/ui/src/app/projectionApi.test.ts` 通过 39/39；`npm run typecheck` 通过。剩余 backend 双向消费协议 / ledger replay / UI `CapabilityPlanSummary` 不再作为 P2-002 重复跟踪，归入 UX-SYSTEM `blocked-on-backend-result-consumption` 主线。
 - 2026-05-17 - capability_discovery owner - 继续 `UX-SYSTEM-TASK-20260517-capability-discovery-api` / `discovery-progressive-disclosure`：新增 `src/runtime/gateway/capability-discovery-tool-transport.ts`，`readAgentServerRunStream` 现在会把 AgentServer stream 中的 `capability_discovery.search|expand|plan|explain` tool-call 解析为受控 runtime call，调用 `CapabilityDiscoveryService` 后 emit `tool-result`，保持 `completionEvidence=not-evidence`，并在 session bundle `records/capability-discovery/*.json` 写入 sanitized audit record；AgentServer dispatch payload metadata 同步暴露极简 tool transport brief，不注入完整 registry/schema/provider endpoint。剩余 blocker 明确为 backend 对 stream-side `tool-result` 的双向消费协议、workspace ledger/replay 索引和 UI `CapabilityPlanSummary`。验证：`node --import tsx --test src/runtime/gateway/agentserver-stream.test.ts` 9/9，`node --import tsx --test src/runtime/gateway/agentserver-stream.test.ts src/runtime/capability-discovery.test.ts src/runtime/gateway/generated-task-runner-execution-lifecycle.test.ts` 25/25，`npm run typecheck` 通过。

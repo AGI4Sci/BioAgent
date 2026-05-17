@@ -261,7 +261,7 @@ Owner：Orchestrator + P1-P6
 
 ### P1 Literature / Full-Text Discovery
 
-状态：partial / strict-eval-failed-fresh-intent-fixed
+状态：partial / strict-eval-failed-contract-recovery-verified
 建议任务：最新 arXiv/bioRxiv/PubMed 主题调研，要求全文/PDF、证据位置、中文报告 artifact、selected report follow-up。
 重点挑战：browser-rendered/full-text provider、discovery 是否自主选择能力、metadata 是否仍被诚实标为未完成。
 
@@ -286,6 +286,29 @@ Root boundary：conversation-policy goal_snapshot fresh-vs-future-followup inten
 修复动作：`goal_snapshot.py` 现在把“完成后我会继续追问 / report follow-up 可用”识别为未来 artifact follow-up 要求，而不是当前 continuation；新增 unittest 覆盖。
 验证：`python3 packages/reasoning/conversation-policy/tests/test_goal_snapshot.py`；manual invocation of 17 `test_execution_classifier.py` functions；`node --import tsx --test src/runtime/capability-discovery.test.ts`；`node --import tsx --test src/ui/src/app/ResultsRenderer.test.ts src/ui/src/app/projectionApi.test.ts`；`npm run typecheck`；`git diff --check`。
 剩余风险：全文调研仍被 `literature_review_task.py does not write the SciForge outputPath argument` 阻塞；需要修 generated-task authoring / strict retry 后重新跑 P1 browser，并再验证 selected report follow-up。
+
+#### EVAL-20260518-P1-002 English selected report follow-up recheck
+
+状态：partial / fail on user hard requirements
+用户目标：从默认聊天入口提交英文开放式 P1 文献/全文调研任务，明确要求 latest papers、PDF/full-text availability、evidence locations、Chinese report artifact、key conclusions、limitations、selected report follow-up。
+Hard requirements：
+- 最新论文列表；全文/PDF 可得或不可得说明；证据位置；中文报告 artifact；关键结论；局限性；selected report follow-up。
+Browser entry：
+- URL: `http://127.0.0.1:5173`
+- before-English-fix run/session refs: `project-literature-evidence-review-mpa2pb53-h5wnm5` / `session-literature-evidence-review-mpa2jmrj-6j2f35`
+- after-English-fix run/session refs: `project-literature-evidence-review-mpa2w8is-ng5lg9` / `session-literature-evidence-review-mpa2sak7-qf6guo`
+- diagnostic artifact: `.sciforge/sessions/2026-05-17_literature-evidence-review_session-literature-evidence-review-mpa2sak7-qf6guo/task-results/generated-literature-dbbdfb8c4470.json`
+用户可见结论：
+- 主回复是否直接解决问题：否；before-English-fix 仍因 `selected report follow up` 被误判为 `intent=continuation` 并触发 generation convergence guard；after-English-fix 前台显示 `intent=fresh`，但 AgentServer strict retry 仍生成不写 `outputPath` 的 static/non-interface task。
+- artifact 是否可打开、可理解、可复用：只有 runtime diagnostic / verification result 可检查；没有真正 paper-list、PDF/full-text evidence、evidence matrix 或中文报告 artifact。
+- capability_discovery 是否自主使用：未形成用户可见 discovery plan；generation 直接尝试 workspace task。
+- debug/audit/raw 信息是否默认折叠：是；结果区显示 answer-first recoverable failure，run details / process / diagnostic refs 默认在折叠区。
+TaskSuccess：false
+AnswerQuality：partial；fresh intent 与 deterministic contract recovery 均已验证，但没有满足任何科研交付 hard requirement。
+Root boundary：conversation-policy future follow-up intent classification；AgentServer generated-task authoring / strict retry / generated-task interface contract；ArtifactDelivery 只能交付 diagnostic，不能补论文报告。
+修复动作：`goal_snapshot.py` 增加英文 `follow-up` fresh-task 保护：无 prior context/explicit refs 且没有 previous/prior/last/above/earlier/existing 信号时，不把 `follow up` 当当前 continuation；新增 unittest 覆盖 browser prompt。前序 deterministic failed-with-reason adapter 已在 browser 中验证，避免 outputPath contract 失败伪成功或空失败。
+验证：`python -m unittest packages/reasoning/conversation-policy/tests/test_goal_snapshot.py`；browser recheck；`git diff --check`。
+剩余风险：AgentServer 仍会生成静态/不可复用 task code；需要从 generation prompt/policy 或 generated-task repair 继续约束必须读取 argv `inputPath` 并写 argv `outputPath`，或在 report-only answer 路径直接返回 ToolPayload。
 
 ### P2 Data Analysis / Reproducibility
 
@@ -403,18 +426,18 @@ Todo：
 
 ### DISC-20260518-P1-001 Fresh literature generated task can pass intent but fail outputPath contract
 
-状态：todo / discovered-after-fresh-intent-fix
+状态：partial / targeted-fix-landed / browser-recheck-shows-structured-failure
 发现者：P1
 轻量证据：P1 after-fix browser run `project-literature-evidence-review-mpa1vfgy-6frcnz` / session `session-literature-evidence-review-mpa1t341-69iryd`；前台显示 `HarnessDecisionRecorded profile=balanced-default; intent=fresh`，但终态为 `AgentServer generated task literature_review_task.py does not write the SciForge outputPath argument`，没有论文列表、PDF/full-text evidence、中文报告 artifact 或 selected report follow-up。
-升级证据：before-fix run `project-literature-evidence-review-mpa1pkme-scu50q` 被 future follow-up 文案误判为 continuation 并触发 convergence guard；fresh-intent 修复后同一真实任务越过该边界，暴露 generated-task outputPath contract blocker。
+升级证据：before-fix run `project-literature-evidence-review-mpa1pkme-scu50q` 被 future follow-up 文案误判为 continuation 并触发 convergence guard；fresh-intent 修复后同一真实任务越过该边界，暴露 generated-task outputPath contract blocker。English recheck before policy extension `project-literature-evidence-review-mpa2pb53-h5wnm5` 仍把 `selected report follow up` 判成 continuation；修复后 `project-literature-evidence-review-mpa2w8is-ng5lg9` / `session-literature-evidence-review-mpa2sak7-qf6guo` 显示 `intent=fresh`，并将 repeated outputPath contract failure 转成 `generated-task-contract-failure` structured result，而非假成功。
 通用性说明：任何 fresh literature / report / analysis generated task 都可能生成只写旁路文件、不写 argv `outputPath` 的 entrypoint；contract gate 正确 fail-closed，但应通过 stricter authoring、bounded retry 或 deterministic recovery adapter 生成有效 ToolPayload，而不是只交付 runtime diagnostic。
 疑似边界：AgentServer generated-task authoring / generated-task preflight / strict retry / ArtifactDelivery
 
 Todo：
 - [x] 最小复现
 - [x] 定位 root boundary
-- [ ] 通用修复
-- [ ] targeted tests / 必要 browser 复验证据
+- [x] 通用修复
+- [x] targeted tests / 必要 browser 复验证据
 - [x] 更新 Activity Log
 
 ### DISC-20260518-P6-001 Current-reference digest recovery can mask failed artifact rewrite
@@ -470,6 +493,8 @@ docs/archive/
 ```
 
 ## Activity Log
+
+- 2026-05-18 02:02 P1：继续最新论文/全文调研 user-proxy；browser 输入通道缺虚拟剪贴板，改用可见 textbox 的逐字符 keypress 提交真实默认入口任务。English `selected report follow up` before-fix run `project-literature-evidence-review-mpa2pb53-h5wnm5` 仍误判 `intent=continuation` 并触发 215004-token convergence guard；修复 `goal_snapshot.py` 后 recheck `project-literature-evidence-review-mpa2w8is-ng5lg9` / `session-literature-evidence-review-mpa2sak7-qf6guo` 显示 `intent=fresh`，但 AgentServer strict retry 仍生成不写 `outputPath` 的 task；deterministic failed-with-reason adapter 在 browser 中可见，debug/audit 默认折叠。验证：goal_snapshot unittest、browser recheck、diff-check；剩余 blocker：AgentServer generated-task authoring 仍需产出可复用 task 或 direct ToolPayload，P1 hard requirements 未满足。
 
 - 2026-05-18 01:54 P6：mini grant/research package 三轮 browser strict-eval fail/partial；修复 vision-sense CJK 误路由、AgentServer taskFiles raw quote policy、generated-task optional envelope、current-reference digest recovery 伪 satisfied；refs `session-literature-evidence-review-mpa25q1t-u5181a` / `project-literature-evidence-review-mpa26uwz-qzfrk8` / `project-literature-evidence-review-mpa2amo7-ley2ny` / `project-literature-evidence-review-mpa2df82-n4v4rm`；验证：vision-sense smoke、runtime-policy、generated-task lifecycle、result-presentation/artifact-policy、ProjectionApi/ResultsRenderer、complex-multiturn smoke、typecheck、diff-check pass；`smoke:web-multiturn-final` still fails SA-WEB-05 provider health preflight.
 

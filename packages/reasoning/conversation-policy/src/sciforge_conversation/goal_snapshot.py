@@ -130,6 +130,12 @@ def _is_future_followup_instruction(prompt: str, has_prior_context: bool, has_ex
     )
     if future_followup:
         return True
+    if re.search(r"\bfollow[- ]?up\b", prompt, re.I) and not re.search(
+        r"\b(previous|prior|last(?:\s+round)?|above|earlier|existing)\b|上一轮|刚才|前面|之前|已有",
+        prompt,
+        re.I,
+    ):
+        return True
     return bool(re.search(
         r"(?:follow[- ]?up|继续追问|追问)"
         r".{0,80}"

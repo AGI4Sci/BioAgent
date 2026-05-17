@@ -100,6 +100,27 @@ class GoalSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot["taskRelation"], "new-task")
         self.assertIn("do-not-import-stale-prior-task-assumptions", snapshot["acceptanceCriteria"])
 
+    def test_english_selected_report_follow_up_requirement_is_fresh_task(self) -> None:
+        snapshot = build_goal_snapshot(
+            {
+                "prompt": (
+                    "p1 literature survey latest 2025 2026 papers on diffusion and flow matching "
+                    "models for single cell perturbation response prediction need latest paper list "
+                    "full text or pdf availability or unavailable note evidence locations chinese "
+                    "report artifact key conclusions limitations and selected report follow up"
+                ),
+                "session": {
+                    "messages": [],
+                    "executionUnits": [],
+                    "runs": [],
+                    "artifacts": [],
+                },
+            }
+        )
+
+        self.assertEqual(snapshot["taskRelation"], "new-task")
+        self.assertIn("do-not-import-stale-prior-task-assumptions", snapshot["acceptanceCriteria"])
+
     def test_scoped_no_rerun_repair_continuation_does_not_forbid_execution(self) -> None:
         snapshot = build_goal_snapshot(
             {

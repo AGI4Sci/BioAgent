@@ -392,6 +392,22 @@ Todo：
 - [ ] targeted tests / 必要 browser 复验证据
 - [ ] 更新 Activity Log
 
+### DISC-20260518-P1-001 Fresh literature generated task can pass intent but fail outputPath contract
+
+状态：todo / discovered-after-fresh-intent-fix
+发现者：P1
+轻量证据：P1 after-fix browser run `project-literature-evidence-review-mpa1vfgy-6frcnz` / session `session-literature-evidence-review-mpa1t341-69iryd`；前台显示 `HarnessDecisionRecorded profile=balanced-default; intent=fresh`，但终态为 `AgentServer generated task literature_review_task.py does not write the SciForge outputPath argument`，没有论文列表、PDF/full-text evidence、中文报告 artifact 或 selected report follow-up。
+升级证据：before-fix run `project-literature-evidence-review-mpa1pkme-scu50q` 被 future follow-up 文案误判为 continuation 并触发 convergence guard；fresh-intent 修复后同一真实任务越过该边界，暴露 generated-task outputPath contract blocker。
+通用性说明：任何 fresh literature / report / analysis generated task 都可能生成只写旁路文件、不写 argv `outputPath` 的 entrypoint；contract gate 正确 fail-closed，但应通过 stricter authoring、bounded retry 或 deterministic recovery adapter 生成有效 ToolPayload，而不是只交付 runtime diagnostic。
+疑似边界：AgentServer generated-task authoring / generated-task preflight / strict retry / ArtifactDelivery
+
+Todo：
+- [x] 最小复现
+- [x] 定位 root boundary
+- [ ] 通用修复
+- [ ] targeted tests / 必要 browser 复验证据
+- [x] 更新 Activity Log
+
 ### New Discovered Task Template
 
 ```markdown
@@ -435,6 +451,7 @@ docs/archive/
 - 2026-05-18 Orchestrator：重排 `PROJECT.md` 为多 Codex 自动化协议，加入 worker/heartbeat/sub-agent/strict-eval/evidence 规范；未改产品代码；验证：`git diff --check`。
 - 2026-05-18 P2：messy TSV 数据分析 strict-eval partial/fail；修复 generated-task entrypoint materialization mismatch 与 Python syntax preflight retry；refs: `project-literature-evidence-review-mpa0si55-syqpd7`、`generated-literature-45e15950175a`、旧 syntax 证据 `generated-literature-2182f65faaaa`；验证：generated-task lifecycle tests、ResultsRenderer tests、typecheck。
 - 2026-05-18 P3：MMD code-debug strict-eval partial/fail；修复 `DISC-20260517-P3-005` syntax preflight terminal failure by routing blocked generated Python through bounded repair/rerun before terminal payload；before evidence `project-literature-evidence-review-mpa0q8t4-mawfnw`，after recheck `project-literature-evidence-review-mpa0yd7f-2a5ue2` blocked earlier by malformed generation response；验证：generated-task lifecycle tests、dispatch test、ResultsRenderer test、typecheck、diff-check。
+- 2026-05-18 01:30 P1：single-cell diffusion 全文文献调研 strict-eval partial/fail；修复 future report follow-up 文案误判 continuation，browser recheck 从 `intent=continuation`/219973-token convergence guard 变为 `intent=fresh`，但仍 blocked by generated task `outputPath` contract；refs: `project-literature-evidence-review-mpa1pkme-scu50q`、`project-literature-evidence-review-mpa1vfgy-6frcnz`；验证：goal_snapshot unittest、execution_classifier function tests、capability-discovery、ResultsRenderer/projectionApi、typecheck、diff-check。
 
 ## Verification Commands
 

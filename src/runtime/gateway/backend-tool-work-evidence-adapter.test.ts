@@ -113,6 +113,21 @@ test('adapts generic write events into durable WorkEvidence refs', () => {
   assert.equal(evidence[0].rawRef, '/workspace/fixed_inverse_square_decay.py');
 });
 
+test('adapts textual backend write events with embedded workspace paths', () => {
+  const evidence = collectWorkEvidenceFromBackendEvent({
+    type: 'tool-result',
+    label: '结果 run_command',
+    detail: '写入完成：/workspace/weighted_survival_auc.py\npair_weight = censoring_weights[i] * censoring_weights[j]',
+  });
+
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0].kind, 'write');
+  assert.equal(evidence[0].status, 'success');
+  assert.deepEqual(evidence[0].input, { path: '/workspace/weighted_survival_auc.py' });
+  assert.deepEqual(evidence[0].evidenceRefs, ['/workspace/weighted_survival_auc.py']);
+  assert.equal(evidence[0].rawRef, '/workspace/weighted_survival_auc.py');
+});
+
 test('normalizer attaches adapted WorkEvidence while preserving raw event', () => {
   const normalized = normalizeAgentServerWorkspaceEvent({
     type: 'tool-result',

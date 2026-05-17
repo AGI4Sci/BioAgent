@@ -56,6 +56,7 @@ function evidenceFromToolCandidate(record: Record<string, unknown>, options: Bac
     record.file,
     record.filePath,
     record.file_path,
+    pathFromEventText(record),
     options.rawRef,
   );
   const diagnostics = lowNoiseDiagnostics(record);
@@ -137,6 +138,7 @@ function looksLikeToolCandidate(record: Record<string, unknown>) {
     record.file,
     record.filePath,
     record.file_path,
+    pathFromEventText(record),
     nestedInputField(record, 'path'),
     nestedInputField(record, 'file'),
     nestedInputField(record, 'filePath'),
@@ -181,16 +183,20 @@ function inferToolOperation(record: Record<string, unknown>): ToolOperationKind 
     record.type,
     record.eventType,
     record.event_type,
+    record.label,
     record.category,
     record.command,
+    record.detail,
+    record.message,
   ]
     .map((value) => (typeof value === 'string' ? value : ''))
     .join(' ')
     .replace(/[_-]+/g, ' ')
     .toLowerCase();
 
+  if (pathFromEventText(record) && /\b(write|wrote|save|saved|create|created|patch|patched|edit|edited|modify|modified)\b|写入|保存|修改|补丁/.test(haystack)) return 'write';
   if (/\b(command|run_command|run|exec|shell|bash|sh|python|node|npm|pnpm|yarn|pytest|tsx)\b/.test(haystack)) return 'command';
-  if (/\b(write|wrote|save|saved|create|created|patch|patched|edit|edited|modify|modified)\b/.test(haystack)) return 'write';
+  if (/\b(write|wrote|save|saved|create|created|patch|patched|edit|edited|modify|modified)\b|写入|保存|修改|补丁/.test(haystack)) return 'write';
   if (/\b(validat|verif|check|lint|test|schema|assert|acceptance)\b/.test(haystack)) return 'validate';
   if (/\b(search|query|retriev|lookup|grep|rg|find)\b/.test(haystack)) return 'search';
   if (/\b(fetch|download|request|http|curl|wget|crawl|scrape)\b/.test(haystack)) return 'fetch';
@@ -198,7 +204,7 @@ function inferToolOperation(record: Record<string, unknown>): ToolOperationKind 
 
   if (firstString(record.query, record.searchQuery, record.search_query, nestedInputField(record, 'query'), nestedInputField(record, 'searchQuery'), nestedInputField(record, 'search_query'))) return 'search';
   if (firstString(record.url, record.uri, record.endpoint, nestedInputField(record, 'url'), nestedInputField(record, 'uri'), nestedInputField(record, 'endpoint')) || finiteNumber(record.httpStatus) !== undefined || finiteNumber(record.statusCode) !== undefined) return 'fetch';
-  if (firstString(record.path, record.file, record.filename, record.filePath, nestedInputField(record, 'path'), nestedInputField(record, 'file'), nestedInputField(record, 'filename'), nestedInputField(record, 'filePath'), nestedInputField(record, 'file_path'))) return 'read';
+  if (firstString(record.path, record.file, record.filename, record.filePath, pathFromEventText(record), nestedInputField(record, 'path'), nestedInputField(record, 'file'), nestedInputField(record, 'filename'), nestedInputField(record, 'filePath'), nestedInputField(record, 'file_path'))) return 'read';
   if (firstString(record.verdict) || isRecord(record.validation) || isRecord(record.validator)) return 'validate';
   return undefined;
 }
@@ -222,6 +228,11 @@ function inferStatus(record: Record<string, unknown>): WorkEvidence['status'] {
   if (resultCount === 0) return 'empty';
   if (fallbackAttempted && (ok === true || (status && /\b(success|succeeded|done|complete|completed|pass|passed|ok)\b/.test(status)))) return 'partial';
   if (ok === true || (status && /\b(success|succeeded|done|complete|completed|pass|passed|ok|wrote|written|saved|created|patched|edited|modified)\b/.test(status))) return 'success';
+  const eventText = [record.label, record.detail, record.message]
+    .map((value) => (typeof value === 'string' ? value : ''))
+    .join(' ')
+    .toLowerCase();
+  if (/\b(wrote|written|saved|created|patched|edited|modified)\b|写入完成|保存完成|修改完成/.test(eventText)) return 'success';
   if (httpStatus !== undefined && httpStatus >= 200 && httpStatus < 400 && resultCount !== undefined) return 'success';
   if (status && /\b(partial|running|started|pending|in_progress|in-progress)\b/.test(status)) return 'partial';
   return 'partial';
@@ -255,7 +266,7 @@ function compactToolInput(record: Record<string, unknown>, operation: ToolOperat
   const aliases: Array<[string, unknown]> = [
     ['query', record.query ?? record.searchQuery ?? record.search_query ?? nestedInputField(record, 'query') ?? nestedInputField(record, 'searchQuery') ?? nestedInputField(record, 'search_query')],
     ['url', record.url ?? record.uri ?? record.endpoint ?? nestedInputField(record, 'url') ?? nestedInputField(record, 'uri') ?? nestedInputField(record, 'endpoint') ?? (isRecord(record.request) ? record.request.url ?? record.request.endpoint : undefined)],
-    ['path', record.path ?? record.file ?? record.filePath ?? record.file_path ?? record.filename ?? nestedInputField(record, 'path') ?? nestedInputField(record, 'file') ?? nestedInputField(record, 'filePath') ?? nestedInputField(record, 'file_path') ?? nestedInputField(record, 'filename')],
+    ['path', record.path ?? record.file ?? record.filePath ?? record.file_path ?? record.filename ?? pathFromEventText(record) ?? nestedInputField(record, 'path') ?? nestedInputField(record, 'file') ?? nestedInputField(record, 'filePath') ?? nestedInputField(record, 'file_path') ?? nestedInputField(record, 'filename')],
     ['command', record.command ?? nestedInputField(record, 'command')],
     ['args', record.args ?? nestedInputField(record, 'args')],
     ['schema', record.schema ?? nestedInputField(record, 'schema')],
@@ -369,6 +380,16 @@ function nestedInputField(record: Record<string, unknown>, key: string) {
     if (container[key] !== undefined) return container[key];
   }
   return undefined;
+}
+
+function pathFromEventText(record: Record<string, unknown>) {
+  const text = firstString(record.path, record.file, record.filePath, record.file_path)
+    ?? [record.detail, record.message, record.summary, record.outputSummary, record.output_summary]
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .find((value) => value.trim().length > 0);
+  if (!text) return undefined;
+  const match = text.match(/(?:file:)?(?:\/[^\s`"')，。；;:]+|(?:\.{1,2}\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+)\.(?:py|ipynb|r|jl|m|js|jsx|ts|tsx|sh|md|txt|csv|tsv|json|ya?ml|html|pdf|png|jpe?g|svg)\b/i);
+  return match?.[0]?.trim();
 }
 
 function firstString(...values: unknown[]) {

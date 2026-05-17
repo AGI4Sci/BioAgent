@@ -165,7 +165,7 @@ export function createLocalProjectionApi(): ProjectionApi {
       return executionTraceView(input.session, run, input.audience);
     },
     async getCapabilityPlanSummary(input) {
-      return capabilityPlanSummary(input.session, input.runId);
+      return capabilityPlanSummaryForSession(input.session, input.runId);
     },
   };
 }
@@ -377,7 +377,7 @@ function executionTraceView(session: SciForgeSession, run: SciForgeRun, audience
   };
 }
 
-function capabilityPlanSummary(session: SciForgeSession, runId?: string): CapabilityPlanSummary | undefined {
+export function capabilityPlanSummaryForSession(session: SciForgeSession, runId?: string): CapabilityPlanSummary | undefined {
   const run = focusedRun(session, runId);
   const raw = isRecord(run?.raw) ? run.raw : undefined;
   const summary = stringField(raw?.capabilityPlanSummary) ?? stringField(raw?.capabilityDiscoverySummary);

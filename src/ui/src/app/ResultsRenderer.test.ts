@@ -1124,6 +1124,46 @@ test('requestRecoverActionThroughUserActionApi routes result recover buttons thr
   assert.ok(action?.auditRefs.includes('artifact:research-report'));
 });
 
+test('ResultsRenderer shows capability discovery plan summary without exposing unsafe debug refs', () => {
+  const run = {
+    ...completedRun('run-discovery-plan'),
+    raw: {
+      capabilityDiscoveryToolResults: [{
+        toolName: 'capability_discovery.plan',
+        status: 'done',
+        auditRefs: [
+          'records/capability-discovery/plan-audit.json',
+          'http://127.0.0.1:18080/internal',
+          '/Applications/workspace/ailab/research/app/SciForge/.secret',
+          'token=abc123',
+        ],
+        result: {
+          summary: 'Use literature search, pdf extraction, and evidence validation.',
+          steps: [
+            { capabilityId: 'web_search' },
+            { capabilityId: 'pdf_extract' },
+            { capabilityId: 'evidence_matrix_validate' },
+          ],
+          completionEvidence: 'not-evidence',
+        },
+      }],
+    },
+  };
+  const session = {
+    ...emptySession(),
+    runs: [run],
+  };
+
+  const html = renderResultsRenderer(session, { activeRunId: 'run-discovery-plan' });
+
+  assert.match(html, /能力计划/);
+  assert.match(html, /Use literature search, pdf extraction, and evidence validation/);
+  assert.match(html, /web_search/);
+  assert.match(html, /能力发现本身不是任务完成证据/);
+  assert.match(html, /records\/capability-discovery\/plan-audit\.json/);
+  assert.doesNotMatch(html, /127\.0\.0\.1|Applications\/workspace|token=abc123/);
+});
+
 function contractFailureSession(): SciForgeSession {
   const failure: ContractValidationFailure = {
     contract: 'sciforge.contract-validation-failure.v1',

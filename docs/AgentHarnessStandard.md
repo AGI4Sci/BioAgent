@@ -189,7 +189,7 @@ export interface HarnessCandidate {
 
 用户显式选择能力可以提高优先级，但仍必须通过安全、配置和预算 gate。
 
-#### Capability Discovery Policy（partial backend retry consumption + ledger replay refs + minimal UI summary / blocked-on-full-UI-wiring-and-browser-validation）
+#### Capability Discovery Policy（partial backend retry consumption + ledger replay refs + default UI summary card / blocked-on-debug-folding-and-browser-validation）
 
 能力检索目标上是 agent 可调用的原子操作，不是 harness 固定时机表；当前已实现统一 discovery API 的 TypeScript service、tiny brief、generated-task helper、AgentServer stream-side tool-call bridge、session-bundle audit record、session-bundle ledger event、bounded retry result consumption、最小 UI summary projection 和 targeted tests。Harness 在 `selectCapabilities` 和 `beforePromptRender` 阶段最终只应做三件事：
 

@@ -93,7 +93,7 @@ import {
   type OpenDebugAuditUIAction,
   type TriggerRecoverUIAction,
 } from './uiActionBoundary';
-import { createLocalUserActionApi, type UserActionApi } from './projectionApi';
+import { capabilityPlanSummaryForSession, createLocalUserActionApi, type CapabilityPlanSummary, type UserActionApi } from './projectionApi';
 
 export { renderRegisteredWorkbenchSlot };
 export type { WorkbenchSlotRenderProps };
@@ -393,6 +393,7 @@ function PrimaryResult({
         viewPlan={viewPlan}
         onTriggerRecoverAction={onTriggerRecoverAction}
       />
+      <CapabilityPlanSummaryCard summary={capabilityPlanSummaryForSession(session, activeRun?.id)} />
       {model.emptyState ? (
         <EmptyArtifactState
           title={model.emptyState.title}
@@ -454,6 +455,31 @@ function PrimaryResult({
         </details>
       ) : null}
     </div>
+  );
+}
+
+function CapabilityPlanSummaryCard({ summary }: { summary?: CapabilityPlanSummary }) {
+  if (!summary || summary.status === 'none') return null;
+  return (
+    <Card className="capability-plan-summary">
+      <SectionHeader
+        icon={Sparkles}
+        title="能力计划"
+        subtitle="自动发现的能力组合"
+      />
+      <p>{summary.summary}</p>
+      {summary.debugRefs.length ? (
+        <details className="result-details-panel subtle">
+          <summary>
+            <span>能力发现记录</span>
+            <Badge variant="muted">{summary.debugRefs.length} refs</Badge>
+          </summary>
+          <div className="inspector-ref-list">
+            {summary.debugRefs.slice(0, 8).map((ref) => <code key={ref}>{ref}</code>)}
+          </div>
+        </details>
+      ) : null}
+    </Card>
   );
 }
 

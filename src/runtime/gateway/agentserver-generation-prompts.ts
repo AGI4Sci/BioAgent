@@ -51,6 +51,7 @@ export function buildAgentServerGenerationPrompt(request: {
   selectedComponentIds?: string[];
   priorAttempts: unknown[];
   strictTaskFilesReason?: string;
+  capabilityDiscoveryToolResults?: Array<Record<string, unknown>>;
   retryAudit?: unknown;
   freshCurrentTurn?: boolean;
   repairContinuation?: boolean;

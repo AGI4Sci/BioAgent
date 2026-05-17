@@ -11,10 +11,12 @@ import {
 import { runAuditRefs, runPresentationState } from './results-renderer-execution-model';
 import {
   createApproveResultUIAction,
+  createCancelRunUIAction,
   createLoadArtifactPreviewUIAction,
   createRequestRetryUIAction,
   createSelectObjectUIAction,
   createSubmitTurnUIAction,
+  createTriggerRecoverUIAction,
   createUpdateCapabilityPreferenceUIAction,
   type UIAction,
 } from './uiActionBoundary';
@@ -40,7 +42,9 @@ export interface UserActionApi {
   selectObject(input: { session: SciForgeSession; objectRef: string; intent: 'inspect' | 'ask-followup' | 'compare' | 'pin' }): Promise<UserActionResult>;
   loadArtifactPreview(input: { session: SciForgeSession; artifactRef: string; byteLimit?: number }): Promise<ArtifactPreview>;
   requestRetry(input: { session: SciForgeSession; runId: string; reason?: string; scope: 'same-input' | 'with-repair-evidence' | 'rediscover-capabilities' }): Promise<UserActionResult>;
+  triggerRecover(input: { session: SciForgeSession; runId: string; recoverAction: string }): Promise<UserActionResult>;
   approveResult(input: { session: SciForgeSession; runId: string; approval: 'human-approved' | 'reject-result'; note?: string }): Promise<UserActionResult>;
+  cancelRun(input: { session: SciForgeSession; runId: string; rejectedGuidanceIds?: string[] }): Promise<UserActionResult>;
   updateCapabilityPreference(input: { session: SciForgeSession; preference: Record<string, unknown> }): Promise<UserActionResult>;
 }
 
@@ -235,6 +239,17 @@ export function createLocalUserActionApi(projectionApi: ProjectionApi = createLo
       });
       return acceptedAction(action, await projectionApi.getConversationProjection({ session: input.session, focusedRunId: input.runId }), '重试请求已记录为语义动作。');
     },
+    async triggerRecover(input) {
+      const action = createTriggerRecoverUIAction({
+        session: input.session,
+        id: actionId('trigger-recover'),
+        createdAt: new Date().toISOString(),
+        runId: input.runId,
+        recoverAction: input.recoverAction,
+        auditRefs: runAuditRefs(input.session, focusedRun(input.session, input.runId)),
+      });
+      return acceptedAction(action, await projectionApi.getConversationProjection({ session: input.session, focusedRunId: input.runId }), '恢复动作已记录为语义动作。');
+    },
     async approveResult(input) {
       const action = createApproveResultUIAction({
         session: input.session,
@@ -245,6 +260,16 @@ export function createLocalUserActionApi(projectionApi: ProjectionApi = createLo
         note: input.note,
       });
       return acceptedAction(action, await projectionApi.getConversationProjection({ session: input.session, focusedRunId: input.runId }));
+    },
+    async cancelRun(input) {
+      const action = createCancelRunUIAction({
+        session: input.session,
+        id: actionId('cancel-run'),
+        createdAt: new Date().toISOString(),
+        runId: input.runId,
+        rejectedGuidanceIds: input.rejectedGuidanceIds,
+      });
+      return acceptedAction(action, await projectionApi.getConversationProjection({ session: input.session, focusedRunId: input.runId }), '取消请求已记录为语义动作。');
     },
     async updateCapabilityPreference(input) {
       const action = createUpdateCapabilityPreferenceUIAction({

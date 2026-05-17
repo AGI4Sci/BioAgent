@@ -2,7 +2,7 @@
 
 最后更新：2026-05-17
 
-状态：partial foundation / in_progress（2026-05-17）。当前代码已经有 `ConversationProjection`、artifact delivery、workspace preview、run/audit refs、最小 `ProjectionApi` / `UserActionApi` / `ProjectionSubscriptionApi` 类型入口、UI action boundary、manual preview action 和部分 `completion-candidate` projection 读取；generated task pre-output / parse-output failure 已能产生 `completionCandidate`。默认消息 key info、evidence rows 和 execution detail 会 scrub `ToolPayload` / `taskFiles` / `stdout/stderr` 等内部术语，避免普通主界面把 raw/debug contract 当用户答案展示。`WorkspaceObjectPreview` 的大文件手动加载会先走 `UserActionApi.loadArtifactPreview` 记录 typed action，再进入现有 workspace preview hydration。但 UI 还没有整体迁移为只消费 ProjectionApi，workspace preview hydration 仍由组件调用 workspace client，通用 AgentServer handoff / `tool_payload.json` salvage import/verify transaction 尚未闭环，canonical projection scrub/conformance 也还需继续扩展。本文定义目标边界，不表示当前代码已经完整实现。
+状态：partial foundation / in_progress（2026-05-17）。当前代码已经有 `ConversationProjection`、artifact delivery、workspace preview、run/audit refs、最小 `ProjectionApi` / `UserActionApi` / `ProjectionSubscriptionApi` 类型入口、UI action boundary、manual preview action、recover/cancel/approval action 和部分 `completion-candidate` projection 读取；generated task pre-output / parse-output failure 已能产生 `completionCandidate`。默认消息 key info、evidence rows 和 execution detail 会 scrub `ToolPayload` / `taskFiles` / `stdout/stderr` 等内部术语，避免普通主界面把 raw/debug contract 当用户答案展示。`WorkspaceObjectPreview` 的大文件手动加载会先走 `UserActionApi.loadArtifactPreview` 记录 typed action，再进入现有 workspace preview hydration。但 UI 还没有整体迁移为只消费 ProjectionApi，workspace preview hydration 仍由组件调用 workspace client，通用 AgentServer handoff / `tool_payload.json` salvage import/verify transaction 尚未闭环，canonical projection scrub/conformance 也还需继续扩展。本文定义目标边界，不表示当前代码已经完整实现。
 
 ## 目标
 
@@ -107,6 +107,11 @@ interface UserActionApi {
     runId: string;
     reason?: string;
     scope: 'same-input' | 'with-repair-evidence' | 'rediscover-capabilities';
+  }): Promise<UserActionResult>;
+
+  triggerRecover(input: {
+    runId: string;
+    recoverAction: string;
   }): Promise<UserActionResult>;
 
   approveResult(input: {

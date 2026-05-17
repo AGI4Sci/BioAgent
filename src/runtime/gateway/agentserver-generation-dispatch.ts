@@ -28,7 +28,7 @@ import { agentServerConvergenceGuardEvent, agentServerDispatchEvent, agentServer
 import { backendHandoffDriftEvent, classifyBackendHandoffDrift } from '@sciforge-ui/runtime-contract/backend-handoff-drift';
 import { DEFAULT_AGENTSERVER_ADAPTER_MODE, backendAdapterForAgentServerAdapter, createInlineAgentServerAdapter, type AgentServerAdapter, type AgentServerGenerationAdapterResult } from './agentserver-adapter.js';
 import { createTurnPipeline, createWorkspaceKernel } from '../conversation-kernel/index.js';
-import { capabilityDiscoveryAgentServerToolTransportBrief } from './capability-discovery-tool-transport.js';
+import { capabilityDiscoveryAgentServerToolTransportBrief, type CapabilityDiscoveryToolResultEvent } from './capability-discovery-tool-transport.js';
 
 function requestHandoffSource(request: GatewayRequest) {
   return request.handoffSource ?? 'cli';
@@ -259,6 +259,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
   let contextRecovery: AgentServerGenerationFailureDiagnostics | undefined;
   let strictTaskFilesReason = params.strictTaskFilesReason;
   let partialStreamWorkEvidence: WorkEvidence[] = [];
+  let capabilityDiscoveryToolResultsForRetry: CapabilityDiscoveryToolResultEvent[] = [];
   try {
     const request = params.request;
     const promptRequest = requestWithoutInlineAgentHarness(request);
@@ -312,6 +313,9 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
       contextEnvelope.backendRetryAudit = contextRecovery.retryAudit;
       contextEnvelope.retryReason = 'Previous AgentServer generation attempt hit provider/rate-limit or retry-budget pressure; this is the only compact retry.';
     }
+    if (capabilityDiscoveryToolResultsForRetry.length) {
+      contextEnvelope.capabilityDiscoveryToolResults = compactCapabilityDiscoveryToolResults(capabilityDiscoveryToolResultsForRetry);
+    }
     const compactContext = buildAgentServerCompactContext(promptRequest, {
       contextEnvelope,
       workspaceTree,
@@ -342,10 +346,12 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
       priorAttempts: compactContext.priorAttempts,
       strictTaskFilesReason,
       retryAudit: contextRecovery?.retryAudit,
+      capabilityDiscoveryToolResults: compactCapabilityDiscoveryToolResults(capabilityDiscoveryToolResultsForRetry),
       freshCurrentTurn: !needsContinuity,
       repairContinuation,
     };
     const generationPrompt = buildAgentServerGenerationPrompt(generationRequest);
+    const compactDiscoveryToolResults = compactCapabilityDiscoveryToolResults(capabilityDiscoveryToolResultsForRetry);
     const contextEnvelopeBytes = Buffer.byteLength(JSON.stringify(contextEnvelope), 'utf8');
     const harnessMetadata = agentHarnessMetadata(request, {
       backendSelectionDecision,
@@ -412,6 +418,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           contextCompaction: preflight.compaction ? contextCompactionMetadata(preflight.compaction) : undefined,
           backendCapabilities: adapter.capabilities,
           capabilityDiscoveryToolTransport: capabilityDiscoveryAgentServerToolTransportBrief(),
+          capabilityDiscoveryToolResults: compactDiscoveryToolResults,
           ...harnessMetadata,
         },
       },
@@ -433,6 +440,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           nativeToolFirst: needsContinuity,
           llmEndpointSource: llmRuntime.llmEndpoint ? llmEndpointSource : undefined,
           capabilityDiscoveryToolTransport: capabilityDiscoveryAgentServerToolTransportBrief(),
+          capabilityDiscoveryToolResults: compactDiscoveryToolResults,
           retryAudit: contextRecovery?.retryAudit,
           toolPolicy: repairContinuation ? {
             mode: 'repair-continuation-minimal',
@@ -468,6 +476,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           maxRetries: 1,
         },
         retryAudit: contextRecovery?.retryAudit,
+        capabilityDiscoveryToolResults: compactDiscoveryToolResults,
         repairContinuation,
         toolPolicy: repairContinuation ? {
           mode: 'repair-continuation-minimal',
@@ -603,7 +612,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
       clearTimeout(preResponseSilentTimeout);
     }
     partialStreamWorkEvidence = [];
-    const { json, run, error, streamText, workEvidence } = await readAgentServerRunStream(response, (event) => {
+    const { json, run, error, streamText, workEvidence, capabilityDiscoveryToolResults } = await readAgentServerRunStream(response, (event) => {
       partialStreamWorkEvidence.push(...collectWorkEvidenceFromBackendEvent(event));
       emitWorkspaceRuntimeEvent(params.callbacks, withRequestContextWindowLimit(
         normalizeAgentServerWorkspaceEvent(event),
@@ -739,6 +748,24 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     const parsedRaw = parseGenerationResponse(run.output) ?? parseGenerationResponse(run) ?? parseGenerationResponse(streamText) ?? parseGenerationResponse(directText);
     const parsed = parsedRaw && directText ? hydrateGeneratedTaskResponseFromText(parsedRaw, directText) : parsedRaw;
     if (!parsed) {
+      if (capabilityDiscoveryToolResults.length && !directText && dispatchAttempt < 2) {
+        capabilityDiscoveryToolResultsForRetry = capabilityDiscoveryToolResults;
+        strictTaskFilesReason = 'AgentServer emitted capability_discovery tool-call events without a terminal generation result. Retrying once with the discovery tool-result records included in the compact handoff; consume those results, then return the final compact JSON.';
+        emitWorkspaceRuntimeEvent(params.callbacks, {
+          type: 'agentserver-generation-retry',
+          source: 'workspace-runtime',
+          status: 'running',
+          message: 'Retrying AgentServer generation with capability discovery tool results.',
+          detail: strictTaskFilesReason,
+          raw: {
+            schemaVersion: 'sciforge.agentserver-generation-retry.v1',
+            reason: 'capability-discovery-tool-result-consumption',
+            toolResultCount: capabilityDiscoveryToolResults.length,
+            auditRefs: capabilityDiscoveryToolResults.flatMap((event) => event.auditRefs).slice(0, 12),
+          },
+        });
+        continue;
+      }
       if (directText && looksLikeUnparsedGenerationResponseText(directText)) {
         const malformedGenerationReason = 'AgentServer returned a malformed or incomplete AgentServerGenerationResponse-looking JSON payload; retry with compact executable taskFiles JSON and no markdown fences.';
         emitBackendHandoffDrift(params.callbacks, {
@@ -872,6 +899,57 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     clearTimeout(timeout);
     params.callbacks?.signal?.removeEventListener('abort', abortGeneration);
   }
+}
+
+function compactCapabilityDiscoveryToolResults(results: CapabilityDiscoveryToolResultEvent[] | undefined): Array<Record<string, unknown>> | undefined {
+  if (!results?.length) return undefined;
+  return results.slice(0, 8).map((event) => ({
+    schemaVersion: 'sciforge.capability-discovery.tool-result-summary.v1',
+    toolName: event.toolName,
+    status: event.status,
+    callId: event.callId,
+    discoveryRef: event.discoveryRef,
+    auditRefs: event.auditRefs.slice(0, 8),
+    completionEvidence: 'not-evidence',
+    result: compactCapabilityDiscoveryResultForRetry(event.result),
+    error: event.error,
+  }));
+}
+
+function compactCapabilityDiscoveryResultForRetry(result: unknown): unknown {
+  if (!isRecord(result)) return result;
+  if (Array.isArray(result.candidates)) {
+    return {
+      contract: result.contract,
+      discoveryRef: result.discoveryRef,
+      auditRef: result.auditRef,
+      candidates: result.candidates.slice(0, 6),
+      next: result.next,
+    };
+  }
+  if (Array.isArray(result.expanded)) {
+    return {
+      contract: result.contract,
+      discoveryRef: result.discoveryRef,
+      auditRef: result.auditRef,
+      expanded: result.expanded.slice(0, 4),
+      excluded: Array.isArray(result.excluded) ? result.excluded.slice(0, 8) : undefined,
+    };
+  }
+  if (Array.isArray(result.steps)) {
+    return {
+      contract: result.contract,
+      planId: result.planId,
+      discoveryRef: result.discoveryRef,
+      auditRef: result.auditRef,
+      summary: result.summary,
+      steps: result.steps.slice(0, 8),
+      missingProviders: Array.isArray(result.missingProviders) ? result.missingProviders.slice(0, 8) : undefined,
+      missingPermissions: Array.isArray(result.missingPermissions) ? result.missingPermissions.slice(0, 8) : undefined,
+      completionEvidence: 'not-evidence',
+    };
+  }
+  return result;
 }
 
 function directPayloadNeedsStrictTaskFilesRetry(payload: ToolPayload) {

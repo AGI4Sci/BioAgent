@@ -209,6 +209,65 @@ test('UserActionApi records retry with repair evidence as an action result', asy
   assert.equal(result.projection?.visibleAnswer.status, 'repair-needed');
 });
 
+test('UserActionApi records recover, approval, and cancel as semantic action results', async () => {
+  const projection = {
+    schemaVersion: 'sciforge.conversation-projection.v1',
+    conversationId: 'conversation-actions',
+    visibleAnswer: {
+      status: 'needs-human',
+      diagnostic: '需要用户决定是否恢复。',
+      artifactRefs: ['artifact:partial-report'],
+    },
+    activeRun: { id: 'run-actions', status: 'needs-human' },
+    artifacts: [{ ref: 'artifact:partial-report', label: 'Partial report' }],
+    executionProcess: [],
+    recoverActions: ['Import and verify candidate artifacts.'],
+    verificationState: { status: 'unverified' },
+    auditRefs: ['artifact:partial-report', 'audit:recover'],
+    diagnostics: [],
+  };
+  const session = testSession({
+    runs: [{
+      id: 'run-actions',
+      scenarioId: 'literature-evidence-review',
+      status: 'failed',
+      prompt: 'recover',
+      response: 'RAW_RECOVER_TEXT_SHOULD_NOT_RENDER',
+      createdAt: '2026-05-17T00:00:00.000Z',
+      raw: { displayIntent: { conversationProjection: projection } },
+    }],
+    artifacts: [deliveryArtifact('partial-report')],
+  });
+  const actionApi = createLocalUserActionApi();
+
+  const recover = await actionApi.triggerRecover({
+    session,
+    runId: 'run-actions',
+    recoverAction: 'Import and verify candidate artifacts.',
+  });
+  const approve = await actionApi.approveResult({
+    session,
+    runId: 'run-actions',
+    approval: 'reject-result',
+    note: 'Still lacks verifier refs.',
+  });
+  const cancel = await actionApi.cancelRun({
+    session,
+    runId: 'run-actions',
+    rejectedGuidanceIds: ['guidance-a', 'guidance-a', 'guidance-b'],
+  });
+
+  assert.equal(recover.accepted, true);
+  assert.equal(recover.action?.type, 'trigger-recover');
+  assert.equal(recover.action?.type === 'trigger-recover' ? recover.action.recoverAction : '', 'Import and verify candidate artifacts.');
+  assert.deepEqual(recover.action?.type === 'trigger-recover' ? recover.action.auditRefs : [], ['artifact:partial-report', 'audit:recover']);
+  assert.equal(approve.action?.type, 'approve-result');
+  assert.equal(approve.action?.type === 'approve-result' ? approve.action.approval : '', 'reject-result');
+  assert.equal(cancel.action?.type, 'cancel-run');
+  assert.deepEqual(cancel.action?.type === 'cancel-run' ? cancel.action.rejectedGuidanceIds : [], ['guidance-a', 'guidance-b']);
+  assert.doesNotMatch(JSON.stringify({ recover, approve, cancel }), /RAW_RECOVER_TEXT/);
+});
+
 function testSession(overrides: Partial<SciForgeSession> = {}): SciForgeSession {
   return {
     schemaVersion: 2,

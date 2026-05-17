@@ -209,6 +209,50 @@ test('UserActionApi records retry with repair evidence as an action result', asy
   assert.equal(result.projection?.visibleAnswer.status, 'repair-needed');
 });
 
+test('ProjectionApi derives CapabilityPlanSummary from discovery tool results without raw debug leakage', async () => {
+  const session = testSession({
+    runs: [{
+      id: 'run-discovery-plan',
+      scenarioId: 'literature-evidence-review',
+      status: 'running',
+      prompt: 'discover capabilities',
+      response: 'RAW_DISCOVERY_TEXT_SHOULD_NOT_RENDER',
+      createdAt: '2026-05-17T00:00:00.000Z',
+      raw: {
+        capabilityDiscoveryToolResults: [{
+          type: 'tool-result',
+          toolName: 'capability_discovery.plan',
+          status: 'done',
+          auditRefs: [
+            'records/capability-discovery/plan-audit.json',
+            'http://127.0.0.1:18380/internal',
+          ],
+          completionEvidence: 'not-evidence',
+          result: {
+            contract: 'sciforge.capability-discovery.v1',
+            summary: 'Use literature search, PDF reading, and citation verification.',
+            steps: [
+              { capabilityId: 'web_search' },
+              { capabilityId: 'pdf_read' },
+              { capabilityId: 'citation_verify' },
+            ],
+            completionEvidence: 'not-evidence',
+          },
+        }],
+      },
+    }],
+  });
+
+  const summary = await createLocalProjectionApi().getCapabilityPlanSummary({ session, runId: 'run-discovery-plan' });
+
+  assert.equal(summary?.status, 'available');
+  assert.match(summary?.summary ?? '', /literature search/);
+  assert.match(summary?.summary ?? '', /web_search、pdf_read、citation_verify/);
+  assert.match(summary?.summary ?? '', /不是任务完成证据|not completion evidence/);
+  assert.deepEqual(summary?.debugRefs, ['records/capability-discovery/plan-audit.json']);
+  assert.doesNotMatch(JSON.stringify(summary), /127\.0\.0\.1|RAW_DISCOVERY_TEXT/);
+});
+
 test('UserActionApi records recover, approval, and cancel as semantic action results', async () => {
   const projection = {
     schemaVersion: 'sciforge.conversation-projection.v1',

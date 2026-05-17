@@ -381,12 +381,59 @@ function capabilityPlanSummary(session: SciForgeSession, runId?: string): Capabi
   const run = focusedRun(session, runId);
   const raw = isRecord(run?.raw) ? run.raw : undefined;
   const summary = stringField(raw?.capabilityPlanSummary) ?? stringField(raw?.capabilityDiscoverySummary);
-  if (!summary) return undefined;
+  const toolResults = capabilityDiscoveryToolResultsFromRaw(raw);
+  const generatedSummary = capabilityDiscoverySummaryFromToolResults(toolResults);
+  const displaySummary = summary ?? generatedSummary;
+  if (!displaySummary) return undefined;
   return {
     status: 'available',
-    summary,
-    debugRefs: runAuditRefs(session, run).filter((ref) => /capability|discovery/i.test(ref)),
+    summary: displaySummary,
+    debugRefs: uniqueStrings([
+      ...toolResults.flatMap((result) => toStringList(result.auditRefs).filter(isSafeCapabilityDebugRef)),
+      ...runAuditRefs(session, run).filter((ref) => /capability|discovery/i.test(ref)),
+    ]),
   };
+}
+
+function isSafeCapabilityDebugRef(ref: string) {
+  return /capability|discovery/i.test(ref)
+    && !/https?:\/\/|localhost|127\.0\.0\.1|token|secret|api[_-]?key|\/(?:Applications|Users|private|var|tmp)\//i.test(ref);
+}
+
+function capabilityDiscoveryToolResultsFromRaw(raw: Record<string, unknown> | undefined): Record<string, unknown>[] {
+  if (!raw) return [];
+  return [
+    raw.capabilityDiscoveryToolResults,
+    isRecord(raw.contextEnvelope) ? raw.contextEnvelope.capabilityDiscoveryToolResults : undefined,
+    isRecord(raw.metadata) ? raw.metadata.capabilityDiscoveryToolResults : undefined,
+    isRecord(raw.input) && isRecord(raw.input.metadata) ? raw.input.metadata.capabilityDiscoveryToolResults : undefined,
+  ].flatMap(toRecordList);
+}
+
+function capabilityDiscoverySummaryFromToolResults(results: Record<string, unknown>[]): string | undefined {
+  const plan = results
+    .map((event) => isRecord(event.result) ? event.result : undefined)
+    .find((result) => result && (Array.isArray(result.steps) || stringField(result.summary)));
+  if (plan) {
+    const planSummary = stringField(plan.summary);
+    const steps = toRecordList(plan.steps)
+      .map((step) => stringField(step.capabilityId))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 4);
+    return [
+      planSummary ?? 'SciForge 已生成能力使用计划。',
+      steps.length ? `计划能力：${steps.join('、')}。` : undefined,
+      '能力发现本身不是任务完成证据，仍需执行所选 capability 并验证结果。',
+    ].filter(Boolean).join(' ');
+  }
+  const candidates = uniqueStrings(results.flatMap((event) => {
+    const result = isRecord(event.result) ? event.result : undefined;
+    return toRecordList(result?.candidates)
+      .map((candidate) => stringField(candidate.title) ?? stringField(candidate.capabilityId))
+      .filter((value): value is string => Boolean(value));
+  })).slice(0, 5);
+  if (!candidates.length) return undefined;
+  return `SciForge 已发现可用能力候选：${candidates.join('、')}。能力发现本身不是任务完成证据，仍需执行所选 capability 并验证结果。`;
 }
 
 function acceptedAction(action: UIAction, projection: ConversationProjectionView, message?: string): UserActionResult {
@@ -462,6 +509,18 @@ function stringField(value: unknown) {
 
 function numberField(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function toRecordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function toStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length > 0) : [];
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values)];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

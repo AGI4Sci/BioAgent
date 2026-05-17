@@ -226,7 +226,7 @@ export function Workbench({
             <div className="scenario-large-icon workbench-chrome-icon" style={{ color: scenarioView.color, background: `${scenarioView.color}18` }}>
               <scenarioView.icon size={22} />
             </div>
-            <span className="workbench-chrome-title">{runtimeScenario.title}</span>
+            <span className="workbench-chrome-title">SciForge 工作台</span>
             {workbenchChromeExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
           </button>
           <div className="workbench-sense-actions" aria-label="感官插件">

@@ -877,7 +877,7 @@ export function ChatPanel({
           <div className="message scenario">
             <div className="message-body">
               <div className="message-meta">
-                <strong>{scenario.name}</strong>
+                <strong>SciForge</strong>
                 <Badge variant="info">running</Badge>
               </div>
               <MessageContent content={runningMessageContent} references={[]} onObjectFocus={onObjectFocus} />
@@ -906,7 +906,7 @@ export function ChatPanel({
           >
             <div className="message-body">
               <div className="message-meta">
-                <strong>{message.role === 'user' ? '你' : message.role === 'system' ? '系统' : scenario.name}</strong>
+                <strong>{message.role === 'user' ? '你' : message.role === 'system' ? '系统' : 'SciForge'}</strong>
                 {messageRunId ? (
                   <button type="button" className="message-run-link" onClick={() => onActiveRunChange(messageRunId)}>
                     run {messageRunId.replace(/^run-/, '').slice(0, 8)}

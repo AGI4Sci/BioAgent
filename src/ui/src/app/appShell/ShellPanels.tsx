@@ -733,11 +733,11 @@ export function TopBar({
     <header className="topbar">
       <form className="searchbox" onSubmit={handleSubmit}>
         <Search size={15} />
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索基因、通路、文献、Execution Unit..." />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索文件、报告、运行、问题..." />
       </form>
       <div className="topbar-actions">
         <Badge variant={healthProblems ? 'warning' : 'success'} glow>
-          Scenario Runtime · {healthProblems ? `${healthProblems} actions` : 'ready'}
+          SciForge · {healthProblems ? `${healthProblems} actions` : 'ready'}
         </Badge>
         <IconButton icon={(theme ?? 'dark') === 'dark' ? Sun : Moon} label={(theme ?? 'dark') === 'dark' ? '切换白天模式' : '切换黑夜模式'} onClick={onThemeToggle} />
         <IconButton icon={Settings} label="设置" onClick={onSettingsOpen} />

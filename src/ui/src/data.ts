@@ -64,7 +64,7 @@ export const scenarios: ScenarioViewConfig[] = builtInScenarioDisplayData.map((s
 
 export const navItems = [
   { id: 'dashboard' as const, label: '研究概览', icon: Activity },
-  { id: 'workbench' as const, label: '场景工作台', icon: Brain },
+  { id: 'workbench' as const, label: '聊天工作台', icon: Brain },
   { id: 'components' as const, label: '组件工作台', icon: Blocks },
   { id: 'timeline' as const, label: '研究时间线', icon: GitBranch },
   { id: 'feedback' as const, label: '反馈收件箱', icon: MessageSquare },

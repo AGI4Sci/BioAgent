@@ -4,7 +4,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PROCESS_PROGRESS_EVENT_TYPE, PROCESS_PROGRESS_PHASE, PROCESS_PROGRESS_STATUS } from '@sciforge-ui/runtime-contract';
 import { defaultSciForgeConfig } from '../config';
+import { navItems } from '../data';
 import { ChatPanel } from './ChatPanel';
+import { TopBar } from './appShell/ShellPanels';
 import { RunVerificationTag, runIdForMessage } from './chat/messageRunPresentation';
 import { RunExecutionProcess, RunKeyInfo } from './chat/RunExecutionProcess';
 import { runningMessageContentFromStream } from './chat/runStatusPresentation';
@@ -334,4 +336,66 @@ test('chat final message body ignores raw displayIntent resultPresentation', () 
 
   assert.match(html, /ORIGINAL_CHAT_BODY/);
   assert.doesNotMatch(html, /DISPLAY_INTENT_SHOULD_NOT_RENDER/);
+});
+
+test('default chat shell uses universal workspace copy instead of scenario-first labels', () => {
+  const session: SciForgeSession = {
+    schemaVersion: 2,
+    sessionId: 'session-universal-shell',
+    scenarioId: 'literature-evidence-review',
+    title: 'universal shell',
+    createdAt: '2026-05-17T00:00:00.000Z',
+    updatedAt: '2026-05-17T00:00:00.000Z',
+    messages: [],
+    runs: [],
+    uiManifest: [],
+    claims: [],
+    executionUnits: [],
+    artifacts: [],
+    notebook: [],
+    versions: [],
+  };
+  const chatHtml = renderToStaticMarkup(createElement(ChatPanel, {
+    scenarioId: 'literature-evidence-review',
+    role: 'Researcher',
+    config: defaultSciForgeConfig,
+    session,
+    input: '',
+    savedScrollTop: 0,
+    onInputChange: () => undefined,
+    onScrollTopChange: () => undefined,
+    onSessionChange: () => undefined,
+    onNewChat: () => undefined,
+    onDeleteChat: () => undefined,
+    archivedSessions: [],
+    onRestoreArchivedSession: () => undefined,
+    onDeleteArchivedSessions: () => undefined,
+    onClearArchivedSessions: () => undefined,
+    onEditMessage: () => undefined,
+    onDeleteMessage: () => undefined,
+    archivedCount: 0,
+    onAutoRunConsumed: () => undefined,
+    onConfigChange: () => undefined,
+    onTimelineEvent: () => undefined,
+    onActiveRunChange: () => undefined,
+    onMarkReusableRun: () => undefined,
+    onObjectFocus: () => undefined,
+    runtimeHealth: [],
+  }));
+  const topbarHtml = renderToStaticMarkup(createElement(TopBar, {
+    onSearch: () => undefined,
+    onSettingsOpen: () => undefined,
+    theme: 'dark',
+    onThemeToggle: () => undefined,
+    healthItems: [],
+  }));
+
+  assert.match(chatHtml, /Ask SciForge/);
+  assert.match(chatHtml, /当前上下文/);
+  assert.doesNotMatch(chatHtml, /文献证据评估场景/);
+  assert.doesNotMatch(chatHtml, /Scenario Runtime/);
+  assert.match(topbarHtml, /SciForge · ready/);
+  assert.match(topbarHtml, /搜索文件、报告、运行、问题/);
+  assert.doesNotMatch(topbarHtml, /Execution Unit/);
+  assert.equal(navItems.find((item) => item.id === 'workbench')?.label, '聊天工作台');
 });

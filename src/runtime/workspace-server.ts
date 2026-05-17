@@ -26,12 +26,22 @@ const PORT = Number(process.env.SCIFORGE_WORKSPACE_PORT || 5174);
 const INSTANCE_ID = process.env.SCIFORGE_INSTANCE_ID || process.env.SCIFORGE_INSTANCE || 'default';
 const INSTANCE_ROLE = process.env.SCIFORGE_INSTANCE_ROLE || INSTANCE_ID;
 const UI_PORT = Number(process.env.SCIFORGE_UI_PORT || 5173);
-const STATE_DIR = resolve(process.env.SCIFORGE_STATE_DIR || join(process.cwd(), '.sciforge'));
+const DEFAULT_PARALLEL_INSTANCE_ID = normalizeParallelInstanceId(INSTANCE_ID);
+const DEFAULT_PARALLEL_STATE_DIR = join(process.cwd(), '.sciforge', 'parallel', DEFAULT_PARALLEL_INSTANCE_ID);
+const DEFAULT_PARALLEL_WORKSPACE_PATH = join(process.cwd(), 'workspace', 'parallel', DEFAULT_PARALLEL_INSTANCE_ID);
+const STATE_DIR = resolve(process.env.SCIFORGE_STATE_DIR || DEFAULT_PARALLEL_STATE_DIR);
 const LOG_DIR = resolve(process.env.SCIFORGE_LOG_DIR || join(STATE_DIR, 'logs'));
-const CONFIG_LOCAL_PATH = resolve(process.env.SCIFORGE_CONFIG_PATH || join(process.cwd(), 'config.local.json'));
-const DEFAULT_WORKSPACE_PATH = normalizeWorkspaceRootPath(resolve(process.env.SCIFORGE_WORKSPACE_PATH || join(process.cwd(), 'workspace')));
+const CONFIG_LOCAL_PATH = resolve(process.env.SCIFORGE_CONFIG_PATH || join(DEFAULT_PARALLEL_STATE_DIR, 'config.local.json'));
+const DEFAULT_WORKSPACE_PATH = normalizeWorkspaceRootPath(resolve(process.env.SCIFORGE_WORKSPACE_PATH || DEFAULT_PARALLEL_WORKSPACE_PATH));
 const STARTED_AT = new Date().toISOString();
 const LIFECYCLE_TOKEN = process.env.SCIFORGE_SERVICE_LIFECYCLE_TOKEN || '';
+
+function normalizeParallelInstanceId(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (/^p[1-6]$/.test(normalized)) return normalized;
+  if (normalized === 'repair' || normalized === 'b' || normalized === 'sciforge-b') return 'p2';
+  return 'p1';
+}
 
 createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -717,7 +727,7 @@ async function readLocalSciForgeConfig() {
     schemaVersion: 1,
     agentServerBaseUrl,
     workspaceWriterBaseUrl,
-    workspacePath: normalizeWorkspaceRootPath(workspacePath),
+    workspacePath: normalizeWorkspaceRootPath(resolve(workspacePath)),
     peerInstances: normalizePeerInstances(sciforge.peerInstances),
     modelProvider: typeof llm.provider === 'string' ? llm.provider : 'native',
     modelBaseUrl: typeof llm.baseUrl === 'string' ? llm.baseUrl.replace(/\/+$/, '') : '',
@@ -727,6 +737,7 @@ async function readLocalSciForgeConfig() {
     feedbackGithubRepo: typeof sciforge.feedbackGithubRepo === 'string' ? sciforge.feedbackGithubRepo : undefined,
     feedbackGithubToken: typeof sciforge.feedbackGithubToken === 'string' ? sciforge.feedbackGithubToken : undefined,
     visionAllowSharedSystemInput: typeof visionSense.allowSharedSystemInput === 'boolean' ? visionSense.allowSharedSystemInput : true,
+    toolProviderRoutes: normalizeToolProviderRoutes(sciforge.toolProviderRoutes),
     updatedAt: typeof sciforge.updatedAt === 'string' ? sciforge.updatedAt : new Date().toISOString(),
     source: 'config.local.json',
   };
@@ -750,11 +761,14 @@ async function writeLocalSciForgeConfig(config: Record<string, unknown>) {
       ...sciforge,
       agentServerBaseUrl: typeof config.agentServerBaseUrl === 'string' ? config.agentServerBaseUrl : sciforge.agentServerBaseUrl,
       workspaceWriterBaseUrl: typeof config.workspaceWriterBaseUrl === 'string' ? config.workspaceWriterBaseUrl : sciforge.workspaceWriterBaseUrl,
-      workspacePath: normalizeWorkspaceRootPath(typeof config.workspacePath === 'string' ? config.workspacePath : typeof sciforge.workspacePath === 'string' ? sciforge.workspacePath : ''),
+      workspacePath: normalizeWorkspaceRootPath(resolve(typeof config.workspacePath === 'string' ? config.workspacePath : typeof sciforge.workspacePath === 'string' ? sciforge.workspacePath : '')),
       peerInstances: Array.isArray(config.peerInstances) ? normalizePeerInstances(config.peerInstances) : normalizePeerInstances(sciforge.peerInstances),
       requestTimeoutMs: typeof config.requestTimeoutMs === 'number' ? config.requestTimeoutMs : sciforge.requestTimeoutMs,
       feedbackGithubRepo: typeof config.feedbackGithubRepo === 'string' ? config.feedbackGithubRepo : sciforge.feedbackGithubRepo,
       feedbackGithubToken: preserveConfiguredSecretString(config.feedbackGithubToken, sciforge.feedbackGithubToken),
+      toolProviderRoutes: isRecord(config.toolProviderRoutes)
+        ? normalizeToolProviderRoutes(config.toolProviderRoutes)
+        : normalizeToolProviderRoutes(sciforge.toolProviderRoutes),
       updatedAt: new Date().toISOString(),
     },
     visionSense: {
@@ -813,6 +827,43 @@ function normalizePeerInstances(value: unknown) {
       trustLevel: item.trustLevel === 'readonly' || item.trustLevel === 'repair' || item.trustLevel === 'sync' ? item.trustLevel : 'readonly',
       enabled: typeof item.enabled === 'boolean' ? item.enabled : true,
     }));
+}
+
+function normalizeToolProviderRoutes(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [rawKey, rawRoute] of Object.entries(value)) {
+    const routeKey = rawKey.trim();
+    if (!routeKey || !isRecord(rawRoute)) continue;
+    const route: Record<string, unknown> = {};
+    if (typeof rawRoute.enabled === 'boolean') route.enabled = rawRoute.enabled;
+    if (typeof rawRoute.capabilityId === 'string' && rawRoute.capabilityId.trim()) route.capabilityId = rawRoute.capabilityId.trim();
+    const source = typeof rawRoute.source === 'string' ? rawRoute.source.trim() : '';
+    if (['local', 'agentserver', 'mcp', 'http', 'ssh', 'client-worker', 'backend-native', 'package', 'workspace', 'external'].includes(source)) route.source = source;
+    if (typeof rawRoute.primaryProviderId === 'string' && rawRoute.primaryProviderId.trim()) route.primaryProviderId = rawRoute.primaryProviderId.trim();
+    const fallbackProviderIds = stringArray(rawRoute.fallbackProviderIds);
+    if (fallbackProviderIds.length) route.fallbackProviderIds = fallbackProviderIds;
+    const permissions = stringArray(rawRoute.permissions);
+    if (permissions.length) route.permissions = permissions;
+    const requiredConfig = stringArray(rawRoute.requiredConfig);
+    if (requiredConfig.length) route.requiredConfig = requiredConfig;
+    const health = typeof rawRoute.health === 'string' ? rawRoute.health.trim() : '';
+    if (['ready', 'unknown', 'unavailable', 'unauthorized', 'rate-limited'].includes(health)) route.health = health;
+    for (const keyName of ['endpoint', 'baseUrl', 'url', 'invokeUrl', 'invokePath'] as const) {
+      const routeValue = rawRoute[keyName];
+      if (typeof routeValue === 'string' && routeValue.trim()) route[keyName] = routeValue.trim().replace(/\/+$/, '');
+    }
+    if (typeof rawRoute.timeoutMs === 'number' && Number.isFinite(rawRoute.timeoutMs)) route.timeoutMs = Math.max(1_000, Math.trunc(rawRoute.timeoutMs));
+    if (Object.keys(route).length) out[routeKey] = route;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .map((entry) => entry.trim())));
 }
 
 function cleanUrlString(value: unknown) {

@@ -512,6 +512,7 @@ export interface SciForgeConfig {
   requestTimeoutMs: number;
   maxContextWindowTokens: number;
   visionAllowSharedSystemInput: boolean;
+  toolProviderRoutes?: Record<string, ToolProviderRouteOverride>;
   updatedAt: string;
 }
 
@@ -611,6 +612,12 @@ export interface ToolProviderRouteOverride {
   permissions?: string[];
   requiredConfig?: string[];
   health?: 'ready' | 'unknown' | 'unavailable' | 'unauthorized' | 'rate-limited';
+  endpoint?: string;
+  baseUrl?: string;
+  url?: string;
+  invokeUrl?: string;
+  invokePath?: string;
+  timeoutMs?: number;
 }
 
 export interface NormalizedAgentResponse {

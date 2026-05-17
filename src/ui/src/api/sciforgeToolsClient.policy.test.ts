@@ -88,6 +88,51 @@ test('conversation policy stream event makes quick status visible before workspa
   assert.ok(events.find((event) => event.type === 'conversation-policy'));
 });
 
+test('configured tool provider routes are sent in runtime uiState', async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+    return streamResponse([
+      {
+        result: {
+          message: 'Workspace result ready.',
+          executionUnits: [{ id: 'unit-1', status: 'done' }],
+          artifacts: [],
+        },
+      },
+    ]);
+  }) as typeof fetch;
+
+  const base = messageInput();
+  await sendSciForgeToolMessage(messageInput(undefined, {
+    config: {
+      ...base.config,
+      toolProviderRoutes: {
+        playwright_edge_browser: {
+          enabled: true,
+          capabilityId: 'playwright_edge_browser',
+          source: 'mcp',
+          primaryProviderId: 'sciforge.observe.playwright-edge-mcp',
+          health: 'ready',
+          endpoint: 'http://127.0.0.1:8931/mcp',
+        },
+      },
+    },
+  }), {});
+
+  const uiState = bodies[0]?.uiState as { toolProviderRoutes?: Record<string, unknown> } | undefined;
+  assert.deepEqual(uiState?.toolProviderRoutes, {
+    playwright_edge_browser: {
+      enabled: true,
+      capabilityId: 'playwright_edge_browser',
+      source: 'mcp',
+      primaryProviderId: 'sciforge.observe.playwright-edge-mcp',
+      health: 'ready',
+      endpoint: 'http://127.0.0.1:8931/mcp',
+    },
+  });
+});
+
 test('project tool runtime events are projected from contract helpers', async () => {
   globalThis.fetch = (async () => streamResponse([
     {

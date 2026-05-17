@@ -218,6 +218,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "3dmol": "^2.5.4",
     "d3": "^7.9.0",
     "html2canvas": "^1.4.1",

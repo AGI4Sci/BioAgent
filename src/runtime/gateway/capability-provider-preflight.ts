@@ -238,6 +238,7 @@ function inferRequiredCapabilityIds(request: GatewayRequest): string[] {
     ids.add('browser_search');
     ids.add('browser_fetch');
   }
+  if (interactiveBrowserAutomationIntent(request)) ids.add('playwright_edge_browser');
   return [...ids].sort();
 }
 
@@ -245,6 +246,12 @@ function browserProviderIntent(request: GatewayRequest): boolean {
   const prompt = stringField(request.prompt) ?? '';
   const selected = [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)].join(' ');
   return /(?:browser|chromium|rendered|javascript|\bjs\b|dynamic page|single-page|spa|网页|浏览器|渲染|动态页面|打开网页|下载|pdf|full[-\s]?text|全文|阅读全文)/i.test(`${prompt} ${selected}`);
+}
+
+function interactiveBrowserAutomationIntent(request: GatewayRequest): boolean {
+  const prompt = stringField(request.prompt) ?? '';
+  const selected = [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)].join(' ');
+  return /(?:playwright[_\s-]*edge|playwright[_\s-]*mcp|microsoft\s*edge|msedge|headed|visible browser|manual takeover|login|captcha|2fa|otp|form|fill|click|scroll|upload|download|browser automation|正常网页浏览器|可见浏览器|手动接管|登录|验证码|二次验证|双因素|表单|填写|点击|滚动|上传|下载|浏览器自动化)/i.test(`${prompt} ${selected}`);
 }
 
 function requiredCapabilityIdsForSelectedTool(toolId: string) {

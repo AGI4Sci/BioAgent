@@ -137,6 +137,36 @@ describe('SciForge config persistence', () => {
     ]);
   });
 
+  it('normalizes configured tool provider routes for runtime requests', () => {
+    const config = normalizeConfig({
+      toolProviderRoutes: {
+        playwright_edge_browser: {
+          enabled: true,
+          capabilityId: 'playwright_edge_browser',
+          source: 'mcp',
+          primaryProviderId: 'sciforge.observe.playwright-edge-mcp',
+          fallbackProviderIds: ['fallback.provider', 'fallback.provider', ''],
+          health: 'ready',
+          endpoint: 'http://127.0.0.1:8931/mcp/',
+          timeoutMs: 60_000.4,
+        },
+      },
+    });
+
+    assert.deepEqual(config.toolProviderRoutes, {
+      playwright_edge_browser: {
+        enabled: true,
+        capabilityId: 'playwright_edge_browser',
+        source: 'mcp',
+        primaryProviderId: 'sciforge.observe.playwright-edge-mcp',
+        fallbackProviderIds: ['fallback.provider'],
+        health: 'ready',
+        endpoint: 'http://127.0.0.1:8931/mcp',
+        timeoutMs: 60000,
+      },
+    });
+  });
+
   it('round-trips peer instances through localStorage save/read', () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
@@ -237,7 +267,7 @@ describe('SciForge config persistence', () => {
   });
 
   it('normalizes accidental .sciforge internal paths back to the workspace root', () => {
-    const root = '/Applications/workspace/ailab/research/app/SciForge/workspace';
+    const root = '/Applications/workspace/ailab/research/app/SciForge/workspace/parallel/p1';
 
     assert.equal(normalizeWorkspaceRootPath(`${root}/.sciforge/tasks/.sciforge/logs`), root);
     assert.equal(normalizeWorkspaceRootPath(`${root}/.sciforge`), root);

@@ -141,6 +141,7 @@ import {
 } from './gateway/generated-task-response-text.js';
 import { hasRecoverableRecentAttempt } from './gateway/recoverable-attempts.js';
 import { tryRunVisionSenseRuntime } from './vision-sense-runtime.js';
+import { tryRunPlaywrightEdgeBrowserRuntime } from './playwright-edge-browser-runtime.js';
 import { tryRunLocalDataSensitivityRuntime } from './local-data-sensitivity-runtime.js';
 import { tryRunLocalReproducibleMethodRuntime } from './local-reproducible-method-runtime.js';
 import { applyConversationPolicy } from './conversation-policy/apply.js';
@@ -180,6 +181,7 @@ export const STAGE_CONVERSATION_POLICY = 'conversation-policy';
 export const STAGE_REQUEST_ENRICHMENT = 'request-enrichment';
 export const STAGE_CAPABILITY_PROVIDER_PREFLIGHT = 'capability-provider-preflight';
 export const STAGE_DIRECT_CONTEXT_FAST_PATH = 'direct-context-fast-path';
+export const STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME = 'playwright-edge-browser-runtime';
 export const STAGE_RUNTIME_EXECUTION_CONSTRAINTS = 'runtime-execution-constraints';
 export const STAGE_VISION_SENSE_RUNTIME = 'vision-sense-runtime';
 export const STAGE_LOCAL_DATA_SENSITIVITY_RUNTIME = 'local-data-sensitivity-runtime';
@@ -192,6 +194,7 @@ export type GatewayPipelineStageName =
   | typeof STAGE_REQUEST_ENRICHMENT
   | typeof STAGE_CAPABILITY_PROVIDER_PREFLIGHT
   | typeof STAGE_DIRECT_CONTEXT_FAST_PATH
+  | typeof STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME
   | typeof STAGE_RUNTIME_EXECUTION_CONSTRAINTS
   | typeof STAGE_VISION_SENSE_RUNTIME
   | typeof STAGE_LOCAL_DATA_SENSITIVITY_RUNTIME
@@ -220,6 +223,7 @@ export const GATEWAY_PIPELINE_STAGE_ORDER: GatewayPipelineStageName[] = [
   STAGE_CONVERSATION_POLICY,
   STAGE_REQUEST_ENRICHMENT,
   STAGE_CAPABILITY_PROVIDER_PREFLIGHT,
+  STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME,
   STAGE_DIRECT_CONTEXT_FAST_PATH,
   STAGE_RUNTIME_EXECUTION_CONSTRAINTS,
   STAGE_VISION_SENSE_RUNTIME,
@@ -262,6 +266,13 @@ export const GATEWAY_PIPELINE_STAGES: GatewayPipelineStage[] = [
     name: STAGE_CAPABILITY_PROVIDER_PREFLIGHT,
     async execute(context) {
       const payload = capabilityProviderUnavailablePayload(context.request);
+      return payload ? { kind: 'short-circuit', payload } : { kind: 'continue' };
+    },
+  },
+  {
+    name: STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME,
+    async execute(context) {
+      const payload = await tryRunPlaywrightEdgeBrowserRuntime(context.request, context.telemetry.callbacks);
       return payload ? { kind: 'short-circuit', payload } : { kind: 'continue' };
     },
   },

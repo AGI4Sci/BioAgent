@@ -14,6 +14,7 @@ export async function tryRunVisionSenseRuntime(
   callbacks: WorkspaceRuntimeCallbacks = {},
 ): Promise<ToolPayload | undefined> {
   if (!visionSenseSelected(request)) return undefined;
+  if (looksLikePlaywrightEdgeMcpBrowserRequest(request.prompt)) return undefined;
   if (!looksLikeComputerUseRequest(request.prompt)) return undefined;
 
   const workspace = resolve(request.workspacePath || process.cwd());
@@ -47,4 +48,11 @@ export async function tryRunVisionSenseRuntime(
   }
 
   return runGenericVisionComputerUseLoop(request, workspace, config, callbacks);
+}
+
+function looksLikePlaywrightEdgeMcpBrowserRequest(prompt: string) {
+  const text = prompt.toLowerCase();
+  return /\bplaywright_edge_browser\b/.test(text)
+    || /sciforge\.observe\.playwright-edge-mcp/.test(text)
+    || (/\bplaywright\s+mcp\b/.test(text) && /\b(edge|msedge|microsoft\s+edge)\b/.test(text));
 }

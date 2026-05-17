@@ -596,6 +596,23 @@ function providerInvocationForGeneratedTask(providerRoutes: ReturnType<typeof ca
         status: route.status,
       };
       const endpoint = provider ? providerEndpoint(provider) : undefined;
+      if (route.capabilityId === 'playwright_edge_browser' || provider?.transport === 'mcp') {
+        const cli = localPlaywrightEdgeMcpCliAdapter();
+        if (cli) {
+          return {
+            ...base,
+            kind: 'node-cli',
+            command: cli.command,
+            argsPrefix: [
+              ...cli.argsPrefix,
+              'invoke',
+              ...(endpoint ? ['--mcp-url', endpoint] : []),
+            ],
+            inputArg: 'json-last',
+            timeoutMs: provider?.timeoutMs ?? 60000,
+          };
+        }
+      }
       if (endpoint) {
         return {
           ...base,
@@ -642,6 +659,20 @@ function localWebWorkerCliAdapter() {
     const require = createRequire(import.meta.url);
     const tsxLoader = require.resolve('tsx');
     const cliPath = fileURLToPath(new URL('../../../packages/workers/web-worker/src/cli.ts', import.meta.url));
+    return {
+      command: process.execPath,
+      argsPrefix: ['--import', tsxLoader, resolve(cliPath)],
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function localPlaywrightEdgeMcpCliAdapter() {
+  try {
+    const require = createRequire(import.meta.url);
+    const tsxLoader = require.resolve('tsx');
+    const cliPath = fileURLToPath(new URL('../../../packages/observe/web/mcp/playwright-edge-provider-cli.ts', import.meta.url));
     return {
       command: process.execPath,
       argsPrefix: ['--import', tsxLoader, resolve(cliPath)],

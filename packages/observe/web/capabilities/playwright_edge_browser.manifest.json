@@ -1,0 +1,125 @@
+{
+  "contract": "sciforge.capability-manifest.v1",
+  "id": "playwright_edge_browser",
+  "name": "Playwright Edge browser",
+  "version": "0.1.0",
+  "ownerPackage": "packages/observe/web",
+  "kind": "observe",
+  "brief": "Drive a visible Microsoft Edge browser through the official Playwright MCP server for navigation, search, clicks, scrolling, forms, downloads, and page text inspection with a dedicated persistent profile.",
+  "routingTags": ["web", "browser", "edge", "playwright", "mcp", "headed", "login", "form", "download", "accessibility-tree"],
+  "domains": ["web", "knowledge", "literature"],
+  "requiredCapabilities": ["playwright_edge_browser"],
+  "inputSchema": {
+    "type": "object",
+    "required": ["task"],
+    "properties": {
+      "task": { "type": "string" },
+      "startUrl": { "type": "string" },
+      "mode": { "type": "string", "enum": ["read", "search", "interactive", "download", "form"] },
+      "mcpServer": { "type": "string" },
+      "profileDir": { "type": "string" },
+      "requiresHumanTakeover": { "type": "boolean" }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["status", "url", "title", "observations"],
+    "properties": {
+      "status": { "type": "string", "enum": ["succeeded", "partial", "failed", "needs-human"] },
+      "url": { "type": "string" },
+      "title": { "type": "string" },
+      "observations": { "type": "array" },
+      "downloadRefs": { "type": "array" },
+      "providerDiagnostics": { "type": "object" }
+    }
+  },
+  "sideEffects": ["network", "desktop", "external-api"],
+  "costClass": "medium",
+  "latencyClass": "high",
+  "sideEffectClass": "desktop",
+  "safety": {
+    "risk": "high",
+    "dataScopes": ["public-web", "external-accounts", "downloads", "persistent-browser-profile"],
+    "requiresHumanApproval": true
+  },
+  "examples": [
+    {
+      "title": "search and open a result in Edge",
+      "inputRef": "capability:playwright_edge_browser/input.search.example",
+      "outputRef": "capability:playwright_edge_browser/output.search.example"
+    }
+  ],
+  "validators": [
+    {
+      "id": "playwright_edge_browser.edge-ua",
+      "kind": "smoke",
+      "command": "npx @playwright/mcp@latest --browser=msedge --user-data-dir=$HOME/.pw-mcp-edge-profile --viewport-size=1440x900 --help"
+    }
+  ],
+  "repairHints": [
+    {
+      "failureCode": "mcp-server-unavailable",
+      "summary": "Start or reconnect the configured playwright-edge MCP server before claiming browser-observed evidence.",
+      "recoverActions": ["start-playwright-edge-mcp", "check-mcp-client-config", "retry-browser-task"]
+    },
+    {
+      "failureCode": "edge-unavailable",
+      "summary": "Install Microsoft Edge or run npx playwright install msedge; do not silently fall back to the user's primary browser profile.",
+      "recoverActions": ["install-msedge", "verify-edge-channel", "retry-with-dedicated-profile"]
+    },
+    {
+      "failureCode": "profile-locked",
+      "summary": "Use a distinct --user-data-dir per parallel MCP server process.",
+      "recoverActions": ["allocate-instance-profile-dir", "restart-mcp-server", "record-profile-dir"]
+    }
+  ],
+  "providers": [
+    {
+      "id": "sciforge.observe.playwright-edge-mcp",
+      "label": "SciForge Playwright Edge MCP",
+      "kind": "external",
+      "contractRef": "packages/observe/web/capabilities/playwright_edge_browser.manifest.json",
+      "requiredConfig": ["mcpServers.playwright-edge"],
+      "priority": 1,
+      "capabilityId": "playwright_edge_browser",
+      "source": "mcp",
+      "transport": "mcp",
+      "mcpServer": "playwright-edge",
+      "runtimeLocation": "packages/observe/web/mcp/playwright-edge.ts",
+      "permissions": ["network", "filesystem", "desktop", "external-account"],
+      "auth": { "required": false },
+      "fallbackEligible": true,
+      "status": "unknown"
+    }
+  ],
+  "lifecycle": {
+    "status": "draft",
+    "sourceRef": "packages/observe/web/capabilities/playwright_edge_browser.manifest.json"
+  },
+  "metadata": {
+    "mcp": {
+      "serverName": "playwright-edge",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--browser=msedge",
+        "--user-data-dir=$HOME/.pw-mcp-edge-profile",
+        "--viewport-size=1440x900"
+      ],
+      "headedByDefault": true,
+      "profilePolicy": "dedicated-persistent-profile",
+      "parallelPolicy": "use a separate user-data-dir for each independent MCP server process"
+    },
+    "toolNames": [
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_click",
+      "browser_type",
+      "browser_fill_form",
+      "browser_press_key",
+      "browser_file_upload",
+      "browser_take_screenshot",
+      "browser_close"
+    ]
+  }
+}

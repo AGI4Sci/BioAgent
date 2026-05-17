@@ -223,6 +223,7 @@ function isSciForgeConfig(value: unknown): value is SciForgeConfig {
     && typeof record.requestTimeoutMs === 'number'
     && (record.maxContextWindowTokens === undefined || typeof record.maxContextWindowTokens === 'number')
     && (record.visionAllowSharedSystemInput === undefined || typeof record.visionAllowSharedSystemInput === 'boolean')
+    && (record.toolProviderRoutes === undefined || (typeof record.toolProviderRoutes === 'object' && record.toolProviderRoutes !== null && !Array.isArray(record.toolProviderRoutes)))
     && typeof record.updatedAt === 'string';
 }
 

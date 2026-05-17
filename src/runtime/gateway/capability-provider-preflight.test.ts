@@ -52,6 +52,35 @@ test('capability provider preflight infers browser routes for rendered page work
   assert.equal(preflight.ok, true);
 });
 
+test('capability provider preflight can route interactive browser automation to Playwright Edge MCP', () => {
+  const preflight = capabilityProviderPreflight({
+    skillDomain: 'literature',
+    prompt: 'Open a visible Microsoft Edge browser, search, click a result, scroll, fill a login form, and download a file.',
+    artifacts: [],
+    uiState: {
+      capabilityProviderAvailability: [
+        { id: 'sciforge.web-worker.browser_search', capabilityId: 'browser_search', available: true, status: 'available' },
+        { id: 'sciforge.web-worker.browser_fetch', capabilityId: 'browser_fetch', available: true, status: 'available' },
+        {
+          id: 'sciforge.observe.playwright-edge-mcp',
+          providerId: 'sciforge.observe.playwright-edge-mcp',
+          capabilityId: 'playwright_edge_browser',
+          source: 'mcp',
+          transport: 'mcp',
+          available: true,
+          status: 'available',
+          url: 'http://localhost:8931/mcp',
+        },
+      ],
+    },
+  } as GatewayRequest);
+
+  assert.deepEqual(preflight.requiredCapabilityIds, ['browser_fetch', 'browser_search', 'playwright_edge_browser']);
+  assert.equal(preflight.ok, true);
+  assert.equal(preflight.routes.find((route) => route.capabilityId === 'playwright_edge_browser')?.primaryProviderId, 'sciforge.observe.playwright-edge-mcp');
+  assert.equal(preflight.routes.find((route) => route.capabilityId === 'playwright_edge_browser')?.providers[0]?.transport, 'mcp');
+});
+
 test('AgentServer discovery maps worker tool routes into provider availability', async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;

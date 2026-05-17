@@ -100,7 +100,7 @@ test('parseWorkspaceState preserves built-in and workspace scenario sessions', (
 test('explicit workspace path treats workspace snapshot as canonical across browsers', () => {
   const localBrowserState = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/Applications/workspace/ailab/research/app/SciForge/workspace',
+    workspacePath: '/Applications/workspace/ailab/research/app/SciForge/workspace/parallel/p1',
     sessionsByScenario: {
       'literature-evidence-review': sessionFixture('local-browser', ['local-only', 'local-extra']),
     },
@@ -109,7 +109,7 @@ test('explicit workspace path treats workspace snapshot as canonical across brow
   });
   const sharedWorkspaceState = parseWorkspaceState({
     schemaVersion: 2,
-    workspacePath: '/Applications/workspace/ailab/research/app/SciForge/workspace',
+    workspacePath: '/Applications/workspace/ailab/research/app/SciForge/workspace/parallel/p1',
     sessionsByScenario: {
       'literature-evidence-review': sessionFixture('shared-workspace', ['shared-history']),
     },

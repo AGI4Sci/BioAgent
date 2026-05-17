@@ -435,6 +435,84 @@ test('generated Python task can invoke ready provider through helper adapter', a
   }
 });
 
+test('generated Python task receives a node CLI adapter for Playwright Edge MCP routes', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-playwright-edge-adapter-'));
+  const request: GatewayRequest = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'Open a visible Microsoft Edge browser and read https://example.com.',
+    selectedToolIds: ['playwright_edge_browser'],
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-playwright-edge-adapter',
+      sessionCreatedAt: '2026-05-12T05:05:00.000Z',
+      capabilityProviderAvailability: [{
+        id: 'sciforge.observe.playwright-edge-mcp',
+        providerId: 'sciforge.observe.playwright-edge-mcp',
+        capabilityId: 'playwright_edge_browser',
+        source: 'mcp',
+        transport: 'mcp',
+        available: true,
+        status: 'available',
+        url: 'http://localhost:8931/mcp',
+      }],
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+  };
+
+  const result = await runGeneratedTaskExecutionLifecycle({
+    workspace,
+    request,
+    skill: providerTestSkill('2026-05-12T05:05:00.000Z'),
+    generation: {
+      ok: true,
+      runId: 'run-playwright-edge-adapter',
+      response: {
+        taskFiles: [{
+          path: 'tasks/playwright-edge-adapter.py',
+          language: 'python',
+          content: [
+            'import sys',
+            'from sciforge_task import load_input, write_payload',
+            '_, input_path, output_path = sys.argv',
+            'task_input = load_input(input_path)',
+            'adapter = task_input["providerInvocation"]["adapters"][0]',
+            'payload = {"message": adapter["kind"], "confidence": 0.9, "claimType": "runtime-diagnostic", "evidenceLevel": "provider", "reasoningTrace": "inspected playwright edge adapter", "claims": [], "uiManifest": [], "executionUnits": [{"id": "unit", "status": "done", "tool": "playwright_edge_browser"}], "artifacts": [{"id": "adapter", "type": "runtime-context-summary", "data": adapter}]}',
+            'write_payload(output_path, payload)',
+          ].join('\n'),
+        }],
+        entrypoint: { language: 'python', path: 'tasks/playwright-edge-adapter.py' },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: ['runtime-context-summary'],
+      },
+    },
+    deps: {
+      repairNeededPayload: (_request, _skill, reason): ToolPayload => ({
+        message: reason,
+        confidence: 0,
+        claimType: 'fact',
+        evidenceLevel: 'runtime',
+        reasoningTrace: reason,
+        claims: [],
+        uiManifest: [],
+        executionUnits: [],
+        artifacts: [],
+      }),
+    },
+  });
+
+  assert.equal(result.kind, 'run');
+  if (result.kind !== 'run') return;
+  assert.equal(result.execution.run.exitCode, 0);
+  const taskInput = JSON.parse(await readFile(join(workspace, result.execution.inputRel ?? ''), 'utf8'));
+  const adapter = taskInput.providerInvocation.adapters[0];
+  assert.equal(adapter.kind, 'node-cli');
+  assert.equal(adapter.providerId, 'sciforge.observe.playwright-edge-mcp');
+  assert.ok(adapter.argsPrefix.some((arg: string) => /playwright-edge-provider-cli\.ts$/.test(arg)));
+  assert.deepEqual(adapter.argsPrefix.slice(-3), ['invoke', '--mcp-url', 'http://localhost:8931/mcp']);
+});
+
 test('generated Python task turns empty provider output into terminal empty-result payload', async () => {
   const server = createServer(async (_request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });

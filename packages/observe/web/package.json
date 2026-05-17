@@ -17,10 +17,14 @@
     "./web_search": "./capabilities/web_search.manifest.json",
     "./web_fetch": "./capabilities/web_fetch.manifest.json",
     "./browser_search": "./capabilities/browser_search.manifest.json",
-    "./browser_fetch": "./capabilities/browser_fetch.manifest.json"
+    "./browser_fetch": "./capabilities/browser_fetch.manifest.json",
+    "./playwright_edge_browser": "./capabilities/playwright_edge_browser.manifest.json",
+    "./mcp/playwright-edge": "./mcp/playwright-edge.ts",
+    "./mcp/playwright-edge-provider": "./mcp/playwright-edge-provider.ts"
   },
   "files": [
     "capabilities",
+    "mcp",
     "manifest.ts",
     "README.md",
     "package.json"

@@ -1,4 +1,4 @@
-import type { PeerInstance, PeerInstanceRole, PeerInstanceTrustLevel, SciForgeConfig } from './domain';
+import type { PeerInstance, PeerInstanceRole, PeerInstanceTrustLevel, SciForgeConfig, ToolProviderRouteOverride, ToolProviderSource } from './domain';
 
 const buildDefaults = (import.meta as ImportMeta & {
   env?: Record<string, string | undefined>;
@@ -8,12 +8,13 @@ const CONFIG_STORAGE_KEY = scopedSciForgeStorageKey('sciforge.config.v1');
 const LEGACY_DEFAULT_AGENT_SERVER_URL = 'http://127.0.0.1:18080';
 const LEGACY_DEFAULT_WORKSPACE_WRITER_URL = 'http://127.0.0.1:5174';
 const LEGACY_DEFAULT_WORKSPACE_PATH = '/Applications/workspace/ailab/research/app/SciForge/workspace';
+const DEFAULT_WORKSPACE_PATH = '/Applications/workspace/ailab/research/app/SciForge/workspace/parallel/p1';
 
 export const defaultSciForgeConfig: SciForgeConfig = {
   schemaVersion: 1,
   agentServerBaseUrl: buildDefaults.VITE_SCIFORGE_DEFAULT_AGENT_SERVER_URL || 'http://127.0.0.1:18080',
   workspaceWriterBaseUrl: buildDefaults.VITE_SCIFORGE_DEFAULT_WORKSPACE_WRITER_URL || 'http://127.0.0.1:5174',
-  workspacePath: buildDefaults.VITE_SCIFORGE_DEFAULT_WORKSPACE_PATH || '/Applications/workspace/ailab/research/app/SciForge/workspace',
+  workspacePath: buildDefaults.VITE_SCIFORGE_DEFAULT_WORKSPACE_PATH || DEFAULT_WORKSPACE_PATH,
   peerInstances: [],
   /** Default feedback inbox target; override in settings if you fork or use another repo. */
   feedbackGithubRepo: 'AGI4Sci/SciForge',
@@ -112,10 +113,81 @@ export function normalizeConfig(value: unknown): SciForgeConfig {
     visionAllowSharedSystemInput: typeof raw.visionAllowSharedSystemInput === 'boolean'
       ? raw.visionAllowSharedSystemInput
       : defaultSciForgeConfig.visionAllowSharedSystemInput,
+    toolProviderRoutes: normalizeToolProviderRoutes(raw.toolProviderRoutes),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
     ...(feedbackGithubRepo ? { feedbackGithubRepo } : {}),
     ...(feedbackGithubToken ? { feedbackGithubToken } : {}),
   };
+}
+
+export function normalizeToolProviderRoutes(value: unknown): Record<string, ToolProviderRouteOverride> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, ToolProviderRouteOverride> = {};
+  for (const [rawKey, rawRoute] of Object.entries(value)) {
+    const key = rawKey.trim();
+    if (!key || !isRecord(rawRoute)) continue;
+    const route: ToolProviderRouteOverride = {};
+    if (typeof rawRoute.enabled === 'boolean') route.enabled = rawRoute.enabled;
+    if (typeof rawRoute.capabilityId === 'string' && rawRoute.capabilityId.trim()) route.capabilityId = rawRoute.capabilityId.trim();
+    const source = normalizeToolProviderSource(rawRoute.source);
+    if (source) route.source = source;
+    if (typeof rawRoute.primaryProviderId === 'string' && rawRoute.primaryProviderId.trim()) route.primaryProviderId = rawRoute.primaryProviderId.trim();
+    if (Array.isArray(rawRoute.fallbackProviderIds)) {
+      const fallbackProviderIds = rawRoute.fallbackProviderIds
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => entry.trim());
+      if (fallbackProviderIds.length) route.fallbackProviderIds = Array.from(new Set(fallbackProviderIds));
+    }
+    const permissions = stringArray(rawRoute.permissions);
+    if (permissions?.length) route.permissions = permissions;
+    const requiredConfig = stringArray(rawRoute.requiredConfig);
+    if (requiredConfig?.length) route.requiredConfig = requiredConfig;
+    const health = normalizeToolProviderRouteHealth(rawRoute.health);
+    if (health) route.health = health;
+    for (const keyName of ['endpoint', 'baseUrl', 'url', 'invokeUrl', 'invokePath'] as const) {
+      const routeValue = rawRoute[keyName];
+      if (typeof routeValue === 'string' && routeValue.trim()) route[keyName] = routeValue.trim().replace(/\/+$/, '');
+    }
+    if (typeof rawRoute.timeoutMs === 'number' && Number.isFinite(rawRoute.timeoutMs)) {
+      route.timeoutMs = Math.max(1_000, Math.trunc(rawRoute.timeoutMs));
+    }
+    if (Object.keys(route).length) out[key] = route;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return Array.from(new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.trim())));
+}
+
+function normalizeToolProviderSource(value: unknown): ToolProviderSource | undefined {
+  return value === 'local'
+    || value === 'agentserver'
+    || value === 'mcp'
+    || value === 'http'
+    || value === 'ssh'
+    || value === 'client-worker'
+    || value === 'backend-native'
+    || value === 'package'
+    || value === 'workspace'
+    || value === 'external'
+    ? value
+    : undefined;
+}
+
+function normalizeToolProviderRouteHealth(value: unknown): ToolProviderRouteOverride['health'] | undefined {
+  return value === 'ready'
+    || value === 'unknown'
+    || value === 'unavailable'
+    || value === 'unauthorized'
+    || value === 'rate-limited'
+    ? value
+    : undefined;
 }
 
 export function normalizePeerInstances(value: unknown): PeerInstance[] {

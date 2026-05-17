@@ -214,6 +214,10 @@ export async function sendSciForgeToolMessage(
     const humanApprovalPolicy = configuredHumanApprovalPolicy(input);
     const unverifiedReason = asString(input.scenarioOverride?.unverifiedReason);
     const scenarioOverride = scenarioOverrideForTransport(input.scenarioOverride);
+    const toolProviderRoutes = mergeToolProviderRoutes(
+      input.config.toolProviderRoutes,
+      input.scenarioOverride?.toolProviderRoutes,
+    );
     const targetInstanceContext = compactTargetInstanceContext(input);
     const repairHandoffRunner = buildRepairHandoffRunnerPayload(input);
     const requestBody = buildAgentHandoffPayload({
@@ -263,7 +267,7 @@ export async function sendSciForgeToolMessage(
           note: 'SciForge dispatch is constrained by versioned current-turn policy records before any AgentServer generation is allowed.',
         },
         scenarioOverride,
-        toolProviderRoutes: input.scenarioOverride?.toolProviderRoutes,
+        toolProviderRoutes,
         scenarioPackageRef: input.scenarioPackageRef,
         skillPlanRef: input.skillPlanRef,
         uiPlanRef: input.uiPlanRef,
@@ -954,6 +958,19 @@ function scenarioOverrideForTransport(input: SendAgentMessageInput['scenarioOver
   const out = { ...input };
   delete out.verificationPolicy;
   return out;
+}
+
+function mergeToolProviderRoutes(
+  configRoutes: SendAgentMessageInput['config']['toolProviderRoutes'],
+  scenarioRoutes: SendAgentMessageInput['scenarioOverride'] extends infer T
+    ? T extends undefined ? undefined : T extends { toolProviderRoutes?: infer R } ? R : undefined
+    : undefined,
+) {
+  const merged = {
+    ...(configRoutes ?? {}),
+    ...(scenarioRoutes ?? {}),
+  };
+  return Object.keys(merged).length ? merged : undefined;
 }
 
 function compactSciForgeReference(reference: NonNullable<SendAgentMessageInput['references']>[number]) {

@@ -182,9 +182,22 @@ export function buildDirectContextFastPathItems(inputs: DirectContextFastPathInp
     });
   }
   for (const artifact of [...recordRows(inputs.artifacts), ...recordRows(inputs.uiArtifacts)].slice(-DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.artifacts)) {
+    const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+    const delivery = isRecord(artifact.delivery) ? artifact.delivery : {};
     const id = stringField(artifact.id) ?? stringField(artifact.type) ?? 'artifact';
     const type = stringField(artifact.type) ?? stringField(artifact.artifactType) ?? 'artifact';
-    const ref = stringField(artifact.dataRef) ?? stringField(artifact.path) ?? `${DIRECT_CONTEXT_FAST_PATH_POLICY.fallbackRefs.artifact}${id}`;
+    const ref = stringField(artifact.dataRef)
+      ?? stringField(artifact.path)
+      ?? stringField(artifact.ref)
+      ?? stringField(artifact.sourceRef)
+      ?? stringField(metadata.reportRef)
+      ?? stringField(metadata.markdownRef)
+      ?? stringField(metadata.dataRef)
+      ?? stringField(metadata.path)
+      ?? stringField(metadata.sourceRef)
+      ?? stringField(delivery.readableRef)
+      ?? stringField(delivery.rawRef)
+      ?? `${DIRECT_CONTEXT_FAST_PATH_POLICY.fallbackRefs.artifact}${id}`;
     items.push({
       kind: 'artifact',
       label: `${type} ${id}`,

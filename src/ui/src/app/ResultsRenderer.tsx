@@ -90,10 +90,10 @@ import {
 } from './results-renderer-registry-slot';
 import {
   createOpenDebugAuditUIAction,
-  createTriggerRecoverUIAction,
   type OpenDebugAuditUIAction,
   type TriggerRecoverUIAction,
 } from './uiActionBoundary';
+import { createLocalUserActionApi, type UserActionApi } from './projectionApi';
 
 export { renderRegisteredWorkbenchSlot };
 export type { WorkbenchSlotRenderProps };
@@ -547,7 +547,10 @@ function RunStatusSummary({
             <button
               key={action}
               type="button"
-              onClick={() => onTriggerRecoverAction?.(createTriggerRecoverAction(session, activeRun, action))}
+              onClick={() => void requestRecoverActionThroughUserActionApi({ session, activeRun, recoverAction: action })
+                .then((recoverAction) => {
+                  if (recoverAction) onTriggerRecoverAction?.(recoverAction);
+                })}
             >
               {action}
             </button>
@@ -709,7 +712,10 @@ function RunAuditOverview({
             <button
               key={action}
               type="button"
-              onClick={() => onTriggerRecoverAction?.(createTriggerRecoverAction(session, activeRun, action))}
+              onClick={() => void requestRecoverActionThroughUserActionApi({ session, activeRun, recoverAction: action })
+                .then((recoverAction) => {
+                  if (recoverAction) onTriggerRecoverAction?.(recoverAction);
+                })}
             >
               {action}
             </button>
@@ -795,15 +801,21 @@ function BackendRepairStateSummary({ state, compact = false }: { state: BackendR
   );
 }
 
-function createTriggerRecoverAction(session: SciForgeSession, activeRun: SciForgeRun | undefined, recoverAction: string): TriggerRecoverUIAction {
-  return createTriggerRecoverUIAction({
-    id: makeId('ui-action'),
-    session,
-    createdAt: nowIso(),
-    runId: activeRun?.id,
-    recoverAction,
-    auditRefs: runAuditRefs(session, activeRun),
+export async function requestRecoverActionThroughUserActionApi(input: {
+  session: SciForgeSession;
+  activeRun?: SciForgeRun;
+  recoverAction: string;
+  userActionApi?: Pick<UserActionApi, 'triggerRecover'>;
+}): Promise<TriggerRecoverUIAction | undefined> {
+  const run = input.activeRun ?? input.session.runs.at(-1);
+  if (!run) return undefined;
+  const api = input.userActionApi ?? createLocalUserActionApi();
+  const result = await api.triggerRecover({
+    session: input.session,
+    runId: run.id,
+    recoverAction: input.recoverAction,
   });
+  return result.action?.type === 'trigger-recover' ? result.action : undefined;
 }
 
 function createOpenDebugAuditAction(session: SciForgeSession, activeRun: SciForgeRun | undefined): OpenDebugAuditUIAction {

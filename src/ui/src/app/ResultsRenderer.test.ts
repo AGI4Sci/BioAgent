@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { backendRepairStates, coerceReportPayload, contractValidationFailures, renderRegisteredWorkbenchSlot, ResultsRenderer, runAuditRefs, runRecoverActions, shouldOpenRunAuditDetails } from './ResultsRenderer';
+import { backendRepairStates, coerceReportPayload, contractValidationFailures, renderRegisteredWorkbenchSlot, requestRecoverActionThroughUserActionApi, ResultsRenderer, runAuditRefs, runRecoverActions, shouldOpenRunAuditDetails } from './ResultsRenderer';
 import { ArtifactInspectorDrawer } from './results-renderer-artifact-inspector';
 import { nextPinnedObjectReferences, resolveObjectReferenceActionPlan } from './results-renderer-object-actions';
 import { RegistrySlot } from './results-renderer-registry-slot';
@@ -1107,6 +1107,21 @@ test('artifact inspector drawer renders lineage, reproducible refs, preview, and
   assert.match(html, /audit ref\(s\) retained|Inspector report/);
   assert.match(html, /Inspector report/);
   assert.match(html, /结构探索/);
+});
+
+test('requestRecoverActionThroughUserActionApi routes result recover buttons through UserActionApi', async () => {
+  const session = contractFailureSession();
+  const action = await requestRecoverActionThroughUserActionApi({
+    session,
+    activeRun: session.runs[0],
+    recoverAction: 'regenerate report artifact with markdownRef',
+  });
+
+  assert.equal(action?.type, 'trigger-recover');
+  assert.equal(action?.runId, 'run-contract-failure');
+  assert.equal(action?.recoverAction, 'regenerate report artifact with markdownRef');
+  assert.ok(action?.auditRefs.includes('execution-unit:EU-report'));
+  assert.ok(action?.auditRefs.includes('artifact:research-report'));
 });
 
 function contractFailureSession(): SciForgeSession {

@@ -187,7 +187,7 @@ test('UI action boundary is the only app-level creator surface for final write i
   assert.match(chatPanel, /createSubmitTurnUIAction/);
   assert.match(chatPanel, /createCancelRunUIAction/);
   assert.match(chatPanel, /createConcurrencyDecisionUIAction/);
-  assert.match(resultsRenderer, /createTriggerRecoverUIAction/);
+  assert.match(resultsRenderer, /requestRecoverActionThroughUserActionApi/);
   assert.match(resultsRenderer, /createOpenDebugAuditUIAction/);
 
   const illegalDirectActionCreates = [...sourceByFile.entries()]

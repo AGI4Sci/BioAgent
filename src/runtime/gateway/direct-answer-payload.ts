@@ -103,6 +103,8 @@ function directPlainAnswerMissingRequiredExecutionEvidence(
   request: GatewayRequest,
 ): PlainAgentTextClassification | undefined {
   const taskText = `${request.skillDomain ?? ''}\n${request.prompt ?? ''}`.toLowerCase();
+  const reproduciblePackageMissing = directPlainAnswerMissingRequiredReproduciblePackageEvidence(text, taskText);
+  if (reproduciblePackageMissing) return reproduciblePackageMissing;
   const asksForRuntimeWork = /\b(reproduc|code|coding|script|python|demo|run|self[-\s]?check|execute|debug|repair|fix|bug|patch|implement|refactor|test|metric|rmse|parameter|pr|pull request)\b/.test(taskText);
   if (!asksForRuntimeWork) return undefined;
   const asksForCodingDelivery = /\b(code|coding|repo|repository|source|typescript|javascript|python|debug|repair|fix|bug|patch|implement|refactor|test|pr|pull request)\b/.test(taskText);
@@ -123,6 +125,36 @@ function directPlainAnswerMissingRequiredExecutionEvidence(
       ? 'direct text claims coding or repair completion but does not cite structured patch/test refs or both modified file paths and verification commands'
       : 'direct text claims code/reproduction execution success but does not cite durable workspace execution evidence',
   };
+}
+
+function directPlainAnswerMissingRequiredReproduciblePackageEvidence(
+  text: string,
+  taskText: string,
+): PlainAgentTextClassification | undefined {
+  const asksForPackageArtifacts = /\b(rerun|script|notebook|raw\s+csv|cleaned\s+csv|qc|missingness|markdown\s+report|png\s+charts?)\b/.test(taskText);
+  const asksForReproduciblePackage = asksForPackageArtifacts
+    && /\b(generate|create|produce|package|analysis|workspace)\b/.test(taskText);
+  if (!asksForReproduciblePackage) return undefined;
+  const answer = text.toLowerCase();
+  const claimsPackageSuccess = /\b(successfully|executed|generated|produced|artifacts?\s+produced|all required artifacts|package\s+(?:executed|generated|complete))\b/.test(answer);
+  if (!claimsPackageSuccess) return undefined;
+  const asksForExactRerun = /\b(exact\s+rerun\s+command|rerun\s+command\s+that\s+works|works\s+here|script\s+or\s+notebook|python\s+script|notebook)\b/.test(taskText);
+  const citesArchivedTask = /\btaskFiles\b|codeRef|executionUnits|\.sciforge\/sessions\/[^`'"\s]+\/tasks\/[^`'"\s]+\.(?:py|ipynb)\b/i.test(text);
+  const citesConcreteScript = /(?:^|[`'"\s])(?:\.sciforge\/|workspace\/|\/)[^`'"\s]+\.(?:py|ipynb)\b/i.test(text);
+  const hasExactBundleRerun = /\bcd\s+['"]?\/[^`'\n"]*SciForge[^`'\n"]*['"]?\s+&&\s+python3?\s+['"]?\/[^`'\n"]+\.(?:py|ipynb)['"]?\s+['"]?\/[^`'\n"]+\.json['"]?\s+['"]?\/[^`'\n"]+\.json['"]?/i.test(text);
+  if (asksForExactRerun && !hasExactBundleRerun) {
+    return {
+      kind: 'process-narration',
+      reason: 'direct text claims a reproducible workspace package but does not provide an exact bundle-local rerun command with absolute script, input, and output paths',
+    };
+  }
+  if (!citesArchivedTask && !citesConcreteScript) {
+    return {
+      kind: 'process-narration',
+      reason: 'direct text claims a reproducible workspace package but does not cite an archived script/notebook or taskFiles execution unit',
+    };
+  }
+  return undefined;
 }
 
 function looksLikeUserFacingStageResult(text: string) {

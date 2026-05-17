@@ -159,6 +159,33 @@ test('generated task preflight blocks treating outputPath as artifact directory'
   assert.match(report.guidance.join('\n'), /Path\(output_path\)\.parent/);
 });
 
+test('generated task preflight blocks aliases that treat outputPath as artifact directory', () => {
+  const report = evaluateGeneratedTaskPayloadPreflight({
+    entrypoint: { path: 'tasks/clinical_analysis.py' },
+    taskFiles: [{
+      path: 'tasks/clinical_analysis.py',
+      language: 'python',
+      content: [
+        'import json, sys',
+        'from pathlib import Path',
+        '_, input_path, output_path = sys.argv',
+        'output_dir = Path(output_path)',
+        'output_dir.mkdir(parents=True, exist_ok=True)',
+        'raw_csv = output_dir / "raw_clinical_data.csv"',
+        'payload = {"message": "ok", "confidence": 1, "claimType": "analysis", "evidenceLevel": "runtime", "reasoningTrace": input_path, "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": [{"id": "raw", "type": "csv", "path": str(raw_csv)}]}',
+        'with open(output_path, "w", encoding="utf-8") as f:',
+        '    json.dump(payload, f)',
+      ].join('\n'),
+    }],
+  });
+
+  assert.equal(report.status, 'blocked');
+  const issue = report.issues.find((entry) => entry.id === 'tasks/clinical_analysis.py:outputPath-used-as-directory');
+  assert.equal(issue?.severity, 'repair-needed');
+  assert.match(issue?.evidence ?? '', /output_dir\.mkdir/);
+  assert.match(issue?.evidence ?? '', /output_dir \//);
+});
+
 test('generated task preflight allows artifacts beside outputPath parent', () => {
   const report = evaluateGeneratedTaskPayloadPreflight({
     entrypoint: { path: 'tasks/generate_report.py' },

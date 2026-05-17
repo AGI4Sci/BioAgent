@@ -769,11 +769,23 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           });
           continue;
         }
+        const directPayload = toolPayloadFromPlainAgentOutput(directText, request);
+        if (!strictTaskFilesReason && dispatchAttempt < 2 && directPayloadNeedsStrictTaskFilesRetry(directPayload)) {
+          strictTaskFilesReason = directTextStrictTaskFilesRetryReason(directPayload);
+          emitWorkspaceRuntimeEvent(params.callbacks, {
+            type: AGENTSERVER_GENERATED_TASK_RETRY_EVENT_TYPE,
+            source: 'workspace-runtime',
+            status: 'running',
+            message: 'AgentServer direct text could not satisfy the reproducible task contract; retrying with taskFiles.',
+            detail: strictTaskFilesReason,
+          });
+          continue;
+        }
         return await finalizeAgentServerGenerationSuccess({
           result: {
           ok: true,
           runId: typeof run.id === 'string' ? run.id : undefined,
-          directPayload: toolPayloadFromPlainAgentOutput(directText, request),
+          directPayload,
           },
           contextRecovery,
           workspace: params.workspace,
@@ -844,6 +856,26 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     clearTimeout(timeout);
     params.callbacks?.signal?.removeEventListener('abort', abortGeneration);
   }
+}
+
+function directPayloadNeedsStrictTaskFilesRetry(payload: ToolPayload) {
+  return payload.claimType === 'runtime-diagnostic'
+    && payload.evidenceLevel === 'agentserver-direct-text-guard'
+    && payload.executionUnits.some((unit) => isRecord(unit) && (
+      unit.status === 'needs-human'
+      || unit.status === 'repair-needed'
+      || unit.status === 'failed-with-reason'
+    ));
+}
+
+function directTextStrictTaskFilesRetryReason(payload: ToolPayload) {
+  const reason = payload.executionUnits
+    .map((unit) => isRecord(unit) && typeof unit.failureReason === 'string' ? unit.failureReason : undefined)
+    .find(Boolean);
+  return [
+    'AgentServer returned direct text that cannot satisfy this generated-work request.',
+    reason ?? 'Retry with compact executable taskFiles JSON, no markdown fences, and a workspace task that writes long artifacts beside outputPath.',
+  ].join(' ');
 }
 
 function preferUntruncatedAgentServerText(runOutputText: string | undefined, streamText: string | undefined) {

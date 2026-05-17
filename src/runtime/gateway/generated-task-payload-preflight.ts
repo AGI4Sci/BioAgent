@@ -164,7 +164,39 @@ function outputPathAsDirectoryEvidence(source: string) {
       evidence.add(match[0]!.trim());
     }
   }
+  for (const alias of outputPathDirectoryAliasNames(source)) {
+    const escaped = escapeRegExp(alias);
+    const aliasPatterns: RegExp[] = [
+      new RegExp(`\\b${escaped}\\.mkdir\\s*\\([^\\n]*`, 'gi'),
+      new RegExp(`\\bos\\.makedirs\\s*\\(\\s*${escaped}\\b[^\\n]*`, 'gi'),
+      new RegExp(`\\bos\\.path\\.join\\s*\\(\\s*${escaped}\\b[^\\n]*`, 'gi'),
+      new RegExp(`\\bpath\\.join\\s*\\(\\s*${escaped}\\b[^\\n]*`, 'gi'),
+      new RegExp(`\\b${escaped}\\s*/\\s*["'][^\\n]*`, 'gi'),
+      new RegExp(`\\b(?:mkdir|mkdirSync)\\s*\\(\\s*${escaped}\\b[^\\n]*`, 'gi'),
+    ];
+    for (const pattern of aliasPatterns) {
+      for (const match of source.matchAll(pattern)) {
+        evidence.add(match[0]!.trim());
+      }
+    }
+  }
   return [...evidence];
+}
+
+function outputPathDirectoryAliasNames(source: string) {
+  const aliases = new Set<string>();
+  const patterns: RegExp[] = [
+    /\b([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[^=\n]+)?=\s*Path\s*\(\s*output_?path\s*\)(?!\s*(?:\.|\/))/gi,
+    /\b([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[^=\n]+)?=\s*output_?path\b/gi,
+    /\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:path\.resolve\s*\(\s*)?outputPath\b/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const alias = String(match[1] || '');
+      if (alias && !/^output_?path$/i.test(alias) && alias !== 'outputPath') aliases.add(alias);
+    }
+  }
+  return [...aliases];
 }
 
 function generatedTaskPayloadPreflightIssuesForSource(source: string, sourceRef: string): GeneratedTaskPayloadPreflightIssue[] {

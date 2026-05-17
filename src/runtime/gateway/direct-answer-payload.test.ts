@@ -359,6 +359,34 @@ test('plain AgentServer text wraps markdown stage results even when they mention
   assert.deepEqual(schemaErrors(payload), []);
 });
 
+test('plain AgentServer text cannot satisfy reproducible package requests with placeholder rerun commands', () => {
+  const payload = toolPayloadFromPlainAgentOutput(
+    [
+      'The clinical analysis package executed successfully. All required artifacts were generated:',
+      '- `artifacts/raw_clinical_data.csv`',
+      '- `artifacts/cleaned_clinical_data.csv`',
+      '- `artifacts/qc_missingness.csv`',
+      '- `artifacts/clinical_report.md`',
+      '',
+      '**Rerun command:**',
+      '```bash',
+      'python clinical_analysis_package.py clinical_analysis_input.json output.json',
+      '```',
+    ].join('\n'),
+    {
+      skillDomain: 'literature',
+      prompt: 'Create a reproducible clinical analysis package with raw CSV, cleaned CSV, QC table, report, script or notebook, charts, and an exact rerun command that works here.',
+      artifacts: [],
+    },
+  );
+
+  assert.equal(payload.claimType, 'runtime-diagnostic');
+  assert.equal(payload.displayIntent?.status, 'needs-human');
+  assert.equal(payload.executionUnits[0]?.status, 'needs-human');
+  assert.match(payload.reasoningTrace, /exact bundle-local rerun command/i);
+  assert.deepEqual(schemaErrors(payload), []);
+});
+
 test('plain AgentServer text guard allows prose that references taskFiles without raw metadata', () => {
   const text = 'The generated files are available in the audit refs. I mention taskFiles only to explain where the code was archived.';
   const classification = classifyPlainAgentText(text);

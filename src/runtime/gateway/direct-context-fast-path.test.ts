@@ -722,6 +722,161 @@ test('selected chart-only sufficiency follow-up stays direct-context and does no
   assert.doesNotMatch(audit.directContextGate.usedContextRefs.join('\n'), /UNSELECTED|evidence_matrix|evidence-matrix|report|csv/i);
 });
 
+test('selected QC/missingness follow-up uses table values instead of chart-only wording', () => {
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: 'Using only the selected missingness-report artifact, decide whether missingness, outliers, and protocol deviations alone are enough to prove or overturn the treatment-effect conclusion. Do not use unselected reports, CSVs, or charts.',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    expectedArtifactTypes: ['research-report', 'notebook-timeline'],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:missingness-report',
+      title: 'missingness_report.csv',
+      payload: {
+        currentReference: {
+          id: 'chat-key-missingness-report',
+          kind: 'artifact',
+          ref: 'artifact:missingness-report',
+          artifactType: 'csv',
+          title: 'missingness_report.csv',
+        },
+      },
+    }],
+    artifacts: [{
+      id: 'missingness-report',
+      type: 'csv',
+      data: {
+        text: [
+          'metric,count,percent',
+          'Total patients,165,100.0',
+          'Missing baseline severity,14,8.5',
+          'Missing outcome week 8,11,6.7',
+          'Outcome outliers,3,1.8',
+          'Protocol deviations,24,14.5',
+        ].join('\n'),
+      },
+    }, {
+      id: 'analysis-report',
+      type: 'research-report',
+      data: {
+        markdown: 'UNSELECTED report says treatment p-value=0.00001 and sensitivity is definitive.',
+      },
+    }, {
+      id: 'heatmap-chart',
+      type: 'image-png',
+      dataRef: '.sciforge/task-results/missingness_heatmap.png',
+      summary: 'UNSELECTED chart artifact.',
+    }],
+    uiState: {
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:missingness-report',
+        title: 'missingness_report.csv',
+        payload: {
+          objectReference: {
+            id: 'chat-key-missingness-report',
+            kind: 'artifact',
+            ref: 'artifact:missingness-report',
+            artifactType: 'csv',
+            title: 'missingness_report.csv',
+          },
+        },
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.equal(payload.executionUnits[0]?.tool, 'sciforge.direct-context-fast-path');
+  assert.match(payload.message, /selected QC\/missingness reference/);
+  assert.match(payload.message, /missing baseline severity: 14 \(8.5%\)/);
+  assert.match(payload.message, /missing outcome week 8: 11 \(6.7%\)/);
+  assert.match(payload.message, /outcome outliers: 3 \(1.8%\)/);
+  assert.match(payload.message, /protocol deviations: 24 \(14.5%\)/);
+  assert.doesNotMatch(payload.message, /selected chart|single chart|A single chart|p-value=0\.00001|sensitivity is definitive|UNSELECTED chart artifact/i);
+  const audit = JSON.parse(String(payload.executionUnits[0]?.params ?? '{}'));
+  assert.ok(audit.directContextGate.usedContextRefs.includes('artifact:missingness-report'));
+  assert.doesNotMatch(audit.directContextGate.usedContextRefs.join('\n'), /analysis-report|heatmap|UNSELECTED|p-value/i);
+});
+
+test('selected QC/missingness follow-up hydrates csv table values from ui artifacts', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-direct-context-qc-'));
+  const csvRel = 'task-results/missingness_report.csv';
+  await mkdir(join(workspace, 'task-results'), { recursive: true });
+  await writeFile(join(workspace, csvRel), [
+    'metric,count,percent',
+    'Total patients,165,100.0',
+    'Missing baseline severity,14,8.5',
+    'Missing outcome week 8,11,6.7',
+    'Outcome outliers,3,1.8',
+    'Protocol deviations,24,14.5',
+  ].join('\n'));
+
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    workspacePath: workspace,
+    prompt: 'Using only the selected missingness-report artifact, use the table values to decide whether missingness, outliers, and protocol deviations alone are enough to prove or overturn the treatment-effect conclusion. Do not use unselected reports, CSVs, or charts.',
+    artifacts: [],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:missingness-report',
+      title: 'missingness-report',
+      payload: {
+        currentReference: {
+          id: 'chat-key-missingness-report',
+          kind: 'artifact',
+          ref: 'artifact:missingness-report',
+          artifactType: 'csv',
+          title: 'missingness-report',
+        },
+      },
+    }],
+    uiState: {
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:missingness-report',
+        title: 'missingness-report',
+        payload: {
+          objectReference: {
+            id: 'chat-key-missingness-report',
+            kind: 'artifact',
+            ref: 'artifact:missingness-report',
+            artifactType: 'csv',
+            title: 'missingness-report',
+          },
+        },
+      }],
+      artifacts: [{
+        id: 'missingness-report',
+        type: 'csv',
+        dataRef: csvRel,
+        data: {
+          content: 'fields: content',
+        },
+      }, {
+        id: 'missingness-heatmap',
+        type: 'image-png',
+        dataRef: 'task-results/missingness_heatmap.png',
+        summary: 'UNSELECTED heatmap chart.',
+      }],
+    },
+  };
+
+  const hydrated = await requestWithDirectContextReadableArtifactData(request);
+  const payload = directContextFastPathPayload(hydrated);
+
+  assert.ok(payload);
+  assert.match(payload.message, /missing baseline severity: 14 \(8.5%\)/);
+  assert.match(payload.message, /missing outcome week 8: 11 \(6.7%\)/);
+  assert.match(payload.message, /outcome outliers: 3 \(1.8%\)/);
+  assert.match(payload.message, /protocol deviations: 24 \(14.5%\)/);
+  assert.doesNotMatch(payload.message, /selected chart|UNSELECTED heatmap|does not expose enough grouped/i);
+  const refs = payload.objectReferences?.map((reference) => reference.ref).join('\n') ?? '';
+  assert.match(refs, /missingness_report\.csv/);
+  assert.doesNotMatch(refs, /heatmap/i);
+});
+
 test('selected reproduction report credibility follow-up does not become a planning register', () => {
   const reportMarkdown = [
     '# Logistic Growth ODE Parameter Estimation Reproduction Report',
@@ -842,7 +997,7 @@ test('selected reproduction report literal fact follow-up does not reuse credibi
     '',
     '## Notes',
     '- Random seed: 42',
-    '- Optimizer: differential_evolution (polish=True) → fallback least_squares if needed',
+    '- Optimizer: differential_evolution (polish=True) → fallback least_squares if needed Headings: Logistic Growth Parameter Estimation – Reproduction Report',
     '- Bounds: r in [0.01, 2.0], K in [50, 500]',
   ].join(' ');
   const request: GatewayRequest = {
@@ -882,8 +1037,87 @@ test('selected reproduction report literal fact follow-up does not reuse credibi
   assert.match(payload.message, /Optimizer: differential_evolution/);
   const answerLines = payload.message.split(/\r?\n/).map((line) => line.trim());
   assert.ok(answerLines.includes('- Random seed: 42'));
+  assert.doesNotMatch(answerLines.find((line) => /Optimizer/i.test(line)) ?? '', /Headings/i);
   assert.doesNotMatch(answerLines.find((line) => /Optimizer/i.test(line)) ?? '', /Bounds/i);
   assert.doesNotMatch(payload.message, /Credibility verdict|Biggest remaining risk|UNSELECTED/i);
+});
+
+test('selected reproduction report evidence-boundary prompt is not mistaken for parameter bounds', () => {
+  const reportMarkdown = [
+    '# Logistic Growth ODE Parameter Estimation Reproduction Report',
+    '',
+    'Synthetic data generated from logistic ODE with additive Gaussian noise.',
+    '',
+    '## Notes',
+    '- Random seed: 42',
+    '- Optimizer: differential_evolution (polish=True) -> fallback least_squares if needed',
+    '- Bounds: r in [0.01, 2.0], K in [50, 500]',
+    '- Synthetic noise std: 5.0',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: '只基于当前选中的 reproduction-report，这份报告不能证明哪些外推或稳健性结论？列 3 条证据边界，不要给可信度总结。',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [],
+    uiState: {
+      currentReferences: [{
+        kind: 'file',
+        ref: 'file:workspace/parallel/p3/generated-literature-8ef4985b7dc3-reproduction-report.md',
+        title: 'reproduction-report',
+        payload: { selectedText: reportMarkdown },
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /证据边界审计|不能证明/);
+  assert.match(payload.message, /随机种子稳健性|噪声水平|真实数据|复杂模型|独立验证集/);
+  assert.doesNotMatch(payload.message, /- Bounds: 报告未给出|Bounds:/);
+  assert.doesNotMatch(payload.message, /可信度总结|Credibility verdict/i);
+});
+
+test('selected reproduction report generic support conclusion prompt uses evidence boundary instead of full-text status', () => {
+  const reportMarkdown = [
+    '# Logistic Growth ODE Parameter Estimation Reproduction Report',
+    '',
+    'Synthetic data generated from logistic ODE with additive Gaussian noise.',
+    '',
+    '## Verdict',
+    '**Reproduction success: YES**',
+    '',
+    '## Notes',
+    '- Random seed: 42',
+    '- Optimizer: differential_evolution (polish=True) -> fallback least_squares if needed',
+    '- Synthetic noise std: 5.0',
+  ].join('\n');
+  const filename = 'generated-literature-8ef4985b7dc3-reproduction-report.md';
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: `只基于文件 ${filename}，这份报告能否支持“真实世界复杂生物模型也已复现成功”的结论？请分成：报告内能支持的证据、不能外推的边界、最终结论。`,
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'reproduction-report',
+      type: 'research-report',
+      title: filename,
+      data: { markdown: reportMarkdown },
+      metadata: { reportRef: `.sciforge/task-results/${filename}` },
+    }],
+    uiState: {
+      currentReferenceDigests: [{
+        sourceRef: `.sciforge/task-results/${filename}`,
+        digestText: 'Markdown digest: Synthetic data; random seed 42; reproduction success yes.',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /证据边界审计|不能外推/);
+  assert.match(payload.message, /更复杂模型|真实科研复现|真实数据/);
+  assert.doesNotMatch(payload.message, /arXiv PDF|全文调研|provider\/web_search|候选元数据/);
 });
 
 test('selected reproduction report counterfactual threshold audit stays direct-context and recomputes pass/fail', () => {
@@ -988,8 +1222,102 @@ test('explicit filename reproduction report question overrides stale selected ru
   assert.match(payload.message, /RMSE: observed value=4\.3505; new threshold<=3; verdict=FAIL/);
   assert.doesNotMatch(payload.message, /Credibility verdict|UNSELECTED|Missing expected artifacts/i);
   assert.deepEqual(payload.objectReferences?.map((reference) => reference.ref), [
-    'artifact:generated-literature-8ef4985b7dc3-reproduction-report',
+    `workspace/parallel/p3/${filename}`,
   ]);
+});
+
+test('explicit filename report question expands digest hit to matching report artifact body', () => {
+  const filename = 'generated-literature-8ef4985b7dc3-reproduction-report.md';
+  const reportMarkdown = [
+    '# Logistic Growth Parameter Estimation - Reproduction Report',
+    '',
+    '## Notes',
+    '- Random seed: 42',
+    '- Optimizer: differential_evolution (polish=True) -> fallback least_squares if needed',
+    '',
+    '*Report generated by logistic_fit_demo.py*',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: `只基于文件 ${filename}，这份报告是否给出了完整 rerun command 和脚本路径？如果没有，不要补造，只列实际出现的命令、路径和缺口。`,
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'reproduction-report',
+      type: 'research-report',
+      title: 'reproduction-report',
+      data: { markdown: reportMarkdown },
+    }],
+    uiState: {
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:old-direct-context-summary',
+        title: 'old-direct-context-summary',
+      }],
+      currentReferenceDigests: [{
+        sourceRef: `.sciforge/task-results/${filename}`,
+        digestText: 'Markdown digest: Representative bullets: Random seed: 42; Optimizer: differential_evolution (polish=True) -> fallback least_squares if needed Headings: Logistic Growth Parameter Estimation; Notes',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /完整 rerun command：未给出/);
+  assert.match(payload.message, /脚本路径：logistic_fit_demo\.py（报告只给出脚本名，不是完整路径）/);
+  assert.match(payload.message, /缺少可直接复制执行的完整命令/);
+  assert.doesNotMatch(payload.message, /python logistic_fit_demo\.py|old-direct-context-summary|Headings/i);
+  assert.ok(payload.objectReferences?.some((reference) => reference.ref === 'artifact:reproduction-report'));
+});
+
+test('explicit filename report follow-up hydrates session artifact when only stale runtime artifact is present', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-direct-context-filename-'));
+  const filename = 'generated-literature-8ef4985b7dc3-reproduction-report.md';
+  const bundle = join(workspace, '.sciforge', 'sessions', '2026-05-16_literature_session-explicit-file');
+  const taskResults = join(bundle, 'task-results');
+  const artifactDir = join(bundle, 'artifacts');
+  await mkdir(taskResults, { recursive: true });
+  await mkdir(artifactDir, { recursive: true });
+  await writeFile(join(taskResults, filename), [
+    '# Logistic Growth Parameter Estimation - Reproduction Report',
+    '',
+    '## Notes',
+    '- Random seed: 42',
+    '- Optimizer: differential_evolution (polish=True) -> fallback least_squares if needed',
+    '',
+    '*Report generated by logistic_fit_demo.py*',
+  ].join('\n'));
+  await writeFile(join(artifactDir, 'reproduction-report.json'), JSON.stringify({
+    id: 'reproduction-report',
+    type: 'research-report',
+    title: 'reproduction-report',
+    metadata: { reportRef: `.sciforge/sessions/2026-05-16_literature_session-explicit-file/task-results/${filename}` },
+  }));
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: `只基于文件 ${filename}，这份报告是否给出了完整 rerun command 和脚本路径？如果没有，不要补造，只列实际出现的命令、路径和缺口。`,
+    workspacePath: workspace,
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'old-direct-context-summary',
+      type: 'runtime-context-summary',
+      data: { markdown: 'UNSELECTED old answer says the report is credible.' },
+    }],
+    uiState: {
+      sessionId: 'session-explicit-file',
+      currentReferenceDigests: [{
+        sourceRef: `.sciforge/sessions/2026-05-16_literature_session-explicit-file/task-results/${filename}`,
+        digestText: 'Markdown digest: Representative bullets: Random seed: 42; Optimizer: differential_evolution (polish=True) -> fallback least_squares if needed Headings: Logistic Growth Parameter Estimation; Notes',
+      }],
+    },
+  };
+
+  const hydrated = await requestWithDirectContextReadableArtifactData(request);
+  const payload = directContextFastPathPayload(hydrated);
+
+  assert.ok(payload);
+  assert.match(payload.message, /脚本路径：logistic_fit_demo\.py（报告只给出脚本名，不是完整路径）/);
+  assert.doesNotMatch(payload.message, /UNSELECTED|Headings/i);
 });
 
 test('selected reproduction report rerun question does not invent missing command or full path', () => {

@@ -286,7 +286,7 @@ export async function completeGeneratedTaskRunOutputLifecycle(
             budgetDebitAuditRefs: generatedDebit.sinkRefs.auditRefs,
           });
         }
-        return await materializeBackendPayloadOutput(workspace, request, completedWithDebit, refs);
+        return await materializeCompletedGeneratedTaskPayload(input, completedWithDebit, refs);
       }
     }
 
@@ -331,7 +331,7 @@ export async function completeGeneratedTaskRunOutputLifecycle(
         budgetDebitAuditRefs: generatedDebit.sinkRefs.auditRefs,
       });
     }
-    return await materializeBackendPayloadOutput(workspace, request, completedWithDebit, refs);
+    return await materializeCompletedGeneratedTaskPayload(input, completedWithDebit, refs);
   } catch (error) {
     const transientReason = transientExternalFailureReasonFromRun(run);
     if (transientReason) {
@@ -432,6 +432,195 @@ async function completeSuccessfulGeneratedTaskPayload(
       patchSummary: input.generation.response.patchSummary,
     } : unit),
   };
+}
+
+async function materializeCompletedGeneratedTaskPayload(
+  input: CompleteGeneratedTaskRunOutputLifecycleInput,
+  payload: ToolPayload,
+  refs: GeneratedTaskRuntimeRefs,
+): Promise<ToolPayload> {
+  const materialized = await materializeBackendPayloadOutput(input.workspace, input.request, payload, refs);
+  const rerunPatched = await ensureGeneratedTaskReportRerunCommand(input, materialized);
+  if (rerunPatched === materialized) return materialized;
+  return await materializeBackendPayloadOutput(input.workspace, input.request, rerunPatched, refs);
+}
+
+async function ensureGeneratedTaskReportRerunCommand(
+  input: CompleteGeneratedTaskRunOutputLifecycleInput,
+  payload: ToolPayload,
+): Promise<ToolPayload> {
+  const rerunCommand = generatedTaskRerunCommand(input);
+  if (!rerunCommand) return payload;
+  const patches = new Map<number, { ref?: string; text: string; changed: boolean }>();
+  await Promise.all(payload.artifacts.map(async (artifact, index) => {
+    if (!isRecord(artifact) || !artifactLooksLikeReport(artifact)) return;
+    let selectedText: string | undefined;
+    let selectedRef: string | undefined;
+    let changed = false;
+    for (const ref of artifactReadableRefCandidates(artifact)) {
+      const abs = artifactRefToAbsPath(ref, input.workspace);
+      if (!abs) continue;
+      try {
+        const text = await readFile(abs, 'utf8');
+        const patched = replaceOrAppendRerunCommand(text, rerunCommand);
+        selectedText = patched;
+        selectedRef = ref;
+        if (patched !== text) {
+          await writeFile(abs, patched, 'utf8');
+          changed = true;
+        }
+        break;
+      } catch {
+        // Report refs are best-effort; artifact materialization still owns delivery validation.
+      }
+    }
+    const inlineText = artifactInlineReportText(artifact);
+    if (inlineText) {
+      const patchedInline = replaceOrAppendRerunCommand(inlineText, rerunCommand);
+      if (!selectedText || patchedInline !== inlineText) selectedText = patchedInline;
+      changed = changed || patchedInline !== inlineText;
+    }
+    if (selectedText) patches.set(index, { ref: selectedRef, text: selectedText, changed });
+  }));
+  let changed = false;
+  const artifacts = payload.artifacts.map((artifact, index) => {
+    if (!isRecord(artifact) || !artifactLooksLikeReport(artifact)) return artifact;
+    const patch = patches.get(index);
+    if (!patch) return artifact;
+    const inline = patchArtifactInlineReportText(artifact, patch.text);
+    changed = changed || patch.changed || inline.changed;
+    if (!patch.changed && !inline.changed) return artifact;
+    return {
+      ...artifact,
+      ...inline.topLevel,
+      data: inline.data,
+      metadata: {
+        ...(isRecord(artifact.metadata) ? artifact.metadata : {}),
+        rerunCommand,
+        rerunCommandPatchedBy: 'sciforge.generated-task-output-lifecycle',
+      },
+    };
+  });
+  if (!changed) return payload;
+  return {
+    ...payload,
+    reasoningTrace: [
+      payload.reasoningTrace,
+      `SciForge normalized generated report rerun command: ${rerunCommand}`,
+    ].filter(Boolean).join('\n'),
+    artifacts,
+  };
+}
+
+function generatedTaskRerunCommand(input: CompleteGeneratedTaskRunOutputLifecycleInput) {
+  const workspace = input.workspace;
+  if (!input.inputRel) return undefined;
+  const taskAbs = join(workspace, input.taskRel);
+  const inputAbs = join(workspace, input.inputRel);
+  const rerunOutputRel = input.outputRel.replace(/\.json$/i, '.rerun.json');
+  const outputAbs = join(workspace, rerunOutputRel);
+  return [
+    'cd',
+    shellQuote(workspace),
+    '&&',
+    'python',
+    shellQuote(taskAbs),
+    shellQuote(inputAbs),
+    shellQuote(outputAbs),
+  ].join(' ');
+}
+
+function replaceOrAppendRerunCommand(text: string, command: string) {
+  const block = `\`\`\`bash\n${command}\n\`\`\``;
+  const headingPattern = /(^|\n)(#{1,6}\s*(?:\d+\.\s*)?Rerun Command[^\n]*\n)(?:```[\s\S]*?```|[^\n]*(?:\n|$))?/i;
+  if (headingPattern.test(text)) {
+    return text.replace(headingPattern, (_match, prefix: string, heading: string) => `${prefix}${heading}${block}\n`);
+  }
+  return `${text.trimEnd()}\n\n## Rerun Command\n${block}\n`;
+}
+
+function artifactInlineReportText(artifact: Record<string, unknown>) {
+  return reportTextFromValue(artifact.data) ?? reportTextFromValue(artifact);
+}
+
+function reportTextFromValue(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() ? value : undefined;
+  if (!isRecord(value)) return undefined;
+  for (const field of ['markdown', 'reportMarkdown', 'report', 'content', 'text']) {
+    const text = value[field];
+    if (typeof text === 'string' && text.trim()) return text;
+  }
+  return undefined;
+}
+
+function patchArtifactInlineReportText(artifact: Record<string, unknown>, text: string) {
+  const dataPatch = patchReportTextFields(artifact.data, text);
+  const topLevelPatch = patchReportTextFields(artifact, text);
+  return {
+    data: dataPatch.value,
+    topLevel: topLevelPatch.value && isRecord(topLevelPatch.value) ? topLevelPatch.value : {},
+    changed: dataPatch.changed || topLevelPatch.changed,
+  };
+}
+
+function patchReportTextFields(value: unknown, text: string): { value: unknown; changed: boolean } {
+  if (typeof value === 'string') {
+    if (!value.trim() || value === text) return { value, changed: false };
+    return { value: text, changed: true };
+  }
+  if (!isRecord(value)) return { value, changed: false };
+  let changed = false;
+  const next = { ...value };
+  for (const field of ['markdown', 'reportMarkdown', 'report', 'content', 'text']) {
+    const current = value[field];
+    if (typeof current === 'string' && current.trim() && current !== text) {
+      next[field] = text;
+      changed = true;
+    }
+  }
+  return { value: changed ? next : value, changed };
+}
+
+function artifactLooksLikeReport(artifact: Record<string, unknown>) {
+  const type = String(artifact.type ?? artifact.kind ?? artifact.id ?? '').toLowerCase();
+  const title = String(artifact.title ?? artifact.label ?? '').toLowerCase();
+  return /report|markdown|analysis/.test(`${type} ${title}`)
+    || artifactReadableRefCandidates(artifact).some((ref) => /\.m(?:d|arkdown)(?:$|[?#])/i.test(ref));
+}
+
+function artifactReadableRefCandidates(artifact: Record<string, unknown>) {
+  const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+  const delivery = isRecord(artifact.delivery) ? artifact.delivery : {};
+  return [
+    delivery.readableRef,
+    metadata.readableRef,
+    metadata.markdownRef,
+    metadata.reportRef,
+    artifact.dataRef,
+    artifact.path,
+    artifact.ref,
+    metadata.path,
+    metadata.filePath,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
+function artifactRefToAbsPath(ref: string, workspace: string) {
+  const trimmed = ref.trim();
+  if (!trimmed || /^artifact:|^runtime:|^execution-unit:/i.test(trimmed)) return undefined;
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      return new URL(trimmed).pathname;
+    } catch {
+      return trimmed.replace(/^file:\/\//i, '');
+    }
+  }
+  if (trimmed.startsWith('/')) return trimmed;
+  if (/^[a-z]+:\/\//i.test(trimmed)) return undefined;
+  return join(workspace, trimmed.replace(/^file:/i, '').replace(/^path:/i, '').replace(/^\.\//, ''));
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function runtimeRefs(input: GeneratedTaskRuntimeRefs): GeneratedTaskRuntimeRefs {

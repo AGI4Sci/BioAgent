@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { GatewayRequest, SkillAvailability, ToolPayload, WorkspaceTaskRunResult } from '../runtime-types.js';
+import { isRecord } from '../gateway-utils.js';
 import { failedTaskPayload } from './payload-validation.js';
 import { completeGeneratedTaskRunOutputLifecycle } from './generated-task-runner-output-lifecycle.js';
 import { normalizeToolPayloadShape } from './direct-answer-payload.js';
@@ -487,6 +488,12 @@ test('normalizes generated task payload shape before validation even when schema
     available: true,
     checkedAt: '2026-05-16T03:00:00.000Z',
     reason: 'test',
+    manifestPath: join(workspace, 'skill.json'),
+    manifest: {
+      id: 'literature-test',
+      entrypoint: { type: 'agentserver-generation', path: 'task.py' },
+      environment: { language: 'python' },
+    },
   } as unknown as SkillAvailability;
   const run = {
     spec: {
@@ -557,4 +564,141 @@ test('normalizes generated task payload shape before validation even when schema
   assert.equal(normalizeCalls, 1);
   assert.equal(validateSawReasoningTrace, '');
   assert.equal(typeof payload.reasoningTrace, 'string');
+});
+
+test('successful generated task reports receive an exact rerun command', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-rerun-command-'));
+  const sessionBundleRel = '.sciforge/sessions/2026-05-16_rerun-command';
+  const outputRel = `${sessionBundleRel}/task-results/generated-rerun-command.json`;
+  const reportRel = `${sessionBundleRel}/task-results/analysis_report.md`;
+  const taskRel = `${sessionBundleRel}/tasks/generated-rerun-command/task.py`;
+  const inputRel = `${sessionBundleRel}/task-inputs/generated-rerun-command.json`;
+  await mkdir(join(workspace, sessionBundleRel, 'task-results'), { recursive: true });
+  await mkdir(join(workspace, sessionBundleRel, 'tasks', 'generated-rerun-command'), { recursive: true });
+  await mkdir(join(workspace, sessionBundleRel, 'task-inputs'), { recursive: true });
+  await writeFile(join(workspace, taskRel), 'print("ok")\n');
+  await writeFile(join(workspace, inputRel), '{}\n');
+  await writeFile(join(workspace, reportRel), [
+    '# Analysis Report',
+    '',
+    '## Rerun Command',
+    '```bash',
+    'python clinical_analysis_package.py <inputPath> <outputPath>',
+    '```',
+    '',
+  ].join('\n'));
+  await writeFile(join(workspace, outputRel), `${JSON.stringify({
+    message: 'Report generated.',
+    confidence: 0.9,
+    claimType: 'analysis',
+    evidenceLevel: 'runtime',
+    reasoningTrace: 'generated report',
+    claims: [],
+    uiManifest: [{ componentId: 'report-viewer', artifactRef: 'analysis-report' }],
+    executionUnits: [{ id: 'analysis', status: 'done' }],
+    artifacts: [{
+      id: 'analysis-report',
+      type: 'research-report',
+      path: reportRel,
+      data: {
+        markdown: '## Rerun Command\n```bash\npython clinical_analysis_package.py <inputPath> <outputPath>\n```',
+        content: '## Rerun Command\n```bash\npython clinical_analysis_package.py input.json output.json\n```',
+      },
+    }],
+  }, null, 2)}\n`);
+
+  const request = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'Produce a report with an exact rerun command that works here.',
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-rerun-command',
+      sessionCreatedAt: '2026-05-16T03:00:00.000Z',
+    },
+  } as GatewayRequest;
+  const skill = {
+    id: 'literature-test',
+    kind: 'builtin',
+    available: true,
+    checkedAt: '2026-05-16T03:00:00.000Z',
+    reason: 'test',
+    manifestPath: join(workspace, 'skill.json'),
+    manifest: {
+      id: 'literature-test',
+      entrypoint: { type: 'agentserver-generation', path: 'task.py' },
+      environment: { language: 'python' },
+    },
+  } as unknown as SkillAvailability;
+  const run = {
+    spec: {
+      id: 'generated-rerun-command',
+      language: 'python',
+      entrypoint: 'main',
+      taskRel,
+    },
+    workspace,
+    command: 'python3',
+    args: [],
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+    stdoutRef: `${sessionBundleRel}/logs/generated-rerun-command.stdout.log`,
+    stderrRef: `${sessionBundleRel}/logs/generated-rerun-command.stderr.log`,
+    outputRef: outputRel,
+    runtimeFingerprint: { language: 'python', command: 'python3' },
+  } as unknown as WorkspaceTaskRunResult;
+
+  const payload = await completeGeneratedTaskRunOutputLifecycle({
+    workspace,
+    request,
+    skill,
+    skills: [skill],
+    taskId: 'generated-rerun-command',
+    generation: {
+      ok: true,
+      runId: 'run-rerun-command',
+      response: {
+        taskFiles: [],
+        entrypoint: { language: 'python', path: taskRel },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: [],
+      },
+    },
+    run,
+    taskRel,
+    inputRel,
+    outputRel,
+    stdoutRel: run.stdoutRef,
+    stderrRel: run.stderrRef,
+    supplementArtifactTypes: [],
+    runGeneratedTask: async () => undefined,
+    options: { allowSupplement: false },
+    deps: {
+      attemptPlanRefs: () => ({}),
+      failedTaskPayload,
+      tryAgentServerRepairAndRerun: async () => undefined,
+      validateAndNormalizePayload: async (value: ToolPayload) => value,
+      normalizeToolPayloadShape,
+      coerceWorkspaceTaskPayload: (value: unknown) => value as ToolPayload,
+      schemaErrors: () => [],
+      firstPayloadFailureReason: () => undefined,
+      payloadHasFailureStatus: () => false,
+      repairNeededPayload: failedTaskPayload as never,
+    } as never,
+  });
+
+  const report = await readFile(join(workspace, reportRel), 'utf8');
+  assert.doesNotMatch(report, /<inputPath>|<outputPath>/);
+  assert.match(report, new RegExp(`cd '${workspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}' && python`));
+  assert.match(report, /generated-rerun-command\.rerun\.json/);
+  assert.match(payload.reasoningTrace, /normalized generated report rerun command/);
+  const writtenPayload = JSON.parse(await readFile(join(workspace, outputRel), 'utf8')) as ToolPayload;
+  assert.match(String(writtenPayload.reasoningTrace), /normalized generated report rerun command/);
+  const reportArtifact = writtenPayload.artifacts.find((artifact) => isRecord(artifact) && artifact.id === 'analysis-report');
+  assert.ok(isRecord(reportArtifact));
+  assert.match(String(isRecord(reportArtifact.metadata) ? reportArtifact.metadata.rerunCommand : ''), /generated-rerun-command\.rerun\.json/);
+  assert.doesNotMatch(JSON.stringify(reportArtifact.data), /<inputPath>|<outputPath>|input\.json output\.json/);
+  assert.match(JSON.stringify(reportArtifact.data), /generated-rerun-command\.rerun\.json/);
 });

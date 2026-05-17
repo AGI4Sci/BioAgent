@@ -39,8 +39,10 @@ export async function materializeBackendPayloadOutput(
     }
     const existingDataRef = stringField(artifact.dataRef);
     const deliveryReadableRef = stringField(delivery.contract.readableRef);
+    const data = await artifactDataWithReadableFileContent(artifact, deliveryReadableRef, delivery.targetFormat, workspace);
     return {
       ...artifact,
+      data,
       dataRef: deliveryReadableRef ?? stableWorkspaceRef(existingDataRef) ?? outputRel,
       delivery: delivery.contract,
       metadata: {
@@ -73,6 +75,37 @@ export async function materializeBackendPayloadOutput(
 }
 
 type ReadableTargetFormat = 'markdown' | 'html' | 'csv' | 'tsv' | 'text' | 'json' | 'binary' | 'unknown';
+
+async function artifactDataWithReadableFileContent(
+  artifact: Record<string, unknown>,
+  readableRef: string | undefined,
+  targetFormat: ReadableTargetFormat,
+  workspace: string,
+) {
+  if (!readableRef || !isReadableTextTargetFormat(targetFormat)) return artifact.data;
+  const text = await readTextRef(readableRef, workspace);
+  if (!text?.trim()) return artifact.data;
+  return mergeReadableTextIntoArtifactData(artifact.data, targetFormat, text);
+}
+
+function isReadableTextTargetFormat(targetFormat: ReadableTargetFormat): targetFormat is Extract<ReadableTargetFormat, 'markdown' | 'html' | 'text'> {
+  return targetFormat === 'markdown' || targetFormat === 'html' || targetFormat === 'text';
+}
+
+function mergeReadableTextIntoArtifactData(
+  value: unknown,
+  targetFormat: Extract<ReadableTargetFormat, 'markdown' | 'html' | 'text'>,
+  text: string,
+) {
+  const primaryField = targetFormat === 'markdown' ? 'markdown' : targetFormat;
+  if (typeof value === 'string') return text;
+  if (!isRecord(value)) return { [primaryField]: text };
+  const next = { ...value, [primaryField]: text };
+  for (const field of readableFieldCandidates(targetFormat)) {
+    if (typeof value[field] === 'string') next[field] = text;
+  }
+  return next;
+}
 
 async function materializeArtifactDelivery({
   workspace,

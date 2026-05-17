@@ -41,15 +41,21 @@ export function directContextFastPathPayload(request: GatewayRequest): ToolPaylo
   const transformMode = decision.transformMode && decision.transformMode !== 'none'
     ? decision.transformMode
     : answerOnlyTransformRequestedLegacyFallback(request.prompt);
-  const selectedChartSufficiencyMessage = selectedChartSufficiencyAnswerMessage(request, payloadContext);
+  const selectedQcMissingnessMessage = selectedQcMissingnessImpactAnswerMessage(request, payloadContext);
+  const selectedChartSufficiencyMessage = selectedQcMissingnessMessage
+    ? undefined
+    : selectedChartSufficiencyAnswerMessage(request, payloadContext);
   const suppressExpectedArtifactGate = Boolean(
     transformMode
+    || selectedQcMissingnessMessage
     || selectedChartSufficiencyMessage
     || boundedArtifactFollowupRequested(request),
   );
   const missingExpectedArtifacts = suppressExpectedArtifactGate ? [] : missingExpectedArtifactTypes(request);
   if (missingExpectedArtifacts.length) return missingExpectedArtifactsPayload(request, payloadContext, missingExpectedArtifacts, gate);
-  const message = selectedChartSufficiencyMessage ?? directContextAnswerMessage(request, payloadContext, decision);
+  const message = selectedQcMissingnessMessage
+    ?? selectedChartSufficiencyMessage
+    ?? directContextAnswerMessage(request, payloadContext, decision);
   const instance = directContextInstance(request, payloadContext);
   const outputSpec = directContextOutputSpec(instance.id, transformMode);
   const reportId = outputSpec.reportId;
@@ -142,7 +148,9 @@ function promptNamedDirectContextItems(
 ) {
   const prompt = normalizeDirectContextMentionText(request.prompt);
   if (!prompt) return [];
-  return context.filter((item) => directContextItemMatchesPromptMention(item, prompt));
+  const directMatches = context.filter((item) => directContextItemMatchesPromptMention(item, prompt));
+  if (!directMatches.length) return [];
+  return expandPromptNamedDirectContextItems(directMatches, context);
 }
 
 function directContextItemMatchesPromptMention(
@@ -165,6 +173,45 @@ function directContextPromptMentionCandidates(
     .filter(isStrongDirectContextMentionCandidate));
 }
 
+function expandPromptNamedDirectContextItems(
+  directMatches: ReturnType<typeof buildDirectContextFastPathItems>,
+  context: ReturnType<typeof buildDirectContextFastPathItems>,
+) {
+  const directSet = new Set(directMatches);
+  const expansionTokens = uniqueStrings(directMatches
+    .flatMap(directContextPromptMentionExpansionCandidates));
+  if (!expansionTokens.length) return directMatches;
+  const expanded = context.filter((item) => {
+    if (directSet.has(item)) return true;
+    const itemTokens = directContextPromptMentionExpansionCandidates(item);
+    return itemTokens.some((token) => expansionTokens.includes(token));
+  });
+  return expanded.length ? expanded : directMatches;
+}
+
+function directContextPromptMentionExpansionCandidates(
+  item: ReturnType<typeof buildDirectContextFastPathItems>[number],
+) {
+  return uniqueStrings([
+    item.ref,
+    item.label,
+  ].filter((value): value is string => Boolean(value))
+    .flatMap((value) => selectedReferenceTokenVariants(value)
+      .flatMap((variant) => [variant, ...directContextMentionSuffixVariants(variant)]))
+    .map(normalizeDirectContextMentionText)
+    .filter(isExpansionDirectContextMentionCandidate));
+}
+
+function directContextMentionSuffixVariants(value: string) {
+  const basename = value.trim().split(/[\\/]/).pop()?.replace(/\.[a-z0-9]+$/i, '') ?? '';
+  const parts = basename.split(/[-_]+/).filter(Boolean);
+  if (parts.length < 2) return [];
+  return uniqueStrings([
+    parts.slice(-2).join('-'),
+    parts.slice(-3).join('-'),
+  ].filter((item) => item.length >= 8));
+}
+
 function normalizeDirectContextMentionText(value: string) {
   let text = value.trim().toLowerCase();
   try {
@@ -184,11 +231,18 @@ function isStrongDirectContextMentionCandidate(value: string) {
   return /[._/-]/.test(value);
 }
 
+function isExpansionDirectContextMentionCandidate(value: string) {
+  if (value.length < 8) return false;
+  if (/^(?:report|research-report|runtime-context-summary|selected|current|artifact|file)$/i.test(value)) return false;
+  return /[._/-]/.test(value);
+}
+
 function readableArtifactFileRef(artifact: Record<string, unknown>) {
   const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
   const delivery = isRecord(artifact.delivery) ? artifact.delivery : {};
   return stringField(artifact.dataRef)
     ?? stringField(artifact.path)
+    ?? stringField(artifact.sourceRef)
     ?? stringField(artifact.ref)
     ?? stringField(metadata.reportRef)
     ?? stringField(metadata.markdownRef)
@@ -225,29 +279,95 @@ export async function requestWithDirectContextReadableArtifactData(request: Gate
   if (!decision || !policyRequestsDirectContext(request, decision)) return request;
 
   const workspace = resolve(request.workspacePath || process.cwd());
-  const artifacts = await Promise.all(request.artifacts.map(async (artifact) => {
-    if (!isRecord(artifact)) return artifact;
-    const existingData = isRecord(artifact.data) ? artifact.data : {};
-    if (stringField(existingData.markdown) || stringField(existingData.content) || stringField(existingData.text)) return artifact;
-    const ref = readableArtifactFileRef(artifact);
-    const path = safeDirectContextReadPath(workspace, ref);
-    if (!path) return artifact;
-    const text = await readBoundedUtf8(path, DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.summaryChars * 12);
-    if (!text) return artifact;
-    const type = stringField(artifact.type) ?? stringField(artifact.artifactType) ?? '';
-    const data = /report|summary|markdown|document/i.test(type)
-      ? { ...existingData, markdown: text, content: text }
-      : { ...existingData, content: text };
-    return { ...artifact, data };
-  }));
-  return { ...request, artifacts };
+  let artifacts = await Promise.all(request.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)));
+  const hydratedUiArtifacts = Array.isArray(uiState.artifacts)
+    ? await Promise.all(uiState.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)))
+    : uiState.artifacts;
+  const promptNamedArtifact = await promptNamedReadableArtifactFromCurrentRefs(request, workspace, artifacts);
+  if (promptNamedArtifact) artifacts = mergeArtifactRecords([...artifacts, promptNamedArtifact]);
+  return {
+    ...request,
+    artifacts,
+    uiState: {
+      ...uiState,
+      artifacts: hydratedUiArtifacts,
+    },
+  };
+}
+
+async function hydrateDirectContextReadableArtifact(artifact: unknown, workspace: string) {
+  if (!isRecord(artifact)) return artifact;
+  const existingData = isRecord(artifact.data) ? artifact.data : {};
+  if (recordHasInlineReadableArtifactData(artifact)) return artifact;
+  const ref = readableArtifactFileRef(artifact);
+  const path = safeDirectContextReadPath(workspace, ref);
+  if (!path) return artifact;
+  const text = await readBoundedUtf8(path, DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.summaryChars * 12);
+  if (!text) return artifact;
+  const type = stringField(artifact.type) ?? stringField(artifact.artifactType) ?? '';
+  const data = /report|summary|markdown|document/i.test(type)
+    ? { ...existingData, markdown: text, content: text, text }
+    : { ...existingData, content: text, text };
+  return { ...artifact, data };
+}
+
+async function promptNamedReadableArtifactFromCurrentRefs(
+  request: GatewayRequest,
+  workspace: string,
+  artifacts: unknown[],
+) {
+  const promptFileTitle = promptMentionedFileTitle(request.prompt);
+  if (!promptFileTitle) return undefined;
+  if (artifacts.some((artifact) => isRecord(artifact)
+    && recordMatchesPromptMentionedFile(artifact, promptFileTitle)
+    && recordHasInlineReadableArtifactData(artifact))) return undefined;
+  const record = boundedFollowupRecords({ ...request, artifacts } as GatewayRequest)
+    .find((item) => recordMatchesPromptMentionedFile(item, promptFileTitle));
+  if (!record) return undefined;
+  const ref = readableArtifactFileRef(record);
+  const path = safeDirectContextReadPath(workspace, ref);
+  if (!path) return undefined;
+  const text = await readBoundedUtf8(path, DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.summaryChars * 12);
+  if (!text) return undefined;
+  const type = /\.(?:md|markdown)$/i.test(path) ? 'research-report' : 'runtime-context-summary';
+  return {
+    id: `prompt-file-${sha1(path).slice(0, 12)}`,
+    type,
+    ref,
+    dataRef: ref,
+    path: ref,
+    title: promptFileTitle,
+    metadata: {
+      reportRef: ref,
+      sourceRef: ref,
+    },
+    data: {
+      markdown: text,
+      content: text,
+    },
+  };
+}
+
+function recordHasInlineReadableArtifactData(record: Record<string, unknown>) {
+  const data = isRecord(record.data) ? record.data : {};
+  return Boolean(
+    stringField(data.markdown)
+    || stringField(data.report)
+    || stringField(data.text)
+    || stringField(data.summary)
+    || recordRows(data.rows).length,
+  );
 }
 
 async function requestWithSessionArtifactsForBoundedFollowup(request: GatewayRequest): Promise<GatewayRequest> {
+  const promptFileTitle = promptMentionedFileTitle(request.prompt);
+  const hasPromptNamedArtifact = promptFileTitle
+    ? request.artifacts.some((artifact) => isRecord(artifact) && recordMatchesPromptMentionedFile(artifact, promptFileTitle))
+    : false;
   if (request.artifacts.some(isBoundedAnswerArtifact) && (
     !/evidence[-\s_]?matrix|证据矩阵|matrix artifact/i.test(request.prompt)
     || request.artifacts.some((artifact) => isRecord(artifact) && /evidence[-\s_]?matrix/i.test(`${stringField(artifact.type) ?? ''} ${stringField(artifact.id) ?? ''}`))
-  )) return request;
+  ) && (!promptFileTitle || hasPromptNamedArtifact)) return request;
   if (!boundedArtifactFollowupPrompt(request.prompt)) return request;
   const workspace = request.workspacePath
     ? resolve(request.workspacePath)
@@ -258,6 +378,32 @@ async function requestWithSessionArtifactsForBoundedFollowup(request: GatewayReq
   const sessionId = sessionIdFromUiState(request.uiState);
   const artifacts = await readSessionArtifactsForDirectContext(workspace, sessionId);
   return artifacts.length ? { ...request, artifacts: mergeArtifactRecords([...request.artifacts, ...artifacts]) } : request;
+}
+
+function recordMatchesPromptMentionedFile(record: Record<string, unknown>, fileTitle: string) {
+  const metadata = isRecord(record.metadata) ? record.metadata : {};
+  const delivery = isRecord(record.delivery) ? record.delivery : {};
+  const candidates = [
+    stringField(record.id),
+    stringField(record.title),
+    stringField(record.ref),
+    stringField(record.path),
+    stringField(record.dataRef),
+    stringField(metadata.reportRef),
+    stringField(metadata.markdownRef),
+    stringField(metadata.dataRef),
+    stringField(metadata.path),
+    stringField(delivery.readableRef),
+    stringField(delivery.rawRef),
+  ].filter((value): value is string => Boolean(value));
+  const targetVariants = selectedReferenceTokenVariants(fileTitle)
+    .map(normalizeDirectContextMentionText)
+    .filter((value) => value.length >= 8);
+  return candidates.some((candidate) => {
+    const candidateVariants = selectedReferenceTokenVariants(candidate)
+      .map(normalizeDirectContextMentionText);
+    return candidateVariants.some((variant) => targetVariants.some((target) => variant.includes(target) || target.includes(variant)));
+  });
 }
 
 function sessionIdFromUiState(value: unknown) {
@@ -693,6 +839,8 @@ function directContextAnswerMessage(
   decision: DirectContextDecision,
 ) {
   const prompt = request.prompt;
+  const selectedQcMissingness = selectedQcMissingnessImpactAnswerMessage(request, context);
+  if (selectedQcMissingness) return selectedQcMissingness;
   const selectedChartSufficiency = selectedChartSufficiencyAnswerMessage(request, context);
   if (selectedChartSufficiency) return selectedChartSufficiency;
   const hypotheses = testableHypothesesFromEvidenceMatrixMessage(prompt, context);
@@ -705,10 +853,10 @@ function directContextAnswerMessage(
   if (selectedReportPassFailAudit) return selectedReportPassFailAudit;
   const selectedReportRerunInfo = selectedReportRerunInfoAnswerMessage(request, context);
   if (selectedReportRerunInfo) return selectedReportRerunInfo;
-  const selectedReportLiteralFacts = selectedReportLiteralFactAnswerMessage(request, context);
-  if (selectedReportLiteralFacts) return selectedReportLiteralFacts;
   const selectedReportBoundary = selectedReportEvidenceBoundaryAnswerMessage(request, context);
   if (selectedReportBoundary) return selectedReportBoundary;
+  const selectedReportLiteralFacts = selectedReportLiteralFactAnswerMessage(request, context);
+  if (selectedReportLiteralFacts) return selectedReportLiteralFacts;
   const selectedReportCredibilityAudit = selectedReportCredibilityAuditAnswerMessage(request, context);
   if (selectedReportCredibilityAudit) return selectedReportCredibilityAudit;
   const protocolBudgetAdaptation = protocolLibraryBudgetAdaptationMessage(prompt, context);
@@ -966,7 +1114,8 @@ function selectedReportEvidenceStatusAnswerMessage(
 ) {
   const prompt = request.prompt;
   if (!/(selected|reference|report|artifact|选中|引用|报告|产物)/i.test(prompt)) return undefined;
-  if (!/(PDF|full[-\s]?text|arXiv|evidence|verification|verify|verified|support|completion|read|全文|证据|读取|阅读|验证|支持|完成|结论)/i.test(prompt)) return undefined;
+  const asksFullTextStatus = promptAsksFullTextEvidenceStatus(prompt);
+  if (!asksFullTextStatus) return undefined;
   const promptNamedContext = promptNamedDirectContextItems(request, context);
   const selectedRefs = selectedReferenceTokens(request);
   const selectedContext = promptNamedContext.length
@@ -981,11 +1130,9 @@ function selectedReportEvidenceStatusAnswerMessage(
     .filter((value): value is string => Boolean(value)))
     .join('\n');
   if (!sourceText) return undefined;
-  const asksFullTextStatus = /(PDF|full[-\s]?text|arXiv|全文|读取|阅读|验证|支持|完成)/i.test(prompt);
   const saysMetadataOnly = /(provider[-\s]?grounded metadata|provider metadata|metadata until full[-\s]?text verification|until full[-\s]?text verification|requires full[-\s]?text verification|citation verification|unverified|needs[-\s]?verification|未验证|待验证|未完成全文|未读取全文)/i.test(sourceText);
   const hasCompletedFullTextEvidence = /(PDF|full[-\s]?text|全文)[^。.!?\n]{0,80}(read|retrieved|downloaded|verified|completed|已读取|已阅读|已获取|已验证|完成)/i.test(sourceText)
     && !/(until full[-\s]?text verification|requires full[-\s]?text verification|未验证|待验证|metadata until)/i.test(sourceText);
-  if (!asksFullTextStatus && !saysMetadataOnly) return undefined;
   const sourceLines = evidenceStatusSourceLines(sourceText);
   const selectedTitle = selectedReportTitle(request) ?? 'selected report';
   if (/[一-龥]/.test(prompt)) {
@@ -1024,7 +1171,13 @@ function selectedReportEvidenceStatusAnswerMessage(
   ].join('\n');
 }
 
+function promptAsksFullTextEvidenceStatus(prompt: string) {
+  return /(PDF|full[-\s]?text|fulltext|arXiv|全文|全文证据|PDF证据|全文调研|论文全文|原文|读取|阅读|已读|读完|downloaded?|retrieved?|citation verification|引用验证|引文验证|文献验证|证据位置|页码|段落)/i.test(prompt);
+}
+
 function selectedReportTitle(request: GatewayRequest) {
+  const promptTitle = promptMentionedFileTitle(request.prompt);
+  if (promptTitle) return promptTitle;
   const uiState = isRecord(request.uiState) ? request.uiState : {};
   return uniqueStrings([...recordRows(request.references), ...recordRows(uiState.currentReferences)]
     .map((reference) => stringField(reference.title) ?? stringField(reference.ref))
@@ -1037,6 +1190,11 @@ function directContextDisplayTitle(item: ReturnType<typeof buildDirectContextFas
   return value?.replace(/^(?:artifact|file|reference|research-report|runtime-context-summary)\s+(.+)$/i, '$1').trim();
 }
 
+function promptMentionedFileTitle(text: string) {
+  const match = text.match(/(?:^|[\s`'"“”])([A-Za-z0-9._/-]+\.(?:md|markdown|txt|json|csv|tsv|py|ipynb))(?:$|[\s`'"“”，,。；;：:])/i);
+  return match?.[1]?.split(/[\\/]/).pop();
+}
+
 function evidenceStatusSourceLines(sourceText: string) {
   const lines = sourceText
     .split(/(?<=[。.!?；;])\s+|[\n\r]+/)
@@ -1044,6 +1202,147 @@ function evidenceStatusSourceLines(sourceText: string) {
     .filter((line) => /(provider|metadata|full[-\s]?text|PDF|arXiv|citation|verification|verified|unverified|全文|读取|阅读|验证)/i.test(line))
     .filter((line) => line.length > 0 && line.length <= 260);
   return uniqueStrings(lines).slice(0, 3);
+}
+
+interface QcMissingnessMetric {
+  key: 'total' | 'missingBaseline' | 'missingOutcome' | 'outliers' | 'protocolDeviations';
+  label: string;
+  count?: number;
+  percent?: number;
+}
+
+function selectedQcMissingnessImpactAnswerMessage(
+  request: GatewayRequest,
+  context: ReturnType<typeof buildDirectContextFastPathItems>,
+) {
+  const prompt = request.prompt;
+  if (!/(selected|reference|artifact|file|table|csv|QC|missingness|选中|引用|产物|文件|表|缺失|质控)/i.test(prompt)) return undefined;
+  if (!/(missing|missingness|outlier|protocol[-_\s]?deviations?|deviations?|treatment|effect|conclusion|prove|overturn|bias|sensitivity|robust|缺失|离群|异常|违背|偏倚|敏感|稳健|治疗|效应|结论|证明|推翻|影响)/i.test(prompt)) return undefined;
+  const selectedRefs = selectedReferenceTokens(request);
+  const selectedContext = selectedRefs.length
+    ? context.filter((item) => directContextItemMatchesSelectedRef(item, selectedRefs))
+    : context.filter((item) => qcMissingnessContextText(item).match(/missing|qc|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i));
+  const qcContext = selectedContext.filter((item) => qcMissingnessContextText(item).match(/missing|qc|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i));
+  const answerContext = qcContext.length ? qcContext : selectedContext;
+  if (!answerContext.length) return undefined;
+  const sourceText = answerContext.map((item) => item.summary).join('\n');
+  const metrics = qcMissingnessMetricsFromText(sourceText);
+  const hasMetricEvidence = metrics.some((metric) => metric.count !== undefined || metric.percent !== undefined);
+  const looksLikeQcArtifact = answerContext.some((item) => /missing|qc|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i.test(qcMissingnessContextText(item)));
+  if (!hasMetricEvidence && !looksLikeQcArtifact) return undefined;
+  const refLine = directContextFastPathSupportingRefs(answerContext).slice(0, 3).join(', ') || answerContext[0]?.label || 'selected QC/missingness artifact';
+  const metricLine = qcMissingnessMetricLine(metrics);
+  const hasEnglishPrompt = !/[一-龥]/.test(prompt);
+  if (!hasEnglishPrompt) {
+    return [
+      `只基于当前选中的 QC/missingness 引用回答：${refLine}。没有启动新的 workspace task，也不使用未选中的报告、CSV、图表或历史消息。`,
+      '',
+      '结论：不能。这个表本身只能说明缺失、离群值和 protocol deviation 的规模/质控风险，不能单独证明或推翻治疗效应结论。',
+      metricLine ? `选中表中的数值：${metricLine}。` : '选中表没有给出足够的分组/模型数值。',
+      '它能支持的判断：这些质控问题需要敏感性分析、排除/保留对照、以及按 treatment/site/batch 的缺失和偏倚检查。',
+      '仍缺少的决定性证据：treatment 分组内缺失/离群/protocol deviation 率、主模型与敏感性模型的效应估计前后对比、CI 或 p 值、模型/检验假设，以及 site/batch imbalance 是否改变结论。',
+    ].join('\n');
+  }
+  return [
+    `Answered only from the selected QC/missingness reference: ${refLine}. No new workspace task was started, and unselected reports, CSVs, charts, or history were not used.`,
+    '',
+    'Conclusion: no. This table can flag data-quality risk, but by itself it cannot prove or overturn the treatment-effect conclusion.',
+    metricLine ? `Selected values: ${metricLine}.` : 'Selected values: the selected table does not expose enough grouped/model-level values.',
+    'What it can support: the missingness/outlier/protocol-deviation burden should trigger sensitivity analysis, inclusion/exclusion comparisons, and treatment/site/batch imbalance checks.',
+    'Still missing to decide the treatment effect: rates by treatment/site/batch, before/after effect estimates from the primary and sensitivity models, CI or p value, model/test assumptions, and whether the QC issues are imbalanced enough to change the conclusion.',
+  ].join('\n');
+}
+
+function qcMissingnessContextText(item: ReturnType<typeof buildDirectContextFastPathItems>[number]) {
+  return `${item.kind} ${item.label} ${item.ref ?? ''} ${item.summary}`;
+}
+
+function qcMissingnessMetricLine(metrics: QcMissingnessMetric[]) {
+  return metrics
+    .filter((metric) => metric.count !== undefined || metric.percent !== undefined)
+    .map((metric) => {
+      const count = metric.count !== undefined ? String(metric.count) : 'not stated';
+      const percent = metric.percent !== undefined ? ` (${formatMetricPercent(metric.percent)}%)` : '';
+      return `${metric.label}: ${count}${percent}`;
+    })
+    .join('; ');
+}
+
+function qcMissingnessMetricsFromText(sourceText: string): QcMissingnessMetric[] {
+  const metrics: QcMissingnessMetric[] = [
+    { key: 'total', label: 'total patients' },
+    { key: 'missingBaseline', label: 'missing baseline severity' },
+    { key: 'missingOutcome', label: 'missing outcome week 8' },
+    { key: 'outliers', label: 'outcome outliers' },
+    { key: 'protocolDeviations', label: 'protocol deviations' },
+  ];
+  for (const row of qcMissingnessRowsFromText(sourceText)) {
+    const metric = metrics.find((candidate) => qcMissingnessMetricNameMatches(row.metric, candidate.key));
+    if (!metric) continue;
+    metric.count = row.count ?? metric.count;
+    metric.percent = row.percent ?? metric.percent;
+  }
+  for (const metric of metrics) {
+    if (metric.count !== undefined || metric.percent !== undefined) continue;
+    const fallback = qcMissingnessMetricFallback(sourceText, metric.key);
+    metric.count = fallback?.count;
+    metric.percent = fallback?.percent;
+  }
+  return metrics;
+}
+
+function qcMissingnessRowsFromText(sourceText: string) {
+  return sourceText
+    .split(/\r?\n|(?=Total patients|Missing baseline|Missing outcome|Outcome outliers|Protocol deviations)/i)
+    .flatMap((line) => {
+      const cells = line
+        .trim()
+        .replace(/^\|+|\|+$/g, '')
+        .split(/\s*\|\s*|\s*,\s*|\t+/)
+        .map((cell) => cell.trim())
+        .filter(Boolean);
+      if (cells.length < 3 || /^(metric|row\s+\d+)$/i.test(cells[0] ?? '')) return [];
+      const count = numericMetricValue(cells[1]);
+      const percent = numericMetricValue(cells[2]);
+      if (count === undefined && percent === undefined) return [];
+      return [{ metric: cells[0] ?? '', count, percent }];
+    });
+}
+
+function qcMissingnessMetricFallback(sourceText: string, key: QcMissingnessMetric['key']) {
+  for (const alias of qcMissingnessMetricAliases(key)) {
+    const pattern = new RegExp(`${escapeRegExp(alias).replace(/\\s+/g, '\\s+')}[^0-9]{0,80}([0-9]+(?:\\.[0-9]+)?)\\s*(?:[,;|()\\s]+)\\s*([0-9]+(?:\\.[0-9]+)?)\\s*%?`, 'i');
+    const match = sourceText.match(pattern);
+    if (!match) continue;
+    const count = numericMetricValue(match[1]);
+    const percent = numericMetricValue(match[2]);
+    if (count !== undefined || percent !== undefined) return { count, percent };
+  }
+  return undefined;
+}
+
+function qcMissingnessMetricNameMatches(name: string, key: QcMissingnessMetric['key']) {
+  const normalized = normalizeMetricName(name);
+  return qcMissingnessMetricAliases(key).some((alias) => normalized.includes(normalizeMetricName(alias)));
+}
+
+function qcMissingnessMetricAliases(key: QcMissingnessMetric['key']) {
+  switch (key) {
+    case 'total':
+      return ['total patients', 'sample size', 'patients'];
+    case 'missingBaseline':
+      return ['missing baseline severity', 'baseline severity missing', 'missing baseline'];
+    case 'missingOutcome':
+      return ['missing outcome week 8', 'outcome week 8 missing', 'missing outcome'];
+    case 'outliers':
+      return ['outcome outliers', 'outliers', 'outcome outlier'];
+    case 'protocolDeviations':
+      return ['protocol deviations', 'protocol deviation', 'protocoldeviation'];
+  }
+}
+
+function formatMetricPercent(value: number) {
+  return Number.isInteger(value) ? String(value) : String(value);
 }
 
 function selectedChartSufficiencyAnswerMessage(
@@ -1257,16 +1556,31 @@ function selectedReportCommandLines(sourceText: string) {
 }
 
 function selectedReportGeneratedByScript(sourceText: string) {
-  return sourceText.match(/Report generated by\s+([^\s`'"]+)/i)?.[1]
+  const raw = sourceText.match(/Report generated by\s+([^\s`'"]+)/i)?.[1]
     ?? sourceText.match(/\b([A-Za-z0-9._/-]+\.py)\b/)?.[1];
+  return raw ? cleanSelectedReportPathToken(raw) : undefined;
 }
 
 function selectedReportFieldValue(sourceText: string, fieldPattern: RegExp) {
   for (const part of statementParts(sourceText)) {
     const match = part.match(fieldPattern);
-    if (match?.[1]) return match[1].trim();
+    if (match?.[1]) return cleanSelectedReportFieldValue(match[1]);
   }
-  return sourceText.match(fieldPattern)?.[1]?.trim();
+  const fallback = sourceText.match(fieldPattern)?.[1];
+  return fallback ? cleanSelectedReportFieldValue(fallback) : undefined;
+}
+
+function cleanSelectedReportFieldValue(value: string) {
+  return value
+    .replace(/\s+(?=(?:Random seed|Optimizer|Bounds|Synthetic noise std|Report generated by|Headings?|Refs?|Artifact|File|Run|Message|Fields)\s*[:：]).*$/i, '')
+    .trim();
+}
+
+function cleanSelectedReportPathToken(value: string) {
+  return cleanSelectedReportFieldValue(value)
+    .replace(/^[*`'"]+/, '')
+    .replace(/[*`'").,;。]+$/g, '')
+    .trim();
 }
 
 function selectedReportLiteralFactAnswerMessage(
@@ -1275,13 +1589,13 @@ function selectedReportLiteralFactAnswerMessage(
 ) {
   const prompt = request.prompt;
   if (!/(selected|reference|report|artifact|reproduc|选中|引用|报告|产物|复现)/i.test(prompt)) return undefined;
-  if (!/(random seed|seed|optimizer|bounds?|noise|std|脚本|路径|随机种子|优化器|边界|噪声)/i.test(prompt)) return undefined;
+  if (!/(random seed|seed|optimizer|bounds?|parameter bounds?|noise|std|脚本|路径|随机种子|优化器|参数边界|取值边界|边界条件|噪声)/i.test(prompt)) return undefined;
   const sourceText = selectedReportSourceText(request, context);
   if (!sourceText) return undefined;
   const facts = [
     /random seed|seed|随机种子/i.test(prompt) ? ['Random seed', selectedReportFieldValue(sourceText, /^(?:[-*]\s*)?Random seed\s*[:：]\s*(.+)$/i)] : undefined,
     /optimizer|优化器/i.test(prompt) ? ['Optimizer', selectedReportFieldValue(sourceText, /^(?:[-*]\s*)?Optimizer\s*[:：]\s*(.+)$/i)] : undefined,
-    /bounds?|边界/i.test(prompt) ? ['Bounds', selectedReportFieldValue(sourceText, /^(?:[-*]\s*)?Bounds\s*[:：]\s*(.+)$/i)] : undefined,
+    /bounds?|parameter bounds?|参数边界|取值边界|边界条件/i.test(prompt) ? ['Bounds', selectedReportFieldValue(sourceText, /^(?:[-*]\s*)?Bounds\s*[:：]\s*(.+)$/i)] : undefined,
     /noise|std|噪声/i.test(prompt) ? ['Synthetic noise std', selectedReportFieldValue(sourceText, /^(?:[-*]\s*)?Synthetic noise std\s*[:：]\s*(.+)$/i)] : undefined,
     /script|脚本|路径/i.test(prompt) ? ['Report generated by', selectedReportGeneratedByScript(sourceText)] : undefined,
   ].filter((item): item is [string, string | undefined] => Boolean(item));

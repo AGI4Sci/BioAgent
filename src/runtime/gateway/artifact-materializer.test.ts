@@ -235,6 +235,7 @@ test('artifact delivery prefers an existing markdown file over shorter inline su
     assert.equal(delivery.previewPolicy, 'inline');
     assert.equal((artifact.metadata as Record<string, unknown>).readableRef, protocolRel);
     assert.equal((artifact.metadata as Record<string, unknown>).markdownRef, protocolRel);
+    assert.equal((artifact.data as Record<string, unknown>).markdown, '# Full Protocol\n\n## Primary Endpoint\n\nComplete protocol body.');
     assert.equal(await readFile(join(workspace, protocolRel), 'utf8'), '# Full Protocol\n\n## Primary Endpoint\n\nComplete protocol body.');
     await assert.rejects(stat(join(workspace, derivedRel)));
   } finally {

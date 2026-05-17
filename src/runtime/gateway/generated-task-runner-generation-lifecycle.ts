@@ -482,23 +482,108 @@ async function retryGeneratedTaskPayloadPreflightContract(
   generation: AgentServerTaskFilesGeneration,
 ): Promise<ResolveGeneratedTaskGenerationLifecycleResult> {
   const preflight = await generatedTaskPayloadPreflightForGeneration(input.workspace, generation.response, input.request);
-  if (!preflight.issues.some((issue) => issue.severity === 'repair-needed' && isGeneratedTaskCapabilityFirstPolicyIssue(issue))) {
-    return { kind: 'task-files', generation };
-  }
+  const blockingIssues = preflight.issues.filter((issue) => issue.severity === 'repair-needed');
+  if (!blockingIssues.length) return { kind: 'task-files', generation };
   const reason = generatedTaskPayloadPreflightFailureReason(preflight);
-  emitGenerationRetryEvent(
-    input.callbacks,
-    `Provider-first preflight blocked direct provider bypass; using deterministic provider-first recovery adapter. ${reason}`,
-    'provider-first-payload-preflight',
-  );
-  return {
-    kind: 'task-files',
-    generation: {
-      ok: true,
-      runId: generation.runId,
-      response: providerFirstRecoveryAdapterGeneration(input.request, reason, reason),
-    },
-  };
+  if (blockingIssues.some(isGeneratedTaskCapabilityFirstPolicyIssue)) {
+    emitGenerationRetryEvent(
+      input.callbacks,
+      `Provider-first preflight blocked direct provider bypass; using deterministic provider-first recovery adapter. ${reason}`,
+      'provider-first-payload-preflight',
+    );
+    return {
+      kind: 'task-files',
+      generation: {
+        ok: true,
+        runId: generation.runId,
+        response: providerFirstRecoveryAdapterGeneration(input.request, reason, reason),
+      },
+    };
+  }
+
+  emitGenerationRetryEvent(input.callbacks, reason, 'payload-preflight');
+  const retriedGeneration = await requestStrictGenerationRetry(input, reason);
+  if (!retriedGeneration.ok) return repairNeeded(input, retriedGeneration.error);
+  if ('directPayload' in retriedGeneration) {
+    return {
+      kind: 'payload',
+      payload: await completeAgentServerDirectPayloadLifecycle({
+        ...directPayloadCompletionInput(input, retriedGeneration),
+        kind: 'strict-retry',
+        stableTaskKind: 'direct-retry-payload-preflight',
+        logLine: `AgentServer payload-preflight retry direct ToolPayload run: ${retriedGeneration.runId || 'unknown'}\n`,
+        source: 'agentserver-direct-payload',
+      }),
+    };
+  }
+
+  const retryPreflight = await generatedTaskPayloadPreflightForGeneration(input.workspace, retriedGeneration.response, input.request);
+  const retryBlockingIssues = retryPreflight.issues.filter((issue) => issue.severity === 'repair-needed');
+  if (retryBlockingIssues.some(isGeneratedTaskCapabilityFirstPolicyIssue)) {
+    const retryReason = generatedTaskPayloadPreflightFailureReason(retryPreflight);
+    emitGenerationRetryEvent(
+      input.callbacks,
+      `Provider-first preflight blocked direct provider bypass after payload-preflight retry; using deterministic provider-first recovery adapter. ${retryReason}`,
+      'provider-first-payload-preflight',
+    );
+    return {
+      kind: 'task-files',
+      generation: {
+        ok: true,
+        runId: retriedGeneration.runId,
+        response: providerFirstRecoveryAdapterGeneration(input.request, reason, retryReason),
+      },
+    };
+  }
+  if (retryBlockingIssues.length) {
+    const retryReason = generatedTaskPayloadPreflightFailureReason(retryPreflight);
+    emitGenerationRetryEvent(
+      input.callbacks,
+      `Payload preflight strict retry surfaced another blocking contract issue; retrying once more. ${retryReason}`,
+      'payload-preflight',
+    );
+    const secondRetryReason = `Previous payload-preflight strict retry still failed: ${retryReason}`;
+    const secondGeneration = await requestStrictGenerationRetry(input, secondRetryReason);
+    if (!secondGeneration.ok) return repairNeeded(input, secondGeneration.error);
+    if ('directPayload' in secondGeneration) {
+      return {
+        kind: 'payload',
+        payload: await completeAgentServerDirectPayloadLifecycle({
+          ...directPayloadCompletionInput(input, secondGeneration),
+          kind: 'strict-retry',
+          stableTaskKind: 'direct-retry-payload-preflight-second',
+          logLine: `AgentServer second payload-preflight retry direct ToolPayload run: ${secondGeneration.runId || 'unknown'}\n`,
+          source: 'agentserver-direct-payload',
+        }),
+      };
+    }
+    const secondPreflight = await generatedTaskPayloadPreflightForGeneration(input.workspace, secondGeneration.response, input.request);
+    const secondBlockingIssues = secondPreflight.issues.filter((issue) => issue.severity === 'repair-needed');
+    if (secondBlockingIssues.some(isGeneratedTaskCapabilityFirstPolicyIssue)) {
+      const secondReason = generatedTaskPayloadPreflightFailureReason(secondPreflight);
+      emitGenerationRetryEvent(
+        input.callbacks,
+        `Provider-first preflight blocked direct provider bypass after payload-preflight retries; using deterministic provider-first recovery adapter. ${secondReason}`,
+        'provider-first-payload-preflight',
+      );
+      return {
+        kind: 'task-files',
+        generation: {
+          ok: true,
+          runId: secondGeneration.runId,
+          response: providerFirstRecoveryAdapterGeneration(input.request, reason, secondReason),
+        },
+      };
+    }
+    if (secondBlockingIssues.length) {
+      return repairNeeded(
+        input,
+        `AgentServer generation contract violation: ${reason}. Second strict retry still failed payload preflight: ${generatedTaskPayloadPreflightFailureReason(secondPreflight)}`,
+      );
+    }
+    return { kind: 'task-files', generation: secondGeneration };
+  }
+  return { kind: 'task-files', generation: retriedGeneration };
 }
 
 function providerFirstRecoveryAdapterGeneration(

@@ -18,6 +18,7 @@ import {
   uploadedArtifactPreview,
 } from './previewDescriptor';
 import { resolvePresentationInputForArtifact } from '../../../../../packages/presentation/interactive-views';
+import { createLocalUserActionApi, type UserActionApi } from '../projectionApi';
 import {
   artifactForObjectReference,
   pathForObjectReference,
@@ -37,17 +38,20 @@ export function WorkspaceObjectPreview({
   session,
   config,
   onPreviewPackageRequest,
+  userActionApi,
 }: {
   reference: ObjectReference;
   session: SciForgeSession;
   config: SciForgeConfig;
   onPreviewPackageRequest?: (reference: ObjectReference, path?: string, descriptor?: PreviewDescriptor) => void;
+  userActionApi?: UserActionApi;
 }) {
   const artifact = artifactForObjectReference(reference, session);
   const inlinePreview = useMemo(() => uploadedArtifactPreview(artifact), [artifact]);
   const presentationInput = useMemo(() => resolvePresentationInputForArtifact(artifact), [artifact]);
   const path = presentationInput?.ref ?? pathForObjectReference(reference, session);
   const previewConfig = useMemo(() => config, [config.workspacePath, config.workspaceWriterBaseUrl]);
+  const resolvedUserActionApi = useMemo(() => userActionApi ?? createLocalUserActionApi(), [userActionApi]);
   const [descriptor, setDescriptor] = useState<PreviewDescriptor | undefined>();
   const [file, setFile] = useState<WorkspaceFileContent | undefined>();
   const [loadingPath, setLoadingPath] = useState('');
@@ -200,7 +204,14 @@ export function WorkspaceObjectPreview({
             onRequest={onPreviewPackageRequest}
           />
         ) : (
-          <DescriptorPreview descriptor={descriptor} config={config} reference={descriptorReference} />
+          <DescriptorPreview
+            descriptor={descriptor}
+            config={config}
+            reference={descriptorReference}
+            objectReference={reference}
+            session={session}
+            userActionApi={resolvedUserActionApi}
+          />
         )}
       </div>
     );
@@ -311,7 +322,21 @@ function artifactFallbackReasonLabel(reason: 'missing-path' | 'read-failed' | 'i
   return 'workspace 文件暂时不可读，已保留引用和诊断信息。';
 }
 
-function DescriptorPreview({ descriptor, config, reference }: { descriptor: PreviewDescriptor; config: SciForgeConfig; reference: SciForgeReference }) {
+function DescriptorPreview({
+  descriptor,
+  config,
+  reference,
+  objectReference,
+  session,
+  userActionApi,
+}: {
+  descriptor: PreviewDescriptor;
+  config: SciForgeConfig;
+  reference: SciForgeReference;
+  objectReference: ObjectReference;
+  session: SciForgeSession;
+  userActionApi: UserActionApi;
+}) {
   const previewConfig = useMemo(() => config, [config.workspacePath, config.workspaceWriterBaseUrl]);
   const descriptorLoadKey = `${descriptor.kind}:${descriptor.inlinePolicy}:${descriptor.sizeBytes ?? 'unknown'}:${descriptor.ref}`;
   const needsManualLoad = descriptorNeedsManualPreviewLoad(descriptor);
@@ -376,10 +401,15 @@ function DescriptorPreview({ descriptor, config, reference }: { descriptor: Prev
           <button
             type="button"
             className="workspace-object-load-preview-action"
-            onClick={() => {
+            onClick={() => void requestManualArtifactPreviewLoad({
+              session,
+              reference: objectReference,
+              userActionApi,
+              byteLimit: WORKSPACE_OBJECT_INLINE_PREVIEW_LIMIT_BYTES,
+            }).finally(() => {
               setRequestedLoadKey(descriptorLoadKey);
               setLoadAttempt((attempt) => attempt + 1);
-            }}
+            })}
             disabled={derivedLoading}
           >
             <Eye size={14} />
@@ -404,6 +434,20 @@ function DescriptorPreview({ descriptor, config, reference }: { descriptor: Prev
       <PreviewDescriptorActions descriptor={descriptor} reference={reference} />
     </div>
   );
+}
+
+export async function requestManualArtifactPreviewLoad(input: {
+  session: SciForgeSession;
+  reference: ObjectReference;
+  userActionApi: Pick<UserActionApi, 'loadArtifactPreview'>;
+  byteLimit?: number;
+}) {
+  if (input.reference.kind !== 'artifact') return undefined;
+  return input.userActionApi.loadArtifactPreview({
+    session: input.session,
+    artifactRef: input.reference.ref,
+    byteLimit: input.byteLimit,
+  });
 }
 
 export function descriptorNeedsManualPreviewLoad(descriptor: PreviewDescriptor) {

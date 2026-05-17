@@ -31,6 +31,7 @@ import {
   type AgentServerBackendFailureKind,
 } from './backend-failure-diagnostics.js';
 import { attemptPlanRefs } from './runtime-routing.js';
+import type { WorkEvidence } from './work-evidence-types.js';
 import {
   AGENTSERVER_GENERATION_RETRY_SCHEMA_VERSION,
   agentServerContextWindowRecoveryStartEvent,
@@ -79,6 +80,7 @@ export type AgentServerGenerationFailureDiagnostics = {
   priorHandoff?: AgentServerGenerationRetryAudit['priorHandoff'];
   retryAttempted?: boolean;
   retrySucceeded?: boolean;
+  sideEffectWorkEvidence?: WorkEvidence[];
 };
 
 export type AgentServerGenerationResult =
@@ -107,6 +109,7 @@ export async function recoverOrReturnAgentServerGenerationFailure(params: {
     rawBytes: number;
     normalizedBytes: number;
   };
+  workEvidence?: WorkEvidence[];
 }): Promise<
   | { retry: true; diagnostics: AgentServerGenerationFailureDiagnostics }
   | { retry: false; result: AgentServerGenerationResult }
@@ -135,6 +138,7 @@ export async function recoverOrReturnAgentServerGenerationFailure(params: {
             priorHandoff: params.contextRecovery?.priorHandoff ?? params.priorHandoff,
             retryAttempted: true,
             retrySucceeded: false,
+            sideEffectWorkEvidence: params.contextRecovery?.sideEffectWorkEvidence ?? params.workEvidence,
           },
         },
       };
@@ -240,6 +244,7 @@ export async function recoverOrReturnAgentServerGenerationFailure(params: {
           priorHandoff: params.priorHandoff,
           retryAttempted: true,
           retrySucceeded: false,
+          sideEffectWorkEvidence: params.contextRecovery?.sideEffectWorkEvidence ?? params.workEvidence,
         },
       },
     };

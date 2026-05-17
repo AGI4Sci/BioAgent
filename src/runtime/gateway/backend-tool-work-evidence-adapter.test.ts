@@ -96,6 +96,23 @@ test('adapts read command and validation facts from generic tool fields', () => 
   assert.equal(evidence[2].status, 'success');
 });
 
+test('adapts generic write events into durable WorkEvidence refs', () => {
+  const evidence = collectWorkEvidenceFromBackendEvent({
+    type: 'tool-result',
+    action: 'write_file',
+    path: '/workspace/fixed_inverse_square_decay.py',
+    status: 'wrote',
+    message: 'Wrote repaired script',
+  });
+
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0].kind, 'write');
+  assert.equal(evidence[0].status, 'success');
+  assert.deepEqual(evidence[0].input, { path: '/workspace/fixed_inverse_square_decay.py' });
+  assert.deepEqual(evidence[0].evidenceRefs, ['/workspace/fixed_inverse_square_decay.py']);
+  assert.equal(evidence[0].rawRef, '/workspace/fixed_inverse_square_decay.py');
+});
+
 test('normalizer attaches adapted WorkEvidence while preserving raw event', () => {
   const normalized = normalizeAgentServerWorkspaceEvent({
     type: 'tool-result',

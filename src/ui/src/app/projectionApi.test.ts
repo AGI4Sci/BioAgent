@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { RuntimeArtifact, SciForgeSession } from '../domain';
 import { conversationProjectionForSession } from './conversation-projection-view-model';
 import { browserVisibleRuntimeState, runPresentationState } from './results-renderer-execution-model';
-import { createLocalProjectionApi, createLocalUserActionApi } from './projectionApi';
+import { createLocalProjectionApi, createLocalProjectionSubscriptionApi, createLocalUserActionApi } from './projectionApi';
 
 test('ProjectionApi restores default view from materialized projection and keeps raw run failures audit-only', async () => {
   const projection = {
@@ -76,9 +76,56 @@ test('ProjectionApi exposes manual artifact preview and selected artifact action
   assert.equal(preview.status, 'requires-manual-load');
   assert.deepEqual(preview.actions.map((action) => action.kind), ['load-preview']);
   assert.equal(loaded.artifactRef, 'artifact:large-report');
+  assert.equal(loaded.sourceAction?.type, 'load-artifact-preview');
+  assert.equal(loaded.sourceAction?.type === 'load-artifact-preview' ? loaded.sourceAction.artifactRef : '', 'artifact:large-report');
   assert.equal(selected.accepted, true);
   assert.equal(selected.action?.type, 'select-object');
   assert.equal(selected.auditRef?.startsWith('ui-action:select-object-'), true);
+});
+
+test('ProjectionSubscriptionApi publishes canonical projection without exposing raw run text', async () => {
+  const projection = {
+    schemaVersion: 'sciforge.conversation-projection.v1',
+    conversationId: 'conversation-subscription',
+    visibleAnswer: {
+      status: 'repair-needed',
+      diagnostic: '验证证据不足。',
+      artifactRefs: ['artifact:partial-report'],
+    },
+    activeRun: { id: 'run-subscription', status: 'repair-needed' },
+    artifacts: [{ ref: 'artifact:partial-report', label: 'Partial report' }],
+    executionProcess: [],
+    recoverActions: ['Retry with repair evidence.'],
+    verificationState: { status: 'failed' },
+    auditRefs: ['raw:debug-only'],
+    diagnostics: [],
+  };
+  const session = testSession({
+    runs: [{
+      id: 'run-subscription',
+      scenarioId: 'literature-evidence-review',
+      status: 'failed',
+      prompt: 'repair',
+      response: 'RAW_AGENTSERVER_TEXT_SHOULD_NOT_RENDER',
+      createdAt: '2026-05-17T00:00:00.000Z',
+      raw: {
+        failureReason: 'RAW_FAILURE_SHOULD_NOT_RENDER',
+        displayIntent: { conversationProjection: projection },
+      },
+    }],
+    artifacts: [deliveryArtifact('partial-report')],
+  });
+  const subscriptionApi = createLocalProjectionSubscriptionApi();
+
+  const event = await new Promise<Parameters<Parameters<typeof subscriptionApi.subscribeConversationProjection>[1]>[0]>((resolve) => {
+    subscriptionApi.subscribeConversationProjection({ session, focusedRunId: 'run-subscription' }, resolve);
+  });
+
+  assert.equal(event.type, 'projection-restored');
+  assert.equal(event.projection.visibleAnswer.status, 'repair-needed');
+  assert.deepEqual(event.projection.visibleAnswer.primaryArtifactRefs, ['artifact:partial-report']);
+  assert.equal(event.run?.runId, 'run-subscription');
+  assert.doesNotMatch(JSON.stringify(event), /RAW_AGENTSERVER_TEXT|RAW_FAILURE/);
 });
 
 test('completion-candidate salvage creates recoverable projection without promoting raw ToolPayload to success', () => {

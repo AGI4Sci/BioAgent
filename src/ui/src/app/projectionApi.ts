@@ -28,6 +28,13 @@ export interface ProjectionApi {
   getCapabilityPlanSummary(input: { session: SciForgeSession; runId?: string }): Promise<CapabilityPlanSummary | undefined>;
 }
 
+export interface ProjectionSubscriptionApi {
+  subscribeConversationProjection(
+    input: { session: SciForgeSession; focusedRunId?: string },
+    listener: (event: ProjectionSubscriptionEvent) => void,
+  ): () => void;
+}
+
 export interface UserActionApi {
   submitTurn(input: { session: SciForgeSession; text: string; selectedRefs?: string[] }): Promise<UserActionResult>;
   selectObject(input: { session: SciForgeSession; objectRef: string; intent: 'inspect' | 'ask-followup' | 'compare' | 'pin' }): Promise<UserActionResult>;
@@ -75,6 +82,7 @@ export interface ArtifactPreview {
   preview?: string;
   structuredData?: unknown;
   actions: UserActionDescriptor[];
+  sourceAction?: UIAction;
 }
 
 export interface ExecutionTraceView {
@@ -97,6 +105,13 @@ export interface UserActionResult {
   auditRef?: string;
   action?: UIAction;
 }
+
+export type ProjectionSubscriptionEvent =
+  | {
+    type: 'projection-restored';
+    projection: ConversationProjectionView;
+    run?: RunSummary;
+  };
 
 export interface UserActionDescriptor {
   id: string;
@@ -151,6 +166,25 @@ export function createLocalProjectionApi(): ProjectionApi {
   };
 }
 
+export function createLocalProjectionSubscriptionApi(projectionApi: ProjectionApi = createLocalProjectionApi()): ProjectionSubscriptionApi {
+  return {
+    subscribeConversationProjection(input, listener) {
+      let active = true;
+      void projectionApi.getConversationProjection(input).then((projection) => {
+        if (!active) return;
+        listener({
+          type: 'projection-restored',
+          projection,
+          run: projection.focusedRun,
+        });
+      });
+      return () => {
+        active = false;
+      };
+    },
+  };
+}
+
 export function createLocalUserActionApi(projectionApi: ProjectionApi = createLocalProjectionApi()): UserActionApi {
   return {
     async submitTurn(input) {
@@ -174,12 +208,20 @@ export function createLocalUserActionApi(projectionApi: ProjectionApi = createLo
       return acceptedAction(action, await projectionApi.getConversationProjection({ session: input.session }), '对象已通过 UserActionApi 选中。');
     },
     async loadArtifactPreview(input) {
-      return projectionApi.getArtifactPreview({
+      const action = createLoadArtifactPreviewUIAction({
+        session: input.session,
+        id: actionId('load-artifact-preview'),
+        createdAt: new Date().toISOString(),
+        artifactRef: input.artifactRef,
+        byteLimit: input.byteLimit,
+      });
+      const preview = await projectionApi.getArtifactPreview({
         session: input.session,
         artifactRef: input.artifactRef,
         mode: 'manual-load',
         byteLimit: input.byteLimit,
       });
+      return { ...preview, sourceAction: action };
     },
     async requestRetry(input) {
       const action = createRequestRetryUIAction({

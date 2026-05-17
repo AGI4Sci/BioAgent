@@ -10,6 +10,10 @@ import {
   silentStreamDecisionRecordFromUnknown,
   type SilentStreamDecisionRecord,
 } from '@sciforge-ui/runtime-contract/events';
+import {
+  maybeHandleCapabilityDiscoveryToolCall,
+  type AgentServerCapabilityDiscoveryToolTransportOptions,
+} from './capability-discovery-tool-transport.js';
 
 export async function readAgentServerRunStream(
   response: Response,
@@ -24,6 +28,7 @@ export async function readAgentServerRunStream(
     silentRunId?: string;
     silentStreamDecision?: SilentStreamDecisionRecord;
     onSilentTimeout?: (message: string, audit: AgentServerSilentStreamGuardAudit) => void;
+    capabilityDiscoveryToolTransport?: AgentServerCapabilityDiscoveryToolTransportOptions;
   } = {},
 ): Promise<{ json: unknown; run: Record<string, unknown>; error?: string; streamText?: string; workEvidence: WorkEvidence[] }> {
   if (!response.body) {
@@ -53,7 +58,7 @@ export async function readAgentServerRunStream(
   const workEvidence: WorkEvidence[] = [];
   const silencePolicy = options.silencePolicy ?? silentPolicyFromTimeout(options.maxSilentMs);
   const silentTimeoutMs = silencePolicy?.timeoutMs;
-  function consumeLine(rawLine: string) {
+  async function consumeLine(rawLine: string) {
     const line = rawLine.trim();
     if (!line) return;
     lastEnvelopeAt = Date.now();
@@ -71,6 +76,10 @@ export async function readAgentServerRunStream(
         if (text) streamTextParts.push(text);
       }
       onEvent(event);
+      const discoveryToolResult = await maybeHandleCapabilityDiscoveryToolCall(event, options.capabilityDiscoveryToolTransport);
+      if (discoveryToolResult) {
+        onEvent(discoveryToolResult);
+      }
       const totalUsage = agentServerEventTotalUsage(event);
       if (
         options.convergenceGuardMode
@@ -108,12 +117,12 @@ export async function readAgentServerRunStream(
     buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
     while (buffer.includes('\n')) {
       const index = buffer.indexOf('\n');
-      consumeLine(buffer.slice(0, index));
+      await consumeLine(buffer.slice(0, index));
       buffer = buffer.slice(index + 1);
     }
     if (done) break;
   }
-  if (buffer.trim()) consumeLine(buffer);
+  if (buffer.trim()) await consumeLine(buffer);
   const data = isRecord(finalResult) && isRecord(finalResult.data) ? finalResult.data : isRecord(finalResult) ? finalResult : {};
   return {
     json: finalResult ?? { envelopes, error: streamError },

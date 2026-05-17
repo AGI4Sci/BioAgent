@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 import { buildSilentStreamDecisionRecord } from '@sciforge-ui/runtime-contract';
@@ -141,6 +144,68 @@ test('generation token guard allows large streams up to a bounded fallback ceili
   assert.equal(result.run.id, 'run-large-total-usage');
 });
 
+test('AgentServer stream bridges capability discovery tool calls into audited tool-result events', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-discovery-tool-'));
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify({
+        event: {
+          type: 'tool-call',
+          id: 'call-discovery-search',
+          toolName: 'capability_discovery.search',
+          input: {
+            goal: 'Need to find tools for recent paper search and PDF full text extraction.',
+            desiredArtifacts: ['research-report'],
+            constraints: { maxCandidates: 2 },
+          },
+        },
+      })}\n`));
+      controller.enqueue(encoder.encode(`${JSON.stringify({
+        result: {
+          data: {
+            run: {
+              id: 'run-discovery-tool-call',
+              status: 'completed',
+            },
+          },
+        },
+      })}\n`));
+      controller.close();
+    },
+  }));
+  const events: unknown[] = [];
+
+  const result = await readAgentServerRunStream(response, (event) => events.push(event), {
+    capabilityDiscoveryToolTransport: {
+      workspace,
+      sessionBundleRel: '.sciforge/sessions/test-session',
+      auditSeed: 'stream-test',
+    },
+  });
+
+  const toolResult = events.find((event): event is Record<string, unknown> => {
+    return typeof event === 'object'
+      && event !== null
+      && (event as Record<string, unknown>).type === 'tool-result'
+      && (event as Record<string, unknown>).toolName === 'capability_discovery.search';
+  });
+  assert.ok(toolResult);
+  assert.equal(toolResult.status, 'done');
+  assert.equal(toolResult.completionEvidence, 'not-evidence');
+  assert.equal(toolResult.callId, 'call-discovery-search');
+  assert.deepEqual(result.run, { id: 'run-discovery-tool-call', status: 'completed' });
+
+  const auditRefs = toolResult.auditRefs as string[];
+  const persistedRef = auditRefs.find((ref) => ref.includes('records/capability-discovery/search-'));
+  assert.ok(persistedRef);
+  const auditRecord = JSON.parse(await readFile(join(workspace, persistedRef), 'utf8')) as Record<string, unknown>;
+  assert.equal(auditRecord.schemaVersion, 'sciforge.capability-discovery.audit-record.v1');
+  assert.equal(auditRecord.method, 'search');
+  assert.equal(auditRecord.completionEvidence, 'not-evidence');
+  assert.doesNotMatch(JSON.stringify(auditRecord), /endpoint|baseUrl|auth|token|secret|\/Applications\/workspace/i);
+});
+
 test('bounded harness generation token guard stops runaway streams before projectionless waits', async () => {
   const request = {
     skillDomain: 'literature',
@@ -271,4 +336,93 @@ test('conversation recovery uses silent stream policy retry budget and decision'
   assert.equal(exhausted.retryable, false);
   assert.ok(exhausted.reason.message.includes('after 1 attempt'));
   assert.equal(audit.silentStreamDecision.decisionId, 'session-a:turn-policy:silent-stream');
+});
+
+test('AgentServer stream executes capability discovery tool-call and persists sanitized audit ref', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-discovery-stream-'));
+  const events: unknown[] = [];
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify({
+        event: {
+          type: 'tool-call',
+          id: 'call-search-1',
+          toolName: 'capability_discovery.search',
+          arguments: JSON.stringify({
+            goal: 'Need recent paper search, PDF reading, and evidence matrix. token=abc123 http://127.0.0.1:18080 /Applications/workspace/private-root',
+            desiredArtifacts: ['research-report', 'evidence-matrix'],
+            constraints: { maxCandidates: 3, latencyTier: 'bounded' },
+          }),
+        },
+      })}\n`));
+      controller.enqueue(encoder.encode(`${JSON.stringify({
+        result: { data: { run: { id: 'run-discovery-stream', status: 'completed', output: {} } } },
+      })}\n`));
+      controller.close();
+    },
+  }));
+
+  const stream = await readAgentServerRunStream(response, (event) => events.push(event), {
+    capabilityDiscoveryToolTransport: {
+      workspace,
+      sessionBundleRel: '.sciforge/sessions/session-discovery',
+      auditSeed: 'stream-test',
+    },
+  });
+
+  assert.equal(stream.run.id, 'run-discovery-stream');
+  const toolResult = events.find((event): event is Record<string, unknown> => {
+    return typeof event === 'object'
+      && event !== null
+      && (event as Record<string, unknown>).type === 'tool-result'
+      && (event as Record<string, unknown>).toolName === 'capability_discovery.search';
+  });
+  assert.ok(toolResult, 'discovery tool-call should emit a tool-result event');
+  assert.equal(toolResult.status, 'done');
+  assert.equal(toolResult.completionEvidence, 'not-evidence');
+  const result = toolResult.result as Record<string, unknown>;
+  assert.equal(result.contract, 'sciforge.capability-discovery.v1');
+  assert.ok(Array.isArray(result.candidates));
+  assert.match(String(toolResult.discoveryRef), /^capability-discovery:search:/);
+  const auditRefs = toolResult.auditRefs as string[];
+  const persistedRef = auditRefs.find((ref) => ref.endsWith('.json'));
+  assert.ok(persistedRef, `tool result should include persisted audit ref: ${JSON.stringify(auditRefs)}`);
+  const auditText = await readFile(join(workspace, persistedRef), 'utf8');
+  assert.match(auditText, /sciforge\.capability-discovery\.audit-record\.v1/);
+  assert.match(auditText, /not-evidence/);
+  assert.doesNotMatch(auditText, /127\.0\.0\.1|abc123|\/Applications\/workspace|baseUrl|endpoint|token/i);
+});
+
+test('AgentServer stream reports malformed capability discovery calls as not-evidence tool results', async () => {
+  const events: unknown[] = [];
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify({
+        event: {
+          type: 'tool-call',
+          id: 'call-plan-1',
+          name: 'capability_discovery.plan',
+          args: { goal: 'plan without candidates' },
+        },
+      })}\n`));
+      controller.close();
+    },
+  }));
+
+  await readAgentServerRunStream(response, (event) => events.push(event), {
+    capabilityDiscoveryToolTransport: { auditSeed: 'malformed-stream-test' },
+  });
+
+  const toolResult = events.find((event): event is Record<string, unknown> => {
+    return typeof event === 'object'
+      && event !== null
+      && (event as Record<string, unknown>).type === 'tool-result'
+      && (event as Record<string, unknown>).toolName === 'capability_discovery.plan';
+  });
+  assert.ok(toolResult);
+  assert.equal(toolResult.status, 'failed-with-reason');
+  assert.equal(toolResult.completionEvidence, 'not-evidence');
+  assert.match(String(toolResult.error), /requires candidateIds/);
 });

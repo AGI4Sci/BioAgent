@@ -1,6 +1,6 @@
 import type { WorkEvidence } from './work-evidence';
 
-const TOOL_OPERATION_KINDS = ['search', 'fetch', 'read', 'command', 'validate'] as const;
+const TOOL_OPERATION_KINDS = ['search', 'fetch', 'read', 'write', 'command', 'validate'] as const;
 type ToolOperationKind = typeof TOOL_OPERATION_KINDS[number];
 
 export interface BackendToolWorkEvidenceAdapterOptions {
@@ -52,6 +52,10 @@ function evidenceFromToolCandidate(record: Record<string, unknown>, options: Bac
     record.output_ref,
     record.dataRef,
     record.data_ref,
+    record.path,
+    record.file,
+    record.filePath,
+    record.file_path,
     options.rawRef,
   );
   const diagnostics = lowNoiseDiagnostics(record);
@@ -186,6 +190,7 @@ function inferToolOperation(record: Record<string, unknown>): ToolOperationKind 
     .toLowerCase();
 
   if (/\b(command|run_command|run|exec|shell|bash|sh|python|node|npm|pnpm|yarn|pytest|tsx)\b/.test(haystack)) return 'command';
+  if (/\b(write|wrote|save|saved|create|created|patch|patched|edit|edited|modify|modified)\b/.test(haystack)) return 'write';
   if (/\b(validat|verif|check|lint|test|schema|assert|acceptance)\b/.test(haystack)) return 'validate';
   if (/\b(search|query|retriev|lookup|grep|rg|find)\b/.test(haystack)) return 'search';
   if (/\b(fetch|download|request|http|curl|wget|crawl|scrape)\b/.test(haystack)) return 'fetch';
@@ -216,7 +221,7 @@ function inferStatus(record: Record<string, unknown>): WorkEvidence['status'] {
   if (status && /\b(repair)\b/.test(status)) return 'repair-needed';
   if (resultCount === 0) return 'empty';
   if (fallbackAttempted && (ok === true || (status && /\b(success|succeeded|done|complete|completed|pass|passed|ok)\b/.test(status)))) return 'partial';
-  if (ok === true || (status && /\b(success|succeeded|done|complete|completed|pass|passed|ok)\b/.test(status))) return 'success';
+  if (ok === true || (status && /\b(success|succeeded|done|complete|completed|pass|passed|ok|wrote|written|saved|created|patched|edited|modified)\b/.test(status))) return 'success';
   if (httpStatus !== undefined && httpStatus >= 200 && httpStatus < 400 && resultCount !== undefined) return 'success';
   if (status && /\b(partial|running|started|pending|in_progress|in-progress)\b/.test(status)) return 'partial';
   return 'partial';

@@ -328,6 +328,55 @@ test('generated task output shape preflight blocks obvious malformed payload wri
   await assert.rejects(access(join(workspace, markerRel)));
 });
 
+test('generated Python syntax preflight blocks invalid source before executing workspace side effects', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-python-syntax-preflight-'));
+  const markerRel = '.sciforge/marker-invalid-python-should-not-run.txt';
+  const request: GatewayRequest = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'run a generated data analysis task',
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-literature-python-syntax-preflight',
+      sessionCreatedAt: '2026-05-12T02:30:00.000Z',
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+  };
+
+  const result = await runGeneratedTaskExecutionLifecycle({
+    workspace,
+    request,
+    skill: providerTestSkill('2026-05-12T02:30:00.000Z'),
+    generation: {
+      ok: true,
+      runId: 'run-python-syntax-preflight',
+      response: {
+        taskFiles: [{
+          path: 'tasks/invalid-python.py',
+          language: 'python',
+          content: [
+            'from pathlib import Path',
+            `Path("${markerRel}").write_text("ran")`,
+            'df´l = 1',
+          ].join('\n'),
+        }],
+        entrypoint: { language: 'python', path: 'tasks/invalid-python.py' },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: ['runtime-diagnostic'],
+      },
+    },
+    deps: { repairNeededPayload },
+  });
+
+  assert.equal(result.kind, 'payload');
+  if (result.kind !== 'payload') return;
+  assert.match(result.payload.message, /Generated Python entrypoint failed syntax preflight before execution/i);
+  assert.equal(result.payload.executionUnits[0]?.status, 'failed-with-reason');
+  assert.match(JSON.stringify(result.payload), /generated-task-python-syntax-preflight/);
+  await assert.rejects(access(join(workspace, markerRel)));
+});
+
 test('generated task output shape preflight resolves same-file artifact variables before execution', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-preflight-artifact-vars-'));
   const request: GatewayRequest = {

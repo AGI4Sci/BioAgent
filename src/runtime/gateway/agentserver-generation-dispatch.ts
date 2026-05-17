@@ -16,7 +16,8 @@ import { agentServerLlmRuntime, AGENT_BACKEND_ANSWER_PRINCIPLE, buildAgentServer
 import { agentServerRequestFailureMessage, agentServerRunFailure, extractAgentServerOutputText, looksLikeTruncatedAgentServerResponseText, looksLikeUnparsedGenerationResponseText, parseGenerationResponse, parseToolPayloadResponse } from './agentserver-run-output.js';
 import { diagnosticForFailure, sanitizeAgentServerError } from './backend-failure-diagnostics.js';
 import { finalizeAgentServerGenerationSuccess, recoverOrReturnAgentServerGenerationFailure, type AgentServerGenerationFailureDiagnostics, type AgentServerGenerationResult } from './agentserver-generation-recovery.js';
-import { isAgentServerRepairContinuationBoundedStopError, agentServerGenerationTokenGuardLimit, agentServerSilentStreamGuardAudit, currentReferenceDigestSilentGuardPolicy, mergeBackendStreamWorkEvidence, readAgentServerRunStream, silentStreamDecisionFromGatewayRequest } from './agentserver-stream.js';
+import { isAgentServerRepairContinuationBoundedStopError, agentServerGenerationTokenGuardLimit, agentServerSilentStreamGuardAudit, currentReferenceDigestSilentGuardPolicy, dedupeWorkEvidence, mergeBackendStreamWorkEvidence, readAgentServerRunStream, silentStreamDecisionFromGatewayRequest } from './agentserver-stream.js';
+import { collectWorkEvidenceFromBackendEvent, type WorkEvidence } from './work-evidence-types.js';
 import { hydrateGeneratedTaskResponseFromText } from './generated-task-response-text.js';
 import { hasRecoverableRecentAttempt } from './recoverable-attempts.js';
 import { repairNeededPayload } from './payload-validation.js';
@@ -27,6 +28,7 @@ import { agentServerConvergenceGuardEvent, agentServerDispatchEvent, agentServer
 import { backendHandoffDriftEvent, classifyBackendHandoffDrift } from '@sciforge-ui/runtime-contract/backend-handoff-drift';
 import { DEFAULT_AGENTSERVER_ADAPTER_MODE, backendAdapterForAgentServerAdapter, createInlineAgentServerAdapter, type AgentServerAdapter, type AgentServerGenerationAdapterResult } from './agentserver-adapter.js';
 import { createTurnPipeline, createWorkspaceKernel } from '../conversation-kernel/index.js';
+import { capabilityDiscoveryAgentServerToolTransportBrief } from './capability-discovery-tool-transport.js';
 
 function requestHandoffSource(request: GatewayRequest) {
   return request.handoffSource ?? 'cli';
@@ -256,6 +258,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
   let runPayload: unknown;
   let contextRecovery: AgentServerGenerationFailureDiagnostics | undefined;
   let strictTaskFilesReason = params.strictTaskFilesReason;
+  let partialStreamWorkEvidence: WorkEvidence[] = [];
   try {
     const request = params.request;
     const promptRequest = requestWithoutInlineAgentHarness(request);
@@ -408,6 +411,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           contextWindow: preflight.state ? contextWindowMetadata(preflight.state) : undefined,
           contextCompaction: preflight.compaction ? contextCompactionMetadata(preflight.compaction) : undefined,
           backendCapabilities: adapter.capabilities,
+          capabilityDiscoveryToolTransport: capabilityDiscoveryAgentServerToolTransportBrief(),
           ...harnessMetadata,
         },
       },
@@ -428,6 +432,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           requiresNativeWorkspaceCapabilities: needsContinuity,
           nativeToolFirst: needsContinuity,
           llmEndpointSource: llmRuntime.llmEndpoint ? llmEndpointSource : undefined,
+          capabilityDiscoveryToolTransport: capabilityDiscoveryAgentServerToolTransportBrief(),
           retryAudit: contextRecovery?.retryAudit,
           toolPolicy: repairContinuation ? {
             mode: 'repair-continuation-minimal',
@@ -597,7 +602,9 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     } finally {
       clearTimeout(preResponseSilentTimeout);
     }
+    partialStreamWorkEvidence = [];
     const { json, run, error, streamText, workEvidence } = await readAgentServerRunStream(response, (event) => {
+      partialStreamWorkEvidence.push(...collectWorkEvidenceFromBackendEvent(event));
       emitWorkspaceRuntimeEvent(params.callbacks, withRequestContextWindowLimit(
         normalizeAgentServerWorkspaceEvent(event),
         request,
@@ -605,6 +612,11 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     }, {
       maxTotalUsage: agentServerGenerationTokenGuardLimit(request, { repairContinuation }),
       convergenceGuardMode: repairContinuation ? 'repair-continuation' : 'generation',
+      capabilityDiscoveryToolTransport: {
+        workspace: params.workspace,
+        sessionBundleRel: sessionBundleRelForRequest(request),
+        auditSeed: `${agentId}:${silentRunId ?? 'run'}:${dispatchAttempt}`,
+      },
       maxSilentMs: silentGuardPolicy.timeoutMs,
       silencePolicy: silentGuardPolicy,
       silentRetryCount: Math.max(0, dispatchAttempt - 1),
@@ -643,6 +655,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         httpStatus: response.status,
         headers: response.headers,
         priorHandoff: normalizedHandoff,
+        workEvidence,
       });
       if (failure.retry) {
         contextRecovery = failure.diagnostics;
@@ -666,6 +679,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         skill: params.skill,
         callbacks: params.callbacks,
         priorHandoff: normalizedHandoff,
+        workEvidence,
       });
       if (failure.retry) {
         contextRecovery = failure.diagnostics;
@@ -690,6 +704,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         skill: params.skill,
         callbacks: params.callbacks,
         priorHandoff: normalizedHandoff,
+        workEvidence,
       });
       if (failure.retry) {
         contextRecovery = failure.diagnostics;
@@ -850,6 +865,7 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
         provider: diagnostic.provider,
         model: diagnostic.model,
         originalErrorSummary: diagnostic.userReason ?? requestFailure,
+        sideEffectWorkEvidence: dedupeWorkEvidence(partialStreamWorkEvidence),
       },
     };
   } finally {

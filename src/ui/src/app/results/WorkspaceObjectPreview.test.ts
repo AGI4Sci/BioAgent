@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { ObjectReference, RuntimeArtifact, SciForgeConfig, SciForgeSession } from '../../domain';
-import { descriptorNeedsManualPreviewLoad, WorkspaceObjectPreview } from './WorkspaceObjectPreview';
+import { descriptorNeedsManualPreviewLoad, requestManualArtifactPreviewLoad, WorkspaceObjectPreview } from './WorkspaceObjectPreview';
 import { MarkdownBlock } from './reportContent';
 
 describe('WorkspaceObjectPreview presentation input', () => {
@@ -66,6 +66,60 @@ describe('WorkspaceObjectPreview presentation input', () => {
     assert.match(html, /\.sciforge\/artifacts\/report-1\.md/);
     assert.doesNotMatch(html, /JSON envelope should stay hidden/);
     assert.doesNotMatch(html, /fallback/);
+  });
+
+  it('routes manual artifact preview requests through UserActionApi before workspace preview hydration', async () => {
+    const session = testSession([]);
+    const calls: Array<{ artifactRef: string; byteLimit?: number }> = [];
+    const result = await requestManualArtifactPreviewLoad({
+      session,
+      reference: {
+        id: 'obj-large-report',
+        title: 'Large report',
+        kind: 'artifact',
+        ref: 'artifact:large-report',
+        status: 'available',
+      },
+      byteLimit: 8192,
+      userActionApi: {
+        async loadArtifactPreview(input) {
+          calls.push({ artifactRef: input.artifactRef, byteLimit: input.byteLimit });
+          return {
+            artifactRef: input.artifactRef,
+            status: 'ready',
+            title: input.artifactRef,
+            actions: [],
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(calls, [{ artifactRef: 'artifact:large-report', byteLimit: 8192 }]);
+    assert.equal(result?.artifactRef, 'artifact:large-report');
+  });
+
+  it('does not treat non-artifact manual preview requests as artifact actions', async () => {
+    const session = testSession([]);
+    let called = false;
+    const result = await requestManualArtifactPreviewLoad({
+      session,
+      reference: {
+        id: 'file-1',
+        title: 'data.csv',
+        kind: 'file',
+        ref: 'file:workspace/data.csv',
+        status: 'available',
+      },
+      userActionApi: {
+        async loadArtifactPreview() {
+          called = true;
+          throw new Error('file refs should not be routed as artifact preview actions');
+        },
+      },
+    });
+
+    assert.equal(result, undefined);
+    assert.equal(called, false);
   });
 
   it('renders markdown reports with GFM tables and task lists', () => {

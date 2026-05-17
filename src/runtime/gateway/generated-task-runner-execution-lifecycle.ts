@@ -1,11 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { evaluateRawDataPreExecutionGuard } from '@sciforge-ui/runtime-contract/raw-data-execution-guard';
 import type { GatewayRequest, SkillAvailability, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceTaskRunResult } from '../runtime-types.js';
 import { errorMessage, generatedTaskArchiveRel, isTaskInputRel, safeWorkspaceRel } from '../gateway-utils.js';
 import { ensureSessionBundle, sessionBundleRelForRequest, sessionBundleResourceRel } from '../session-bundle.js';
-import { runWorkspaceTask, sha1 } from '../workspace-task-runner.js';
+import { fileExists, runWorkspaceTask, sha1 } from '../workspace-task-runner.js';
 import { emitWorkspaceRuntimeEvent } from '../workspace-runtime-events.js';
 import { sanitizeAgentServerError } from './backend-failure-diagnostics.js';
 import { readGeneratedTaskFileIfPresent, type AgentServerTaskFilesGeneration } from './generated-task-runner-generation-lifecycle.js';
@@ -19,7 +21,9 @@ import {
 } from './generated-task-runner-validation-lifecycle.js';
 import { isGeneratedTaskCapabilityFirstPolicyIssue } from './generated-task-payload-preflight.js';
 import type { GeneratedTaskRunnerDeps } from './generated-task-runner.js';
-import { AGENTSERVER_GENERATED_TASK_MATERIALIZED_EVENT_TYPE } from '../../../packages/skills/runtime-policy';
+import { AGENTSERVER_GENERATED_TASK_MATERIALIZED_EVENT_TYPE, workspaceTaskPythonCommandCandidates } from '../../../packages/skills/runtime-policy';
+
+const execFileAsync = promisify(execFile);
 
 export interface GeneratedTaskExecutionLifecycleInput {
   workspace: string;
@@ -107,6 +111,37 @@ export async function runGeneratedTaskExecutionLifecycle(
           recoverActions: generatedTaskPayloadPreflightRecoverActions(payloadPreflight),
           agentServerRefs: {
             generatedTaskPayloadPreflight: payloadPreflight,
+          },
+        },
+      ),
+    };
+  }
+  const syntaxPreflight = await evaluateGeneratedTaskEntrypointSyntax({
+    workspace: input.workspace,
+    entrypoint: input.generation.response.entrypoint,
+    generatedPathMap: materialized.generatedPathMap,
+  });
+  if (syntaxPreflight.blocked) {
+    return {
+      kind: 'payload',
+      payload: input.deps.repairNeededPayload(
+        input.request,
+        input.skill,
+        syntaxPreflight.reason,
+        {
+          taskRel: refs.taskRel,
+          inputRel: refs.inputRel,
+          outputRel: refs.outputRel,
+          stdoutRel: refs.stdoutRel,
+          stderrRel: refs.stderrRel,
+          blocker: 'generated-task-python-syntax-preflight',
+          executionUnitStatus: 'failed-with-reason',
+          recoverActions: [
+            'Regenerate the task code so the entrypoint parses before execution.',
+            'Run a syntax-only parser check before rerunning expensive workspace work.',
+          ],
+          agentServerRefs: {
+            generatedTaskSyntaxPreflight: syntaxPreflight,
           },
         },
       ),
@@ -220,6 +255,61 @@ async function materializeGeneratedTaskFiles(input: GeneratedTaskExecutionLifecy
     };
   }
   return { kind: 'materialized', generatedPathMap, generatedInputRels, materializedTaskFiles, taskHelperRel };
+}
+
+async function evaluateGeneratedTaskEntrypointSyntax(input: {
+  workspace: string;
+  entrypoint: AgentServerTaskFilesGeneration['response']['entrypoint'];
+  generatedPathMap: Map<string, string>;
+}): Promise<{ blocked: false } | { blocked: true; reason: string; language: string; taskRel?: string; diagnostic: string }> {
+  if (input.entrypoint.language !== 'python') return { blocked: false };
+  const entrypointOriginalRel = safeWorkspaceRel(input.entrypoint.path);
+  const taskRel = input.generatedPathMap.get(entrypointOriginalRel);
+  if (!taskRel) return { blocked: false };
+  const taskPath = join(input.workspace, taskRel);
+  const command = await pythonSyntaxCommand(input.workspace);
+  try {
+    await execFileAsync(command, [
+      '-c',
+      [
+        'import ast, pathlib, sys',
+        'path = pathlib.Path(sys.argv[1])',
+        'ast.parse(path.read_text(encoding="utf-8"), filename=str(path))',
+      ].join('\n'),
+      taskPath,
+    ], {
+      cwd: input.workspace,
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+    });
+    return { blocked: false };
+  } catch (error) {
+    const diagnostic = sanitizeAgentServerError(childProcessDiagnostic(error));
+    return {
+      blocked: true,
+      language: 'python',
+      taskRel,
+      diagnostic,
+      reason: `Generated Python entrypoint failed syntax preflight before execution: ${diagnostic}`,
+    };
+  }
+}
+
+async function pythonSyntaxCommand(workspace: string) {
+  for (const candidate of workspaceTaskPythonCommandCandidates(workspace)) {
+    if (await fileExists(candidate)) return candidate;
+  }
+  return 'python3';
+}
+
+function childProcessDiagnostic(error: unknown) {
+  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  return [
+    typeof record.stderr === 'string' ? record.stderr : '',
+    typeof record.stdout === 'string' ? record.stdout : '',
+    errorMessage(error),
+  ].filter((part) => part.trim()).join('\n').trim();
 }
 
 function sciforgeTaskHelperSource() {

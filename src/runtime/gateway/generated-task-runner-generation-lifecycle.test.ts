@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import type { AgentServerGenerationResponse, GatewayRequest, SkillAvailability, ToolPayload, WorkspaceRuntimeEvent } from '../runtime-types.js';
 import {
+  completeAgentServerGenerationFailureLifecycle,
   resolveGeneratedTaskGenerationRetryLifecycle,
   type GeneratedTaskGenerationLifecycleDeps,
 } from './generated-task-runner-generation-lifecycle.js';
@@ -275,6 +276,58 @@ test('generation lifecycle returns repair payload when payload preflight retry i
   assert.equal(result.kind, 'payload');
   assert.match(result.payload.message, /strict retry still failed payload preflight/i);
   assert.match(result.payload.message, /claims/);
+});
+
+test('generation failure lifecycle exposes AgentServer side-effect writes as unverified completion candidates', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-agentserver-side-effect-candidate-'));
+  const candidatePath = join(workspace, 'fixed_inverse_square_decay.py');
+
+  const payload = await completeAgentServerGenerationFailureLifecycle({
+    workspace,
+    request: readyWebProviderRequest,
+    skill,
+    generation: {
+      ok: false,
+      error: 'AgentServer generation stopped by convergence guard after 214465 total tokens.',
+      diagnostics: {
+        kind: 'agentserver',
+        originalErrorSummary: 'bounded generation stopped',
+        sideEffectWorkEvidence: [{
+          kind: 'write',
+          status: 'success',
+          input: { path: candidatePath },
+          outputSummary: 'Wrote repaired script before terminal response failed.',
+          evidenceRefs: [candidatePath],
+          recoverActions: [],
+          rawRef: candidatePath,
+        }],
+      },
+    },
+    deps: {
+      ...depsWithRetry(async () => {
+        throw new Error('failure lifecycle should not retry generation');
+      }),
+      repairNeededPayload: (_request, _skill, reason, _refs) => repairPayload(reason),
+      agentServerGenerationFailureReason: (error) => error,
+      agentServerFailurePayloadRefs: () => ({}),
+    },
+  });
+
+  const displayIntent = payload.displayIntent as Record<string, any> | undefined;
+  const completionCandidate = displayIntent?.completionCandidate as Record<string, any> | undefined;
+  assert.equal(completionCandidate?.schemaVersion, 'sciforge.completion-candidate.v1');
+  assert.equal(completionCandidate?.status, 'unverified');
+  assert.deepEqual(completionCandidate?.auditRefs, ['fixed_inverse_square_decay.py']);
+  assert.deepEqual(completionCandidate?.artifactRefs, ['artifact:agentserver-candidate-fixed-inverse-square-decay-py']);
+  assert.equal(payload.artifacts.some((artifact) => {
+    const delivery = artifact.delivery as Record<string, unknown> | undefined;
+    return artifact.id === 'agentserver-candidate-fixed-inverse-square-decay-py'
+      && delivery?.readableRef === 'fixed_inverse_square_decay.py'
+      && delivery?.role === 'supporting-evidence';
+  }), true);
+  assert.doesNotMatch(JSON.stringify(payload), new RegExp(workspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(payload.message, /needs repair|AgentServer/i);
+  assert.notEqual(payload.claimType, 'satisfied');
 });
 
 function depsWithRetry(

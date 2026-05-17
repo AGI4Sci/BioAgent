@@ -50,6 +50,7 @@ import {
   generatedTaskPayloadPreflightFailureReason,
   isGeneratedTaskCapabilityFirstPolicyIssue,
 } from './generated-task-payload-preflight.js';
+import { attachAgentServerCompletionCandidateArtifacts } from './agentserver-completion-candidate.js';
 
 export const AGENTSERVER_DIRECT_PAYLOAD_TASK_REF = 'agentserver://direct-payload' as const;
 
@@ -167,9 +168,15 @@ export async function completeAgentServerGenerationFailureLifecycle(input: {
     failureReason,
     input.deps.agentServerFailurePayloadRefs(input.generation.diagnostics),
   );
+  const salvagedPayload = attachAgentServerCompletionCandidateArtifacts({
+    payload: repairPayload,
+    workspace: input.workspace,
+    workEvidence: input.generation.diagnostics?.sideEffectWorkEvidence,
+    failureKind: input.generation.diagnostics?.kind,
+  });
   return attachGeneratedTaskFailureBudgetDebit({
     ...budgetDebitInput,
-    payload: repairPayload,
+    payload: salvagedPayload,
   });
 }
 

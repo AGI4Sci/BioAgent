@@ -1290,11 +1290,49 @@ function literatureReportRows(sourceText: string): LiteratureReportRow[] {
     });
   }
   return uniqueLiteratureRows([
+    ...literatureReportRowsFromJsonLike(sourceText),
     ...regexRows,
     ...rows,
     ...literatureReportRowsFromPipeCells(sourceText),
     ...literatureRowsFromEvidenceMatrixSummary(sourceText),
   ]).slice(0, 12);
+}
+
+function literatureReportRowsFromJsonLike(sourceText: string): LiteratureReportRow[] {
+  const normalized = sourceText.replace(/\\"/g, '"');
+  const rows: LiteratureReportRow[] = [];
+  const titlePattern = /"title"\s*:\s*"([^"]+)"([\s\S]{0,2400}?)(?="title"\s*:|$)/gi;
+  for (const match of normalized.matchAll(titlePattern)) {
+    const title = match[1]?.trim();
+    const block = match[2] ?? '';
+    if (!title || /^title$/i.test(title)) continue;
+    rows.push({
+      title,
+      year: firstJsonLikeString(block, ['year', 'published', 'date']) ?? firstJsonLikeDate(block),
+      url: firstJsonLikeString(block, ['url', 'evidenceLocation', 'sourceUrl']) ?? firstUrl(block),
+      fullTextStatus: firstJsonLikeString(block, ['fullTextStatus', 'full_text_status', 'pdfStatus']),
+      summary: firstJsonLikeString(block, ['summary', 'evidenceSnippet', 'abstract', 'claim']),
+      limitations: firstJsonLikeString(block, ['limitations', 'limitation', 'notes']),
+    });
+  }
+  return rows;
+}
+
+function firstJsonLikeString(block: string, keys: string[]) {
+  for (const key of keys) {
+    const pattern = new RegExp(`"${escapeRegExp(key)}"\\s*:\\s*"([^"]+)"`, 'i');
+    const value = block.match(pattern)?.[1]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function firstJsonLikeDate(block: string) {
+  return block.match(/\b(20\d{2}(?:-\d{2}-\d{2})?(?:T[0-9:.Z-]+)?)\b/)?.[1];
+}
+
+function firstUrl(block: string) {
+  return block.match(/https?:\/\/[^\s"',)]+/i)?.[0];
 }
 
 function literatureReportRowsByRegex(sourceText: string): LiteratureReportRow[] {

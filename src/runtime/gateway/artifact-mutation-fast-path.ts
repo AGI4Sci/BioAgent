@@ -269,7 +269,7 @@ function dedupeRoles(roles: Array<{ role: string; fte: string }>) {
 }
 
 function budgetCategoriesFromPrompt(text: string) {
-  const match = text.match(/(?:categories?|类别|类|科目|预算表)[：: ]+([A-Za-z0-9_\-/，、,\s]+?)(?:。|\n|$)/i);
+  const match = text.match(/(?:categories?|类别|类|科目|预算表)[：: ]+([A-Za-z0-9_\-/，、,\s]+?)(?:[.。]|\n|$)/i);
   if (match) {
     return uniqueStrings((match[1] ?? '')
       .split(/[、,，/]+|\s{2,}/)

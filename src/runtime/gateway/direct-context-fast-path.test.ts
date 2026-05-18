@@ -2489,6 +2489,65 @@ test('selected literature report read-first follow-up is answered from report ro
   assert.deepEqual(payload.objectReferences?.map((reference) => reference.ref), ['artifact:research-report']);
 });
 
+test('selected literature report read-first follow-up can recover paper rows from json-like report context', () => {
+  const reportText = JSON.stringify({
+    papers: [{
+      title: 'PRiMeFlow: Capturing Complex Expression Heterogeneity in Perturbation Response Modelling',
+      published: '2026-04-15T15:33:07Z',
+      url: 'https://arxiv.org/abs/2604.13986v2',
+      fullTextStatus: 'PDF/full-text likely reachable from provider URL; not downloaded in this bounded run.',
+      summary: 'PRiMeFlow directly models genetic and small molecule perturbations in gene expression space using flow matching.',
+      limitations: 'Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims.',
+    }, {
+      title: 'Flow Matching for Count Data',
+      published: '2026-05-08T13:53:37Z',
+      url: 'https://arxiv.org/abs/2605.07746v1',
+      fullTextStatus: 'PDF/full-text candidate link found via browser_fetch: https://arxiv.org/pdf/2605.07746v1',
+      summary: 'Flow matching for count data extends generative modeling to discrete single-cell expression observations.',
+      limitations: 'Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims.',
+    }, {
+      title: 'MIOFlow 2.0: A unified framework for inferring cellular stochastic dynamics',
+      published: '2026-03-23T20:49:45Z',
+      url: 'https://arxiv.org/abs/2603.22564v2',
+      fullTextStatus: 'PDF/full-text likely reachable from provider URL; not downloaded in this bounded run.',
+      summary: 'MIOFlow 2.0 infers continuous cellular trajectories from single-cell and spatial transcriptomics snapshots.',
+      limitations: 'Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims.',
+    }],
+  });
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: 'use research report only. no new search. answer in chinese. pick 3 priority papers to read first with reason, evidence location, pdf status, full text status, and one limitation.',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      data: { markdown: reportText },
+    }],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:research-report',
+      title: 'research-report',
+    }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:research-report'] })),
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:research-report',
+        title: 'research-report',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /优先阅读 1/);
+  assert.match(payload.message, /PRiMeFlow/);
+  assert.match(payload.message, /Flow Matching for Count Data/);
+  assert.match(payload.message, /证据位置/);
+  assert.doesNotMatch(payload.message, /Completion verdict|selected chart|single chart/i);
+});
+
 test('scoped no-rerun repair prompt still yields to backend when it asks to generate a minimal task', () => {
   const request: GatewayRequest = {
     skillDomain: 'literature',

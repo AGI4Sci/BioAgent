@@ -247,6 +247,7 @@ function targetFormatForArtifact(artifact: Record<string, unknown>): ReadableTar
   ].find(Boolean);
   const type = String(artifact.type || artifact.id || '').toLowerCase();
   const ref = (declared ?? '').toLowerCase();
+  if (/text\/plain/.test(type) || /\.(?:txt|log|py|r|jl|m|js|jsx|ts|tsx|sh)(?:$|[?#])/.test(ref)) return 'text';
   if (/\.m(?:d|arkdown)(?:$|[?#])/.test(ref) || /report|markdown|summary|text/.test(type)) return 'markdown';
   if (/\.html?(?:$|[?#])/.test(ref) || /html/.test(type)) return 'html';
   if (/\.csv(?:$|[?#])/.test(ref) || /csv|table|matrix|dataset/.test(type)) return 'csv';
@@ -268,14 +269,17 @@ function existingArtifactReadableRef(
   targetFormat: ReadableTargetFormat,
 ) {
   const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
+  const delivery = isRecord(artifact.delivery) ? artifact.delivery : {};
   const candidates = [
     stringField(artifact.path),
+    stringField(delivery.readableRef),
     stringField(metadata.readableRef),
     stringField(artifact.dataRef),
     stringField(metadata.markdownRef),
     stringField(metadata.reportRef),
     stringField(metadata.path),
     stringField(metadata.filePath),
+    stringField(delivery.rawRef),
   ].map((ref) => stableWorkspaceRef(ref, workspace)).filter((ref): ref is string => Boolean(ref));
   return candidates.find((ref) => refMatchesTargetFormat(ref, targetFormat)) ?? candidates[0];
 }
@@ -287,7 +291,7 @@ function refMatchesTargetFormat(ref: string, targetFormat: ReadableTargetFormat)
   if (targetFormat === 'html') return extension === 'html' || extension === 'htm';
   if (targetFormat === 'csv') return extension === 'csv';
   if (targetFormat === 'tsv') return extension === 'tsv';
-  if (targetFormat === 'text') return extension === 'txt' || extension === 'log';
+  if (targetFormat === 'text') return /^(?:txt|log|py|r|jl|m|js|jsx|ts|tsx|sh)$/.test(extension);
   if (targetFormat === 'json') return extension === 'json';
   if (targetFormat === 'binary') return /^(?:pdf|png|jpe?g|gif|webp|svg|docx?|xlsx?|pptx?)$/.test(extension);
   return false;
@@ -295,7 +299,10 @@ function refMatchesTargetFormat(ref: string, targetFormat: ReadableTargetFormat)
 
 function artifactDeliveryRole(artifact: Record<string, unknown>, hasReadableRef: boolean): ArtifactDelivery['role'] {
   const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
-  const explicit = stringField(artifact.presentationRole) ?? stringField(metadata.presentationRole);
+  const delivery = isRecord(artifact.delivery) ? artifact.delivery : {};
+  const explicit = stringField(artifact.presentationRole)
+    ?? stringField(metadata.presentationRole)
+    ?? stringField(delivery.role);
   if (isArtifactDeliveryRole(explicit)) return explicit;
   const type = String(artifact.type || artifact.id || '').toLowerCase();
   const ref = [artifact.dataRef, artifact.path, metadata.artifactRef, metadata.outputRef].map(stringField).filter(Boolean).join(' ').toLowerCase();

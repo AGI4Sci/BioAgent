@@ -569,6 +569,7 @@ function confidenceFromPayload(payload: Record<string, unknown>, citations: Resu
 }
 
 function processStatusFromPayload(payload: Record<string, unknown>): ResultPresentationProcessSummary['status'] {
+  if (payloadDeclaresSuccessfulCompletion(payload)) return 'completed';
   const text = `${payload.claimType ?? ''} ${payload.evidenceLevel ?? ''} ${payload.message ?? ''}`.toLowerCase();
   if (/current-reference-digest-recovery|bounded-current-reference-digest/.test(text)) return 'partial';
   if (/failed-with-reason|failed|failure|repair-needed|失败/.test(text)) return 'failed';
@@ -578,6 +579,7 @@ function processStatusFromPayload(payload: Record<string, unknown>): ResultPrese
 }
 
 function resultStatusFromPayload(payload: Record<string, unknown>): ResultPresentationStatus {
+  if (payloadDeclaresSuccessfulCompletion(payload)) return 'complete';
   const text = `${payload.status ?? ''} ${payload.claimType ?? ''} ${payload.evidenceLevel ?? ''} ${payload.message ?? ''}`.toLowerCase();
   if (/current-reference-digest-recovery|bounded-current-reference-digest/.test(text)) return 'partial';
   if (/background|running|continuing/.test(text)) return 'background-running';
@@ -585,6 +587,18 @@ function resultStatusFromPayload(payload: Record<string, unknown>): ResultPresen
   if (/needs-human|human/.test(text)) return 'needs-human';
   if (/partial|insufficient|unverified|unavailable|missing/.test(text)) return 'partial';
   return 'complete';
+}
+
+function payloadDeclaresSuccessfulCompletion(payload: Record<string, unknown>) {
+  const displayIntent = isRecord(payload.displayIntent) ? payload.displayIntent : {};
+  const taskOutcome = stringField(displayIntent.taskOutcome);
+  if (taskOutcome !== 'satisfied') return false;
+  const protocolStatus = stringField(displayIntent.protocolStatus);
+  if (protocolStatus === 'protocol-failed') return false;
+  const status = stringField(displayIntent.status);
+  if (status && /^(?:failed|repair-needed|needs-work|partial)$/i.test(status)) return false;
+  const executionUnits = recordList(payload.executionUnits);
+  return !executionUnits.some((unit) => /^(?:failed|failed-with-reason|repair-needed|needs-human)$/i.test(stringField(unit.status) ?? ''));
 }
 
 function resultStatusFromProcess(status?: ResultPresentationProcessSummary['status']): ResultPresentationStatus {

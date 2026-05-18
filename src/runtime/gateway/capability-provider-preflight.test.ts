@@ -48,8 +48,46 @@ test('capability provider preflight infers browser routes for rendered page work
     },
   } as GatewayRequest);
 
-  assert.deepEqual(preflight.requiredCapabilityIds, ['browser_fetch', 'browser_search']);
+  assert.deepEqual(preflight.requiredCapabilityIds, ['browser_fetch', 'browser_search', 'pdf_extract']);
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.blockingRoutes[0]?.capabilityId, 'pdf_extract');
+});
+
+test('capability provider preflight keeps arXiv search route alongside full-text browser routes', () => {
+  const preflight = capabilityProviderPreflight({
+    skillDomain: 'literature',
+    prompt: 'Research today arxiv papers about agent computer use and read full text/PDF.',
+    artifacts: [],
+    uiState: {
+      capabilityProviderAvailability: [
+        { id: 'sciforge.web-worker.web_search', capabilityId: 'web_search', available: true, status: 'available' },
+        { id: 'sciforge.web-worker.browser_search', capabilityId: 'browser_search', available: true, status: 'available' },
+        { id: 'sciforge.web-worker.browser_fetch', capabilityId: 'browser_fetch', available: true, status: 'available' },
+        { id: 'sciforge.web-worker.pdf_extract', capabilityId: 'pdf_extract', available: true, status: 'available' },
+      ],
+    },
+  } as GatewayRequest);
+
+  assert.deepEqual(preflight.requiredCapabilityIds, ['browser_fetch', 'browser_search', 'pdf_extract', 'web_search']);
   assert.equal(preflight.ok, true);
+});
+
+test('capability provider preflight does not mark PDF extraction ready without extractor health', () => {
+  const preflight = capabilityProviderPreflight({
+    skillDomain: 'literature',
+    prompt: 'Read the PDF full text for this arXiv paper.',
+    artifacts: [],
+    uiState: {
+      capabilityProviderAvailability: [
+        { id: 'sciforge.web-worker.web_search', capabilityId: 'web_search', available: true, status: 'available' },
+        { id: 'sciforge.web-worker.browser_fetch', capabilityId: 'browser_fetch', available: true, status: 'available' },
+      ],
+    },
+  } as GatewayRequest);
+
+  assert.ok(preflight.requiredCapabilityIds.includes('pdf_extract'));
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.routes.find((route) => route.capabilityId === 'pdf_extract')?.status, 'provider-unavailable');
 });
 
 test('capability provider preflight can route interactive browser automation to Playwright Edge MCP', () => {

@@ -40,6 +40,7 @@ import { appendRunningGuidanceRecord, appendUploadMessageToSession, applyHistori
 import { attachStreamProcessToFailedSession, attachStreamProcessToResponse, compactFailureNotice, guidanceBadgeVariant, guidanceStatusLabel, latestTokenUsage } from './chat/runPresentation';
 import { RunVerificationTag, runIdForMessage } from './chat/messageRunPresentation';
 import { runReadiness, runningMessageContentFromStream, runtimeReadinessIssue } from './chat/runStatusPresentation';
+import { waitForNextPaint } from './chat/nextPaint';
 import { fileToUploadedArtifact, objectReferenceForUploadedArtifact, referenceForUploadedArtifact } from './chat/uploadedArtifact';
 import type { RuntimeHealthItem } from './runtimeHealthPanel';
 import {
@@ -503,7 +504,7 @@ export function ChatPanel({
     setStreamEvents(initialEvents);
     setAssistantDraft('');
     setIsSending(true);
-    await nextAnimationFrame();
+    await waitForNextPaint();
     const controller = new AbortController();
     abortRef.current = controller;
     userAbortRequestedRef.current = false;
@@ -1185,10 +1186,4 @@ async function copyTextToClipboard(text: string) {
   } finally {
     textarea.remove();
   }
-}
-
-function nextAnimationFrame() {
-  return new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
 }

@@ -368,6 +368,77 @@ test('attachResultPresentationContract does not downgrade direct-context answers
   assert.equal(resultPresentation?.status, 'complete');
 });
 
+test('attachResultPresentationContract does not treat quoted failure notes as current direct-context failure', () => {
+  const answer = [
+    '只基于当前选中的 selected report 回答，不启动新的 workspace task。',
+    '',
+    '- 是否确认今天 arXiv 上的相关论文：没有。选中报告明确是无可确认结果/最新论文列表为空。',
+    '- PDF/全文状态：没有可对应到论文的 PDF/全文可读记录。',
+    '- 选中报告依据：Recovery note: AgentServer returned failed-with-reason during the original literature run.',
+  ].join('\n');
+  const attached = attachResultPresentationContract(payload({
+    message: answer,
+    confidence: 0.74,
+    claimType: 'context-summary',
+    evidenceLevel: 'current-session-context',
+    claims: [{
+      id: 'direct-context-claim',
+      text: '只基于当前选中的 selected report 回答，不启动新的 workspace task',
+      supportingRefs: ['artifact:research-report'],
+    }],
+    artifacts: [{
+      id: 'direct-context-summary',
+      type: 'runtime-context-summary',
+      title: 'Direct context answer',
+      data: { markdown: answer },
+    }],
+    executionUnits: [{
+      id: 'EU-direct-context-report-followup',
+      status: 'done',
+      tool: 'sciforge.direct-context-fast-path',
+      outputRef: 'runtime://direct-context-fast-path/report-followup',
+    }],
+    verificationResults: [{
+      id: 'verification-visible-unverified',
+      verdict: 'unverified',
+      confidence: 0,
+      evidenceRefs: ['execution-unit:EU-direct-context-report-followup'],
+      repairHints: [],
+      diagnostics: { required: false, visibleUnverified: true, nonBlocking: true },
+    }],
+    displayIntent: {
+      protocolStatus: 'protocol-success',
+      taskOutcome: 'satisfied',
+      status: 'completed',
+    },
+  }), {
+    request: {
+      skillDomain: 'literature',
+      prompt: 'Use the selected report only. Answer in Chinese: did this run confirm any today arxiv papers?',
+      expectedArtifactTypes: ['research-report'],
+      artifacts: [],
+      uiState: {
+        conversationPolicy: {
+          executionModePlan: { executionMode: 'direct-context-answer' },
+          responsePlan: { initialResponseMode: 'direct-context-answer' },
+        },
+      },
+    },
+  });
+
+  const projection = attached.displayIntent?.taskOutcomeProjection as Record<string, any> | undefined;
+  const card = attached.displayIntent?.taskRunCard as Record<string, any> | undefined;
+  const conversationProjection = projection?.conversationProjection as Record<string, any> | undefined;
+  const visibleAnswer = conversationProjection?.visibleAnswer as Record<string, any> | undefined;
+  const resultPresentation = attached.displayIntent?.resultPresentation as Record<string, any> | undefined;
+
+  assert.equal(projection?.taskSuccess, true);
+  assert.equal(card?.taskOutcome, 'satisfied');
+  assert.equal(visibleAnswer?.status, 'satisfied');
+  assert.equal(resultPresentation?.status, 'complete');
+  assert.doesNotMatch(String(visibleAnswer?.text), /Partial result artifacts|user goal is not fully satisfied/i);
+});
+
 test('attachResultPresentationContract rebuilds stale partial presentation when recomputed direct-context projection is satisfied', () => {
   const request = {
     skillDomain: 'literature' as const,

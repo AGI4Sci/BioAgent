@@ -103,6 +103,7 @@ import { createLatencyTelemetry } from './gateway/latency-telemetry.js';
 import { attachIntentFirstVerification } from './gateway/intent-first-verification.js';
 import { applyRuntimeReplayRecorder, attachRuntimeReplayRecorderRefs } from './gateway/runtime-replay-recorder.js';
 import { recordValidationRepairTelemetryForPayload } from './gateway/validation-repair-telemetry-runtime.js';
+import { persistFinalGatewayPayloadIfManagedOutputRef } from './gateway/final-payload-persistence.js';
 import {
   agentServerFailurePayloadRefs,
   agentServerGenerationFailureReason,
@@ -172,6 +173,7 @@ import {
 } from './gateway/capability-provider-preflight.js';
 import { directContextFastPathPayload, requestWithDirectContextReadableArtifactData } from './gateway/direct-context-fast-path.js';
 import { tryRunArtifactMutationFastPath } from './gateway/artifact-mutation-fast-path.js';
+import { tryRunMarkdownReadonlyFastPath } from './gateway/markdown-readonly-fast-path.js';
 import { requestAgentServerGeneration } from './gateway/agentserver-generation-dispatch.js';
 import { requestContextRefs } from './gateway/request-context-refs.js';
 
@@ -283,6 +285,22 @@ export const GATEWAY_PIPELINE_STAGES: GatewayPipelineStage[] = [
   {
     name: STAGE_DIRECT_CONTEXT_FAST_PATH,
     async execute(context) {
+      const uiState = isRecord(context.request.uiState) ? context.request.uiState : {};
+      const constraints = normalizeTurnExecutionConstraints(uiState.turnExecutionConstraints);
+      if (conversationPolicyFailure(uiState)
+        && !policyFailureAllowsStatelessFreshGeneration(context.request, uiState, constraints)
+        && !policyFailureAllowsTransportContinuation(context.request, uiState, constraints)) {
+        return { kind: 'continue' };
+      }
+      const markdownReadonlyPayload = await tryRunMarkdownReadonlyFastPath(context.request);
+      if (markdownReadonlyPayload) {
+        emitWorkspaceRuntimeEvent(context.telemetry.callbacks, directContextFastPathEvent({
+          claimType: markdownReadonlyPayload.claimType,
+          executionUnitCount: markdownReadonlyPayload.executionUnits.length,
+          artifactCount: markdownReadonlyPayload.artifacts.length,
+        }));
+        return { kind: 'short-circuit', payload: markdownReadonlyPayload };
+      }
       const request = await requestWithDirectContextReadableArtifactData(context.request);
       const payload = directContextFastPathPayload(request);
       if (!payload) return { kind: 'continue' };
@@ -397,7 +415,7 @@ async function verifyAndFinalizeGatewayPayload(
     request,
   );
   telemetry.markVerificationEnd();
-  return finalizeGatewayPayload(telemetry.emitFinal(verified) ?? verified, request, runtimeReplayRecorder, telemetry.callbacks);
+  return await finalizeGatewayPayload(telemetry.emitFinal(verified) ?? verified, request, runtimeReplayRecorder, telemetry.callbacks);
 }
 
 function emitGatewayPipelineRegistryAudit(callbacks: WorkspaceRuntimeCallbacks) {
@@ -731,18 +749,20 @@ function conversationPolicyFailure(uiState: Record<string, unknown>) {
   };
 }
 
-function finalizeGatewayPayload(
+async function finalizeGatewayPayload(
   payload: ToolPayload,
   request: GatewayRequest,
   runtimeReplayRecorder: ReturnType<typeof applyRuntimeReplayRecorder>,
   callbacks: WorkspaceRuntimeCallbacks,
-): ToolPayload {
+): Promise<ToolPayload> {
   const verifiedPayload = attachIntentFirstVerification(
     attachRuntimeReplayRecorderRefs(payload, runtimeReplayRecorder),
     request,
     { callbacks, runWorkVerify: true },
   );
-  return attachResultPresentationContract(verifiedPayload, { request });
+  const finalPayload = attachResultPresentationContract(verifiedPayload, { request });
+  await persistFinalGatewayPayloadIfManagedOutputRef(finalPayload, request);
+  return finalPayload;
 }
 
 async function runAgentServerGeneratedTask(

@@ -61,6 +61,7 @@ export function evaluateGeneratedTaskPayloadPreflight(input: {
       issues.push(...generatedTaskOutputPathAsDirectoryIssuesForSource(content, file.path));
       issues.push(...generatedTaskPayloadPreflightIssuesForSource(content, file.path));
       issues.push(...generatedTaskProviderFirstNetworkIssuesForSource(content, file.path, input.request));
+      issues.push(...generatedTaskProviderHelperIssuesForSource(content, file.path, input.request));
     }
   }
 
@@ -327,14 +328,63 @@ function generatedTaskProviderFirstNetworkIssuesForSource(
   }];
 }
 
+function generatedTaskProviderHelperIssuesForSource(
+  source: string,
+  sourceRef: string,
+  request?: GatewayRequest,
+): GeneratedTaskPayloadPreflightIssue[] {
+  const routes = readyWebProviderRoutes(request);
+  if (!routes.length) return [];
+  const stripped = stripGeneratedTaskComments(source);
+  const usesHelper = /\binvoke_(?:capability|provider)\s*\(/.test(stripped);
+  if (!usesHelper) return [];
+  if (generatedTaskDefinesOrImportsProviderHelper(stripped)) return [];
+  return [{
+    id: `${sourceRef}:provider-helper-missing-import:${routes.map((route) => route.capabilityId).join(',')}`,
+    kind: GENERATED_TASK_CAPABILITY_FIRST_PREFLIGHT_ISSUE_KIND,
+    severity: 'repair-needed',
+    path: 'capabilityFirstPolicy',
+    sourceRef,
+    evidence: clipEvidence(stripped.match(/^[^\n]*\binvoke_(?:capability|provider)\s*\([^\n]*/m)?.[0] ?? 'invoke_capability(...)'),
+    reason: 'Generated task calls invoke_capability/invoke_provider without importing the SciForge sciforge_task helper, so provider-first execution would fail at runtime.',
+    recoverActions: [
+      'Regenerate the task with: from sciforge_task import load_input, write_payload, invoke_capability, provider_result_is_empty, empty_result_payload, ProviderInvocationError.',
+      'Do not catch missing invoke_capability as an empty result; missing provider helper is a task-code error that requires repair.',
+    ],
+  }];
+}
+
+function generatedTaskDefinesOrImportsProviderHelper(source: string) {
+  return /(?:^|\n)\s*from\s+sciforge_task\s+import\s+[^\n]*(?:invoke_capability|invoke_provider)/.test(source)
+    || /(?:^|\n)\s*import\s+sciforge_task\b/.test(source)
+    || /(?:^|\n)\s*def\s+invoke_(?:capability|provider)\s*\(/.test(source);
+}
+
 function readyWebProviderRoutes(request?: GatewayRequest) {
   if (!request) return [];
-  const selectedToolIds = new Set([...(request.selectedToolIds ?? []), ...WEB_PROVIDER_CAPABILITY_IDS]);
+  const selectedToolIds = new Set([
+    ...(request.selectedToolIds ?? []),
+    'web_search',
+    'web_fetch',
+    'browser_search',
+    'browser_fetch',
+  ]);
+  if (requestNeedsPdfExtraction(request)) selectedToolIds.add('pdf_extract');
   return capabilityProviderRoutesForGatewayInvocation({ ...request, selectedToolIds: [...selectedToolIds] }).routes
     .filter((route) => WEB_PROVIDER_CAPABILITY_IDS.includes(route.capabilityId) && route.status === 'ready');
 }
 
-const WEB_PROVIDER_CAPABILITY_IDS = ['web_search', 'web_fetch', 'browser_search', 'browser_fetch'];
+const WEB_PROVIDER_CAPABILITY_IDS = ['web_search', 'web_fetch', 'browser_search', 'browser_fetch', 'pdf_extract'];
+
+function requestNeedsPdfExtraction(request: GatewayRequest) {
+  if ((request.selectedToolIds ?? []).includes('pdf_extract')) return true;
+  const haystack = [
+    request.prompt,
+    request.skillDomain,
+    ...(request.expectedArtifactTypes ?? []),
+  ].filter(Boolean).join('\n').toLowerCase();
+  return /\b(?:pdf|full\s*text|fulltext|全文|阅读全文|pdf\s*extraction)\b/i.test(haystack);
+}
 
 function directExternalNetworkUses(source: string) {
   const uses = new Set<string>();

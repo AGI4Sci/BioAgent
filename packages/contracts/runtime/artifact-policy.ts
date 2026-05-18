@@ -181,6 +181,15 @@ export function buildDirectContextFastPathItems(inputs: DirectContextFastPathInp
       summary,
     });
   }
+  for (const reference of [...recordRows(inputs.references), ...recordRows(inputs.currentReferences)].slice(-DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.references)) {
+    const ref = directContextReferenceRef(reference);
+    items.push({
+      kind: stringField(reference.kind) ?? 'file',
+      label: stringField(reference.title) ?? ref ?? 'reference',
+      ref,
+      summary: directContextReferenceSummary(reference) ?? ref ?? 'current reference',
+    });
+  }
   for (const artifact of [...recordRows(inputs.artifacts), ...recordRows(inputs.uiArtifacts)].slice(-DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.artifacts)) {
     const metadata = isRecord(artifact.metadata) ? artifact.metadata : {};
     const delivery = isRecord(artifact.delivery) ? artifact.delivery : {};
@@ -203,15 +212,6 @@ export function buildDirectContextFastPathItems(inputs: DirectContextFastPathInp
       label: `${type} ${id}`,
       ref,
       summary: directContextArtifactSummary(artifact),
-    });
-  }
-  for (const reference of [...recordRows(inputs.references), ...recordRows(inputs.currentReferences)].slice(-DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.references)) {
-    const ref = stringField(reference.ref);
-    items.push({
-      kind: stringField(reference.kind) ?? 'file',
-      label: stringField(reference.title) ?? ref ?? 'reference',
-      ref,
-      summary: directContextReferenceSummary(reference) ?? ref ?? 'current reference',
     });
   }
   for (const claim of recordRows(inputs.claims).slice(-DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.references)) {
@@ -241,6 +241,55 @@ export function buildDirectContextFastPathItems(inputs: DirectContextFastPathInp
     });
   }
   return dedupeDirectContextFastPathItems(items);
+}
+
+function directContextReferenceRef(reference: ArtifactPolicyRecord): string | undefined {
+  const payload = isRecord(reference.payload) ? reference.payload : {};
+  const provenance = isRecord(payload.provenance) ? payload.provenance : {};
+  const currentReference = isRecord(payload.currentReference) ? payload.currentReference : {};
+  const currentProvenance = isRecord(currentReference.provenance) ? currentReference.provenance : {};
+  const objectReference = isRecord(payload.objectReference) ? payload.objectReference : {};
+  const objectProvenance = isRecord(objectReference.provenance) ? objectReference.provenance : {};
+  const readablePath = [
+    stringField(reference.dataRef),
+    stringField(reference.path),
+    stringField(provenance.dataRef),
+    stringField(provenance.path),
+    stringField(payload.dataRef),
+    stringField(payload.path),
+    stringField(currentReference.dataRef),
+    stringField(currentReference.path),
+    stringField(currentProvenance.dataRef),
+    stringField(currentProvenance.path),
+    stringField(objectReference.dataRef),
+    stringField(objectReference.path),
+    stringField(objectProvenance.dataRef),
+    stringField(objectProvenance.path),
+  ].find(isDirectContextReadableTextRef);
+  return readablePath
+    ?? stringField(reference.ref)
+    ?? stringField(currentReference.ref)
+    ?? stringField(objectReference.ref)
+    ?? stringField(reference.dataRef)
+    ?? stringField(reference.path)
+    ?? stringField(provenance.dataRef)
+    ?? stringField(provenance.path)
+    ?? stringField(payload.dataRef)
+    ?? stringField(payload.path)
+    ?? stringField(currentReference.dataRef)
+    ?? stringField(currentReference.path)
+    ?? stringField(currentProvenance.dataRef)
+    ?? stringField(currentProvenance.path)
+    ?? stringField(objectReference.dataRef)
+    ?? stringField(objectReference.path)
+    ?? stringField(objectProvenance.dataRef)
+    ?? stringField(objectProvenance.path);
+}
+
+function isDirectContextReadableTextRef(value: string | undefined) {
+  return typeof value === 'string'
+    && /\.(?:md|markdown|txt|csv|tsv|json|py|ipynb)(?:$|[?#])/i.test(value)
+    && !/^(?:artifact|run|execution-unit|claim|runtime):/i.test(value);
 }
 
 export function directContextFastPathMessage(items: DirectContextFastPathItem[]): string {
@@ -763,35 +812,35 @@ function directContextReferenceSummary(reference: ArtifactPolicyRecord): string 
   const currentReference = isRecord(payload.currentReference) ? payload.currentReference : {};
   const objectReference = isRecord(payload.objectReference) ? payload.objectReference : {};
   const candidates = [
-    reference.summary,
-    reference.selectedText,
-    reference.preview,
     reference.content,
     reference.text,
     reference.markdown,
     directContextDataPreview(reference.data),
+    reference.selectedText,
+    reference.preview,
+    reference.summary,
     payload.summary,
-    payload.selectedText,
-    payload.sourceSummary,
-    payload.preview,
     payload.content,
     payload.text,
     payload.markdown,
     directContextDataPreview(payload.data),
-    currentReference.summary,
-    currentReference.selectedText,
-    currentReference.preview,
+    payload.selectedText,
+    payload.sourceSummary,
+    payload.preview,
     currentReference.content,
     currentReference.text,
     currentReference.markdown,
     directContextDataPreview(currentReference.data),
-    objectReference.summary,
-    objectReference.selectedText,
-    objectReference.preview,
+    currentReference.summary,
+    currentReference.selectedText,
+    currentReference.preview,
     objectReference.content,
     objectReference.text,
     objectReference.markdown,
     directContextDataPreview(objectReference.data),
+    objectReference.summary,
+    objectReference.selectedText,
+    objectReference.preview,
   ];
   return candidates
     .map(stringField)

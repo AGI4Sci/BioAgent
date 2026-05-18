@@ -17,5 +17,5 @@ test('core capability manifests include platform and local provider contracts', 
   assert.equal(CORE_CAPABILITY_MANIFESTS.some((manifest) => manifest.id === 'web_search'), false);
   assert.equal(CORE_CAPABILITY_MANIFESTS.some((manifest) => manifest.id === 'web_fetch'), false);
   assert.equal(pdfExtract?.providers[0]?.source, 'local');
-  assert.equal(pdfExtract?.providers[0]?.status, 'available');
+  assert.equal(pdfExtract?.providers[0]?.status, 'unknown');
 });

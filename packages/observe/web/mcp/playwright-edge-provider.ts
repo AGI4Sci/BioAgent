@@ -38,6 +38,7 @@ export interface PlaywrightEdgeBrowserInvocationOutput {
     title?: string;
   }>;
   resultLinks?: Array<{ text: string; href: string }>;
+  links?: Array<{ text: string; href: string }>;
   providerDiagnostics: {
     mcpUrl: string;
     transport: 'streamable-http' | 'sse';
@@ -45,6 +46,79 @@ export interface PlaywrightEdgeBrowserInvocationOutput {
     userAgent?: string;
     brands?: unknown;
     edgeDetected: boolean;
+  };
+}
+
+export interface PlaywrightEdgeBrowserAutomationProvider {
+  search(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+  fetch(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
+export interface PlaywrightEdgeBrowserAutomationProviderOptions {
+  mcpUrl?: string;
+  maxChars?: number;
+  timeoutMs?: number;
+}
+
+export function createPlaywrightEdgeBrowserAutomationProvider(
+  defaults: PlaywrightEdgeBrowserAutomationProviderOptions = {},
+): PlaywrightEdgeBrowserAutomationProvider {
+  return {
+    async search(input) {
+      const query = stringField(input.query) ?? stringField(input.rawQuery);
+      if (!query) throw new Error('playwright_edge_browser search requires query.');
+      const limit = clampNumber(input.limit ?? input.maxResults, 5, 1, 10);
+      const output = await invokePlaywrightEdgeBrowser({
+        query,
+        mode: 'search',
+        openFirstResult: false,
+        mcpUrl: stringField(input.mcpUrl) ?? defaults.mcpUrl,
+        maxChars: numberField(input.maxChars) ?? defaults.maxChars,
+        timeoutMs: numberField(input.timeoutMs) ?? defaults.timeoutMs,
+      });
+      return {
+        query,
+        rawQuery: stringField(input.rawQuery) ?? query,
+        provider: 'playwright-edge-mcp',
+        engine: 'bing-rendered-edge-mcp',
+        finalUrl: output.url,
+        status: output.status,
+        ok: output.status === 'succeeded' || output.status === 'partial',
+        title: output.title,
+        rendered: true,
+        resultLinks: output.resultLinks ?? [],
+        results: (output.resultLinks ?? []).slice(0, limit).map((link) => ({
+          title: link.text || link.href,
+          url: link.href,
+          snippet: link.text,
+        })),
+        providerDiagnostics: publicProviderDiagnostics(output.providerDiagnostics),
+      };
+    },
+    async fetch(input) {
+      const url = stringField(input.url);
+      if (!url) throw new Error('playwright_edge_browser fetch requires url.');
+      const output = await invokePlaywrightEdgeBrowser({
+        url,
+        mode: 'read',
+        mcpUrl: stringField(input.mcpUrl) ?? defaults.mcpUrl,
+        maxChars: numberField(input.maxChars) ?? defaults.maxChars,
+        timeoutMs: numberField(input.timeoutMs) ?? defaults.timeoutMs,
+      });
+      return {
+        url,
+        finalUrl: output.url,
+        status: output.status === 'failed' ? 0 : 200,
+        ok: output.status === 'succeeded' || output.status === 'partial',
+        provider: 'playwright-edge-mcp',
+        rendered: true,
+        title: output.title,
+        text: output.text,
+        links: (output.links ?? []).map((link) => ({ text: link.text, url: link.href })),
+        observations: output.observations,
+        providerDiagnostics: publicProviderDiagnostics(output.providerDiagnostics),
+      };
+    },
   };
 }
 
@@ -107,6 +181,7 @@ export async function invokePlaywrightEdgeBrowser(
         title: pageInfo.title,
       }],
       ...(resultLinks ? { resultLinks } : {}),
+      ...(pageInfo.links ? { links: pageInfo.links } : {}),
       providerDiagnostics: {
         mcpUrl,
         transport: connected.transport,
@@ -247,4 +322,25 @@ function isTextContent(value: unknown): value is { type: 'text'; text: string } 
     && typeof value === 'object'
     && (value as { type?: unknown }).type === 'text'
     && typeof (value as { text?: unknown }).text === 'string';
+}
+
+function stringField(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberField(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function publicProviderDiagnostics(diagnostics: PlaywrightEdgeBrowserInvocationOutput['providerDiagnostics']) {
+  return {
+    transport: diagnostics.transport,
+    toolCount: diagnostics.toolCount,
+    edgeDetected: diagnostics.edgeDetected,
+  };
 }

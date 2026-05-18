@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -1439,6 +1439,98 @@ test('selected metadata-only literature report answers full-text status from sel
   assert.doesNotMatch(payload.message, /2501\.00001|UNSELECTED|full-text research completed/);
 });
 
+test('selected no-result literature report follow-up is not routed to stale QC missingness context', () => {
+  const noResultReport = [
+    '# 中文文献调研报告（无可确认结果）',
+    '',
+    '- Query: today arxiv agent computer use',
+    '- 最新论文列表：为空。',
+    '- PDF/全文状态：没有可对应到论文的 PDF/全文可读记录；arxiv-api could not satisfy explicit arXiv query: arXiv API returned HTTP 429。',
+    '- 证据位置：只有 provider diagnostics；没有可引用的 arXiv abs/PDF 链接、页码、段落或论文内证据位置。',
+    '- 关键结论：本轮未能确认今天 arXiv 上有满足 agent computer use 的可规范化论文记录。',
+    '- 局限性：provider 限流和 bounded run 可能造成假阴性；需要重试 arXiv 和逐篇 PDF extraction。',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: 'Use the selected report only. Answer in Chinese: did this run confirm any today arxiv papers about agent computer use? List PDF/full-text status, evidence location limits, key conclusion, and remaining limitations.',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      data: { markdown: noResultReport },
+    }, {
+      id: 'stale-missingness-report',
+      type: 'csv',
+      data: {
+        text: [
+          'metric,count,percent',
+          'Total patients,165,100.0',
+          'Missing baseline severity,14,8.5',
+          'Protocol deviations,24,14.5',
+        ].join('\n'),
+      },
+    }],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:research-report',
+      title: 'research-report',
+    }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:research-report'] })),
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:research-report',
+        title: 'research-report',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /没有。选中报告明确是无可确认结果\/最新论文列表为空/);
+  assert.match(payload.message, /arXiv API returned HTTP 429/);
+  assert.match(payload.message, /没有可引用的 arXiv abs\/PDF 链接、页码、段落或论文内证据位置/);
+  assert.match(payload.message, /不能支持“已完成阅读全文调研”/);
+  assert.doesNotMatch(payload.message, /QC\/missingness|treatment-effect|missing baseline severity|protocol deviations/i);
+  assert.deepEqual(payload.objectReferences?.map((reference) => reference.ref), ['artifact:research-report']);
+});
+
+test('selected no-result literature report follow-up does not hard-code arXiv topic copy', () => {
+  const noResultReport = [
+    '# 中文文献调研报告（无可确认结果）',
+    '',
+    '- Query: PubMed mitochondrial calcium oscillation sensors',
+    '- 最新论文列表：为空。',
+    '- PDF/全文状态：没有可对应到论文的 PDF/全文可读记录；PubMed provider returned no records。',
+    '- 证据位置：只有 provider diagnostics；没有可引用的 PubMed/PDF 链接、页码、段落或论文内证据位置。',
+    '- 关键结论：本轮未能确认满足 mitochondrial calcium oscillation sensors 的可规范化论文记录。',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: '只读选中的 report。请说明这次是否确认到 PubMed mitochondrial calcium oscillation sensors 论文、PDF/全文状态、证据位置和局限性。',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      data: { markdown: noResultReport },
+    }],
+    references: [{ kind: 'artifact', ref: 'artifact:research-report', title: 'research-report' }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:research-report'] })),
+      currentReferences: [{ kind: 'artifact', ref: 'artifact:research-report', title: 'research-report' }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /请求条件下的相关论文：没有/);
+  assert.match(payload.message, /PubMed provider returned no records/);
+  assert.match(payload.message, /PubMed 论文\/PDF/);
+  assert.doesNotMatch(payload.message, /今天 arXiv|today arXiv|agent computer use/i);
+});
+
 test('direct context fast path answers skill tool capability provider status queries from runtime registry', () => {
   const request: GatewayRequest = {
     skillDomain: 'literature',
@@ -2492,6 +2584,9 @@ test('selected literature report read-first follow-up is answered from report ro
 test('selected literature report read-first follow-up can recover paper rows from json-like report context', () => {
   const reportText = JSON.stringify({
     papers: [{
+      title: 'Provider search',
+      summary: 'Called web_search; normalized 8 candidate records.',
+    }, {
       title: 'PRiMeFlow: Capturing Complex Expression Heterogeneity in Perturbation Response Modelling',
       published: '2026-04-15T15:33:07Z',
       url: 'https://arxiv.org/abs/2604.13986v2',
@@ -2545,7 +2640,274 @@ test('selected literature report read-first follow-up can recover paper rows fro
   assert.match(payload.message, /PRiMeFlow/);
   assert.match(payload.message, /Flow Matching for Count Data/);
   assert.match(payload.message, /证据位置/);
+  assert.doesNotMatch(payload.message, /Provider search|Called web_search/);
   assert.doesNotMatch(payload.message, /Completion verdict|selected chart|single chart/i);
+});
+
+test('selected literature report read-first follow-up prioritizes extracted PDF rows with evidence pages', () => {
+  const reportMarkdown = [
+    '# 中文文献调研报告',
+    '## 候选论文与全文/PDF状态',
+    '| title | year | venue | url | fullTextStatus | evidenceLocation | summary | limitations |',
+    '|---|---|---|---|---|---|---|---|',
+    '| ShopGym: An Integrated Framework for Realistic Simulation and Scalable Benchmarking of E-Commerce Web Agents | 2026-05-15 |  | https://arxiv.org/abs/2605.16116 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16116 | https://arxiv.org/pdf/2605.16116#page=1 | Developing and evaluating e-commerce web agents requires environments that preserve meaningful task structure while enabling controllable, reproducible, and scalable scientific comparison. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| ScreenSearch: Uncertainty-Aware OS Exploration | 2026-05-15 |  | https://arxiv.org/abs/2605.16024 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16024 | https://arxiv.org/pdf/2605.16024#page=1 | Desktop GUI agents operate under partial observability; ScreenSearch frames the task as computer/OS state exploration before committing. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| PAGER: Bridging the Semantic-Execution Gap in Point-Precise Geometric GUI Control | 2026-05-15 |  | https://arxiv.org/abs/2605.15963 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.15963 | https://arxiv.org/pdf/2605.15963#page=1 | Large vision-language models have advanced GUI agents, but precise geometric construction requires point-accurate execution. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| SaaS-Bench: Can Computer-Use Agents Leverage Real-World SaaS to Solve Professional Workflows? | 2026-05-15 |  | https://arxiv.org/abs/2605.15777 | PDF/full-text candidate URL inferred from source: https://arxiv.org/pdf/2605.15777 | https://arxiv.org/abs/2605.15777 | arXiv:2605.15777 / published:2026-05-15 / pdf:https://arxiv.org/pdf/2605.15777 | Provider-grounded recovery package; citation/full-text verification should be run before strong scientific claims. |',
+  ].join(' ');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: '基于刚才选中的research-report，不要启动新搜索。请选出最值得继续阅读全文的3篇，中文说明每篇为什么优先、PDF/全文状态、证据页码或URL、关键结论和局限性。',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      data: { markdown: reportMarkdown },
+    }],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:research-report',
+      title: 'research-report',
+    }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:research-report'] })),
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:research-report',
+        title: 'research-report',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /优先阅读 1：ShopGym/);
+  assert.match(payload.message, /优先阅读 2：ScreenSearch/);
+  assert.match(payload.message, /优先阅读 3：PAGER/);
+  assert.match(payload.message, /evidence=https:\/\/arxiv\.org\/pdf\/2605\.16024#page=1/);
+  assert.match(payload.message, /Desktop GUI agents operate under partial observability/);
+  assert.doesNotMatch(payload.message, /理由：https:\/\/arxiv\.org\/abs/);
+  assert.doesNotMatch(payload.message, /Known By Their Actions/);
+});
+
+test('selected literature report no-new-search follow-up overrides stale fresh-execution decision', () => {
+  const reportMarkdown = [
+    '# 中文文献调研报告',
+    '## 候选论文与全文/PDF状态',
+    '| title | year | venue | url | fullTextStatus | evidenceLocation | summary | limitations |',
+    '|---|---|---|---|---|---|---|---|',
+    '| ShopGym: An Integrated Framework for Realistic Simulation and Scalable Benchmarking of E-Commerce Web Agents | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16116 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16116 | https://arxiv.org/pdf/2605.16116#page=1 | Developing and evaluating e-commerce web agents requires realistic, reproducible environments for controlled scientific comparison. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| ScreenSearch: Uncertainty-Aware OS Exploration | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16024 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16024 | https://arxiv.org/pdf/2605.16024#page=1 | 2605.16024 | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| PAGER: Bridging the Semantic-Execution Gap in Point-Precise Geometric GUI Control | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.15963 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.15963 | https://arxiv.org/pdf/2605.15963#page=1 | 2605.15963 | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: '请再次基于刚才选中的research-report，不启动新搜索。选出最值得继续阅读全文的3篇，并用中文说明每篇为什么优先、PDF/全文状态、证据页码或URL、关键结论和局限性。',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      data: { markdown: reportMarkdown },
+    }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('fresh-execution', {
+        usedRefs: ['runtime://fresh-dispatch'],
+      })),
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.equal(payload.executionUnits[0]?.tool, 'sciforge.direct-context-fast-path');
+  assert.match(payload.message, /不启动新的 workspace task，也不重新检索/);
+  assert.match(payload.message, /优先阅读 1：ShopGym/);
+  assert.match(payload.message, /优先阅读 2：ScreenSearch/);
+  assert.match(payload.message, /优先阅读 3：PAGER/);
+  assert.match(payload.message, /完成 bounded PDF 抽取并保留证据位置/);
+  assert.doesNotMatch(payload.message, /理由：2605\.16024/);
+});
+
+test('prompt-named literature report wins over stale selected report context', () => {
+  const goodReport = [
+    '# 中文文献调研报告',
+    '## 候选论文与全文/PDF状态',
+    '| title | year | venue | url | fullTextStatus | evidenceLocation | summary | limitations |',
+    '|---|---|---|---|---|---|---|---|',
+    '| ShopGym: An Integrated Framework for Realistic Simulation and Scalable Benchmarking of E-Commerce Web Agents | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16116 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16116 | https://arxiv.org/pdf/2605.16116#page=1 | Developing and evaluating e-commerce web agents requires realistic, reproducible environments for controlled scientific comparison. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| ScreenSearch: Uncertainty-Aware OS Exploration | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16024 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16024 | https://arxiv.org/pdf/2605.16024#page=1 | Desktop GUI agents operate under partial observability and should explore uncertain OS state before committing actions. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    '| PAGER: Bridging the Semantic-Execution Gap in Point-Precise Geometric GUI Control | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.15963 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.15963 | https://arxiv.org/pdf/2605.15963#page=1 | Point-precise geometric GUI control needs execution grounded in exact spatial operations, not only semantic labels. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+  ].join('\n');
+  const staleReport = [
+    '# 中文文献调研报告（bad stale search）',
+    '检索 provider：duckduckgo-html；provider query：bad stale query',
+    '| title | year | venue | url | fullTextStatus | evidenceLocation | summary | limitations |',
+    '|---|---|---|---|---|---|---|---|',
+    '| Baidu - 百度一下，你就知道 | 2026 | web | //duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.baidu.com%2F | Full-text/PDF unavailable in this run because provider fetch failed; source URL retained for retry. | //duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.baidu.com%2F | 百度是全球领先的中文搜索引擎。 | Provider-grounded recovery package; citation/full-text verification should be run before strong scientific claims. |',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: '基于 task-results/agentserver-generation-retry-literature-recovery-literature-b4b24737361b-research-report.md，不启动新搜索。选出最值得继续阅读全文的3篇，并用中文说明每篇为什么优先、PDF/全文状态、证据页码或URL、关键结论和局限性。',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    artifacts: [{
+      id: 'stale-report',
+      type: 'research-report',
+      dataRef: 'task-results/stale-duckduckgo-research-report.md',
+      data: { markdown: staleReport },
+    }, {
+      id: 'research-report',
+      type: 'research-report',
+      dataRef: 'task-results/agentserver-generation-retry-literature-recovery-literature-b4b24737361b-research-report.md',
+      data: { markdown: goodReport },
+    }],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:stale-report',
+      title: 'stale-duckduckgo-research-report.md',
+    }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:stale-report'] })),
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:stale-report',
+        title: 'stale-duckduckgo-research-report.md',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.match(payload.message, /优先阅读 1：ShopGym/);
+  assert.match(payload.message, /优先阅读 2：ScreenSearch/);
+  assert.match(payload.message, /优先阅读 3：PAGER/);
+  assert.doesNotMatch(payload.message, /Baidu|duckduckgo-html|百度一下/);
+});
+
+test('contextProjection selected report with no-new-search hydrates session artifact and stays direct-context', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-context-projection-followup-'));
+  try {
+    const sessionDir = join(workspace, '.sciforge', 'sessions', '2026-05-18_literature-evidence-review_session-literature-evidence-review-session-context-proj');
+    const reportRef = '.sciforge/sessions/2026-05-18_literature-evidence-review_session-literature-evidence-review-session-context-proj/task-results/research-report.md';
+    const report = [
+      '# 中文文献调研报告',
+      '| title | year | venue | url | fullTextStatus | evidenceLocation | summary | limitations |',
+      '|---|---|---|---|---|---|---|---|',
+      '| ShopGym: An Integrated Framework for Realistic Simulation and Scalable Benchmarking of E-Commerce Web Agents | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16116 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16116 | https://arxiv.org/pdf/2605.16116#page=1 | Developing and evaluating e-commerce web agents requires realistic, reproducible environments for controlled scientific comparison. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+      '| ScreenSearch: Uncertainty-Aware OS Exploration | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16024 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16024 | https://arxiv.org/pdf/2605.16024#page=1 | Desktop GUI agents operate under partial observability and should explore uncertain OS state before committing actions. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+      '| PAGER: Bridging the Semantic-Execution Gap in Point-Precise Geometric GUI Control | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.15963 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.15963 | https://arxiv.org/pdf/2605.15963#page=1 | Point-precise geometric GUI control needs execution grounded in exact spatial operations, not only semantic labels. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    ].join('\n');
+    await mkdir(join(sessionDir, 'artifacts'), { recursive: true });
+    await mkdir(join(sessionDir, 'task-results'), { recursive: true });
+    await writeFile(join(workspace, reportRef), report, 'utf8');
+    await writeFile(join(sessionDir, 'artifacts', 'research-report.json'), JSON.stringify({
+      id: 'research-report',
+      type: 'research-report',
+      title: 'research-report',
+      dataRef: reportRef,
+      path: reportRef,
+    }), 'utf8');
+    const request: GatewayRequest = {
+      skillDomain: 'literature',
+      prompt: '基于刚才选中的research-report，不启动新搜索。请选出最值得继续阅读全文的3篇，中文说明每篇为什么优先、PDF/全文状态、证据页码或URL、关键结论和局限性。',
+      workspacePath: workspace,
+      agentServerBaseUrl: 'http://agentserver.example.test',
+      artifacts: [],
+      uiState: {
+        sessionId: 'session-context-proj',
+        contextProjection: {
+          selectedContextRefs: ['artifact:research-report'],
+          contextRefs: [{ ref: reportRef, kind: 'artifact' }],
+        },
+      },
+    };
+
+    const hydrated = await requestWithDirectContextReadableArtifactData(request);
+    const payload = directContextFastPathPayload(hydrated);
+
+    assert.ok(payload);
+    assert.equal(payload.executionUnits[0]?.tool, 'sciforge.direct-context-fast-path');
+    assert.match(payload.message, /不启动新的 workspace task，也不重新检索/);
+    assert.match(payload.message, /优先阅读 1：ShopGym/);
+    assert.match(payload.message, /优先阅读 2：ScreenSearch/);
+    assert.match(payload.message, /优先阅读 3：PAGER/);
+    assert.doesNotMatch(payload.message, /duckduckgo|Baidu|百度一下/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test('selected reference provenance path beats colliding generic artifact id in bounded report follow-up', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-selected-report-provenance-'));
+  try {
+    const goodRef = 'task-results/good-research-report.md';
+    const staleRef = 'task-results/stale-research-report.md';
+    const goodReport = [
+      '# 中文文献调研报告',
+      '| title | year | venue | url | fullTextStatus | evidenceLocation | summary | limitations |',
+      '|---|---|---|---|---|---|---|---|',
+      '| ShopGym: An Integrated Framework for Realistic Simulation and Scalable Benchmarking of E-Commerce Web Agents | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16116 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16116 | https://arxiv.org/pdf/2605.16116#page=1 | Developing and evaluating e-commerce web agents requires realistic, reproducible environments for controlled scientific comparison. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+      '| ScreenSearch: Uncertainty-Aware OS Exploration | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.16024 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.16024 | https://arxiv.org/pdf/2605.16024#page=1 | Desktop GUI agents operate under partial observability and should explore uncertain OS state before committing actions. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+      '| PAGER: Bridging the Semantic-Execution Gap in Point-Precise Geometric GUI Control | 2026-05-15 | arXiv | https://arxiv.org/abs/2605.15963 | PDF extracted via pdf_extract (pdftotext), page range 1-8, chars=14000; source https://arxiv.org/pdf/2605.15963 | https://arxiv.org/pdf/2605.15963#page=1 | Point-precise geometric GUI control needs execution grounded in exact spatial operations, not only semantic labels. | PDF text was bounded to the configured page/character budget; citation claims should stay within recorded evidence locations. |',
+    ].join('\n');
+    await mkdir(join(workspace, 'task-results'), { recursive: true });
+    await writeFile(join(workspace, goodRef), goodReport, 'utf8');
+    await writeFile(join(workspace, staleRef), '# stale report\n\nNo PDF/full-text URL confirmed by provider metadata; Provider-grounded recovery package.', 'utf8');
+    const request: GatewayRequest = {
+      skillDomain: 'literature',
+      prompt: '基于刚才选中的research-report，不启动新搜索。请选出最值得继续阅读全文的3篇，中文说明每篇为什么优先、PDF/全文状态、证据页码或URL、关键结论和局限性。',
+      workspacePath: workspace,
+      agentServerBaseUrl: 'http://agentserver.example.test',
+      artifacts: [{
+        id: 'research-report',
+        type: 'research-report',
+        dataRef: staleRef,
+        data: { markdown: 'No PDF/full-text URL confirmed by provider metadata; Provider-grounded recovery package.' },
+      }],
+      references: [{
+        id: 'ref-selected-report',
+        kind: 'task-result',
+        title: 'research-report',
+        ref: 'artifact:research-report',
+        payload: {
+          currentReference: {
+            id: 'obj-selected-report',
+            kind: 'artifact',
+            title: 'research-report',
+            ref: 'artifact:research-report',
+            artifactType: 'research-report',
+            provenance: { dataRef: goodRef },
+          },
+          objectReference: {
+            id: 'obj-selected-report',
+            kind: 'artifact',
+            title: 'research-report',
+            ref: 'artifact:research-report',
+            artifactType: 'research-report',
+            provenance: { dataRef: goodRef },
+          },
+        },
+      }],
+      uiState: {
+        conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:research-report'] })),
+        currentReferences: [],
+      },
+    };
+
+    const hydrated = await requestWithDirectContextReadableArtifactData(request);
+    const payload = directContextFastPathPayload(hydrated);
+
+    assert.ok(payload);
+    assert.match(payload.message, /不启动新的 workspace task，也不重新检索/);
+    assert.match(payload.message, /优先阅读 1：ShopGym/);
+    assert.match(payload.message, /优先阅读 2：ScreenSearch/);
+    assert.match(payload.message, /优先阅读 3：PAGER/);
+    assert.doesNotMatch(payload.message, /没有记录任何已经读取|No PDF\/full-text URL confirmed/);
+    assert.doesNotMatch(JSON.stringify(payload.objectReferences ?? []), /stale-research-report/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test('scoped no-rerun repair prompt still yields to backend when it asks to generate a minimal task', () => {

@@ -925,6 +925,70 @@ test('generated Python task writes failed-with-reason when provider invocation i
   }
 });
 
+test('generated Python helper converts command provider timeout into ProviderInvocationError', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-provider-timeout-'));
+  const request: GatewayRequest = {
+    workspacePath: workspace,
+    skillDomain: 'literature',
+    prompt: 'Extract PDF text with the ready provider.',
+    selectedToolIds: ['pdf_extract'],
+    artifacts: [],
+    uiState: {
+      sessionId: 'session-provider-timeout',
+      sessionCreatedAt: '2026-05-12T05:25:00.000Z',
+      capabilityProviderAvailability: [{
+        id: 'sciforge.web-worker.pdf_extract',
+        providerId: 'sciforge.web-worker.pdf_extract',
+        capabilityId: 'pdf_extract',
+        workerId: 'sciforge.web-worker',
+        available: true,
+        status: 'available',
+      }],
+    },
+    scenarioPackageRef: { id: 'literature-evidence-review', version: '1.0.0', source: 'built-in' },
+  };
+
+  const result = await runGeneratedTaskExecutionLifecycle({
+    workspace,
+    request,
+    skill: providerTestSkill('2026-05-12T05:25:00.000Z'),
+    generation: {
+      ok: true,
+      runId: 'run-provider-timeout',
+      response: {
+        taskFiles: [{
+          path: 'tasks/provider-timeout.py',
+          language: 'python',
+          content: [
+            'import sys',
+            'from sciforge_task import load_input, write_payload, invoke_capability, ProviderInvocationError',
+            '_, input_path, output_path = sys.argv',
+            'task_input = load_input(input_path)',
+            'try:',
+            '    invoke_capability(task_input, "pdf_extract", {"url": "https://arxiv.org/pdf/2605.16024"}, timeout_seconds=0.001)',
+            'except ProviderInvocationError as error:',
+            '    write_payload(output_path, {"message": str(error), "confidence": 0, "claimType": "runtime-diagnostic", "evidenceLevel": "provider", "reasoningTrace": "timeout converted to ProviderInvocationError", "claims": [], "uiManifest": [], "executionUnits": [{"id": "provider-call", "tool": "invoke_capability", "status": "failed-with-reason", "failureReason": str(error)}], "artifacts": []})',
+            'else:',
+            '    write_payload(output_path, {"message": "unexpected success", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []})',
+          ].join('\n'),
+        }],
+        entrypoint: { language: 'python', path: 'tasks/provider-timeout.py' },
+        environmentRequirements: {},
+        validationCommand: '',
+        expectedArtifacts: ['runtime-diagnostic'],
+      },
+    },
+    deps: { repairNeededPayload },
+  });
+
+  assert.equal(result.kind, 'run');
+  if (result.kind !== 'run') return;
+  assert.equal(result.execution.run.exitCode, 0);
+  const output = JSON.parse(await readFile(join(workspace, result.execution.run.outputRef), 'utf8'));
+  assert.match(output.message, /pdf_extract CLI timed out/);
+  assert.equal(output.executionUnits[0]?.status, 'failed-with-reason');
+});
+
 test('generated task preflight blocks direct network when web provider route is ready', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-generated-provider-first-preflight-'));
   const request: GatewayRequest = {

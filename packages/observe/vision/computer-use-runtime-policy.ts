@@ -253,6 +253,7 @@ export function isHighRiskVisionSenseGuiRequest(prompt: string) {
 export function looksLikeVisionSenseComputerUseRequest(prompt: string) {
   const text = prompt.trim();
   if (!text) return false;
+  if (looksLikeNonGuiResearchTask(text)) return false;
   if (/\b(computer\s*use|gui|desktop|screenshot|mouse|keyboard|click|type|scroll|drag)\b/i.test(text)) return true;
   if (/\b(on[-\s]?screen|current screen|visible screen|screen capture|capture the screen)\b/i.test(text)) return true;
   if (/\b(browser|word|powerpoint|ppt)\b.{0,32}\b(open|click|type|scroll|drag|operate|control|use)\b/i.test(text)) return true;
@@ -261,6 +262,20 @@ export function looksLikeVisionSenseComputerUseRequest(prompt: string) {
   if (/(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿).{0,24}(打开|点击|输入|滚动|拖拽|操作|切换|保存|创建)/.test(text)) return true;
   if (/(打开|点击|输入|滚动|拖拽|操作|切换|保存|创建).{0,24}(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿)/.test(text)) return true;
   if (/控制.{0,12}(浏览器|网页|页面|窗口|应用|软件|演示文稿)|(?:浏览器|网页|页面|窗口|应用|软件|演示文稿).{0,12}控制/.test(text)) return true;
+  return false;
+}
+
+function looksLikeNonGuiResearchTask(text: string) {
+  const asksForResearchOutput = /\b(?:arxiv|pubmed|biorxiv|medrxiv|papers?|articles?|literature|research|survey|review|summar(?:y|ize|ise)|report|full[-\s]?text|pdf|doi|pmid|citations?|evidence)\b|论文|文献|调研|综述|报告|全文|证据|引用|检索/i.test(text);
+  if (!asksForResearchOutput) return false;
+  return !hasExplicitGuiOperation(text);
+}
+
+function hasExplicitGuiOperation(text: string) {
+  if (/\b(?:open|click|type|scroll|drag|operate|control|switch|save|create)\b.{0,40}\b(?:browser|page|window|app|desktop|screen|screenshot|mouse|keyboard|word|powerpoint|ppt)\b/i.test(text)) return true;
+  if (/\b(?:browser|page|window|app|desktop|screen|screenshot|mouse|keyboard|word|powerpoint|ppt)\b.{0,40}\b(?:open|click|type|scroll|drag|operate|control|switch|save|create)\b/i.test(text)) return true;
+  if (/(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿|屏幕|鼠标|键盘).{0,24}(打开|点击|输入|滚动|拖拽|操作|切换|保存|创建|控制)/.test(text)) return true;
+  if (/(打开|点击|输入|滚动|拖拽|操作|切换|保存|创建|控制).{0,24}(浏览器|网页|页面|窗口|应用|软件|文档|演示文稿|屏幕|鼠标|键盘)/.test(text)) return true;
   return false;
 }
 

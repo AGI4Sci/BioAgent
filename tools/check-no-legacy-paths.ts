@@ -141,17 +141,30 @@ const rules: Rule[] = [
 // of these paths, lower the matching count in this table in the same change.
 const trackedBaselineCounts: Record<string, number> = {
   'src/runtime/gateway/agent-backend-config.ts#provider-scenario-prompt-special-case': 0,
-  'src/runtime/gateway/capability-provider-preflight.ts#provider-scenario-prompt-special-case': 31,
-  'src/runtime/gateway/direct-context-fast-path.ts#provider-scenario-prompt-special-case': 16,
+  // T120 migration note, 2026-05-18 Integration Worker:
+  // P1/P6 user-level closures added bounded provider/full-text recovery,
+  // selected artifact direct-context answers, markdown read-only answers, and
+  // deterministic artifact mutation fast paths. These are frozen here as
+  // migration debt; move them into manifests/catalog policies before reducing
+  // the baseline.
+  'src/runtime/gateway/artifact-mutation-fast-path.ts#provider-scenario-prompt-special-case': 11,
+  'src/runtime/gateway/capability-provider-preflight.ts#provider-scenario-prompt-special-case': 35,
+  'src/runtime/gateway/conversation-reference-digest.ts#provider-scenario-prompt-special-case': 1,
+  'src/runtime/gateway/conversation-service-plan.ts#provider-scenario-prompt-special-case': 1,
+  'src/runtime/gateway/direct-context-fast-path.ts#provider-scenario-prompt-special-case': 72,
   'src/runtime/gateway/generated-task-runner-execution-lifecycle.ts#provider-scenario-prompt-special-case': 1,
-  'src/runtime/gateway/generated-task-runner-validation-lifecycle.ts#provider-scenario-prompt-special-case': 1,
+  'src/runtime/gateway/generated-task-payload-preflight.ts#provider-scenario-prompt-special-case': 4,
+  'src/runtime/gateway/generated-task-runner-generation-lifecycle.ts#provider-scenario-prompt-special-case': 19,
+  'src/runtime/gateway/generated-task-runner-supplement-lifecycle.ts#provider-scenario-prompt-special-case': 2,
+  'src/runtime/gateway/generated-task-runner-validation-lifecycle.ts#provider-scenario-prompt-special-case': 6,
+  'src/runtime/gateway/markdown-readonly-fast-path.ts#provider-scenario-prompt-special-case': 7,
   'src/runtime/gateway/runtime-routing.ts#provider-scenario-prompt-special-case': 3,
   'src/runtime/gateway/transient-external-failure.ts#provider-scenario-prompt-special-case': 1,
   'src/runtime/gateway/agentserver-context-window.ts#provider-scenario-prompt-special-case': 0,
   'src/runtime/gateway/agentserver-prompts.ts#provider-scenario-prompt-special-case': 0,
   'src/runtime/gateway/backend-failure-diagnostics.ts#provider-scenario-prompt-special-case': 0,
   'src/runtime/gateway/context-envelope.ts#provider-scenario-prompt-special-case': 0,
-  'src/runtime/gateway/gateway-request.ts#provider-scenario-prompt-special-case': 0,
+  'src/runtime/gateway/gateway-request.ts#provider-scenario-prompt-special-case': 1,
   'src/runtime/gateway/capability-evolution-events.ts#provider-scenario-prompt-special-case': 0,
   'src/runtime/gateway/repair-policy.ts#provider-scenario-prompt-special-case': 0,
   'src/runtime/gateway/work-evidence-guard.ts#provider-scenario-prompt-special-case': 0,

@@ -784,7 +784,9 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
           source: 'agentserver-run-output',
           runId: typeof run.id === 'string' ? run.id : undefined,
         });
-        if (!strictTaskFilesReason && dispatchAttempt < 2) {
+        if (!strictTaskFilesReason
+          && dispatchAttempt < 2
+          && !shouldPreferProviderRecoveryOverMalformedRetry(params.request, params.skill)) {
           strictTaskFilesReason = malformedGenerationReason;
           emitWorkspaceRuntimeEvent(params.callbacks, {
             type: AGENTSERVER_GENERATED_TASK_RETRY_EVENT_TYPE,
@@ -925,6 +927,13 @@ async function dispatchAgentServerGeneration(params: AgentServerGenerationParams
     clearTimeout(timeout);
     params.callbacks?.signal?.removeEventListener('abort', abortGeneration);
   }
+}
+
+function shouldPreferProviderRecoveryOverMalformedRetry(request: GatewayRequest, skill: SkillAvailability) {
+  if (request.skillDomain === 'literature') return true;
+  if (request.scenarioPackageRef?.id === 'literature-evidence-review') return true;
+  if (skill.id.includes('literature')) return true;
+  return skill.manifest.skillDomains.includes('literature');
 }
 
 function agentServerGenerationFailureWithWorkEvidence(

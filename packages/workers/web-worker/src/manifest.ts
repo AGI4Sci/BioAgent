@@ -4,8 +4,8 @@ export const webWorkerManifest: ToolWorkerManifest = {
   protocolVersion: 'sciforge.tools.v1',
   workerId: 'sciforge.web-worker',
   workerVersion: '0.1.0',
-  description: 'Read-only web search, fetch, and browser-rendered retrieval worker for SciForge agents.',
-  capabilities: ['web_search', 'web_fetch', 'browser_search', 'browser_fetch', 'read_only_network', 'browser_automation'],
+  description: 'Read-only web search, fetch, PDF text extraction, and browser-rendered retrieval worker for SciForge agents.',
+  capabilities: ['web_search', 'web_fetch', 'browser_search', 'browser_fetch', 'pdf_extract', 'read_only_network', 'browser_automation'],
   providers: [
     {
       providerId: 'sciforge.web-worker.web_search',
@@ -15,7 +15,7 @@ export const webWorkerManifest: ToolWorkerManifest = {
       healthPath: '/health',
       manifestPath: '/manifest',
       permissions: ['network'],
-      status: 'available',
+      status: 'degraded',
     },
     {
       providerId: 'sciforge.web-worker.web_fetch',
@@ -25,7 +25,7 @@ export const webWorkerManifest: ToolWorkerManifest = {
       healthPath: '/health',
       manifestPath: '/manifest',
       permissions: ['network'],
-      status: 'available',
+      status: 'degraded',
     },
     {
       providerId: 'sciforge.web-worker.browser_search',
@@ -45,6 +45,16 @@ export const webWorkerManifest: ToolWorkerManifest = {
       healthPath: '/health',
       manifestPath: '/manifest',
       permissions: ['network', 'browser'],
+      status: 'available',
+    },
+    {
+      providerId: 'sciforge.web-worker.pdf_extract',
+      capabilityId: 'pdf_extract',
+      transport: 'http',
+      invokePath: '/invoke',
+      healthPath: '/health',
+      manifestPath: '/manifest',
+      permissions: ['network'],
       status: 'available',
     },
   ],
@@ -75,6 +85,7 @@ export const webWorkerManifest: ToolWorkerManifest = {
       inputSchema: {
         url: { type: 'string', required: true, description: 'HTTP or HTTPS URL to fetch.' },
         maxChars: { type: 'number', description: 'Maximum text characters to return.', default: 12000 },
+        maxPages: { type: 'number', description: 'For PDF responses, maximum pages to extract from the start of the document.', default: 8 },
       },
       outputSchema: {
         url: { type: 'string', required: true },
@@ -82,6 +93,7 @@ export const webWorkerManifest: ToolWorkerManifest = {
         status: { type: 'number', required: true },
         title: { type: 'string' },
         text: { type: 'string', required: true },
+        pdfExtraction: { type: 'object' },
       },
       sideEffects: ['network'],
       timeoutMs: 20000,
@@ -129,6 +141,28 @@ export const webWorkerManifest: ToolWorkerManifest = {
       sideEffects: ['network'],
       timeoutMs: 30000,
       tags: ['web', 'fetch', 'browser', 'rendered', 'research'],
+    },
+    {
+      id: 'pdf_extract',
+      name: 'PDF Extract',
+      version: '0.1.0',
+      description: 'Download a public PDF URL and extract bounded text with page-range evidence locations.',
+      inputSchema: {
+        url: { type: 'string', required: true, description: 'HTTP or HTTPS PDF URL to fetch.' },
+        maxChars: { type: 'number', description: 'Maximum extracted text characters to return.', default: 12000 },
+        maxPages: { type: 'number', description: 'Maximum pages to extract from the start of the document.', default: 8 },
+        timeoutMs: { type: 'number', description: 'Download and extraction timeout in milliseconds.', default: 20000 },
+      },
+      outputSchema: {
+        url: { type: 'string', required: true },
+        finalUrl: { type: 'string', required: true },
+        status: { type: 'number', required: true },
+        text: { type: 'string', required: true },
+        pdfExtraction: { type: 'object', required: true },
+      },
+      sideEffects: ['network'],
+      timeoutMs: 30000,
+      tags: ['web', 'pdf', 'extract', 'full-text', 'research'],
     },
   ],
 };

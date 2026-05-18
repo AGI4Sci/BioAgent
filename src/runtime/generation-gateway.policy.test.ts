@@ -11,9 +11,13 @@ import {
   GATEWAY_PIPELINE_STAGE_ORDER,
   GATEWAY_PIPELINE_STAGES,
   STAGE_AGENTSERVER_DISPATCH_CONSTRAINTS,
+  STAGE_ARTIFACT_MUTATION_FAST_PATH,
   STAGE_CAPABILITY_PROVIDER_PREFLIGHT,
   STAGE_CONVERSATION_POLICY,
   STAGE_DIRECT_CONTEXT_FAST_PATH,
+  STAGE_LOCAL_DATA_SENSITIVITY_RUNTIME,
+  STAGE_LOCAL_REPRODUCIBLE_METHOD_RUNTIME,
+  STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME,
   STAGE_REQUEST_ENRICHMENT,
   STAGE_RUNTIME_EXECUTION_CONSTRAINTS,
   STAGE_VISION_SENSE_RUNTIME,
@@ -181,11 +185,11 @@ test('provider preflight blocks before sense or backend dispatch for explicit pr
       skillDomain: 'literature',
       prompt: 'Require web_search provider route for recent papers; do not run backend network code.',
       workspacePath: workspace,
-      selectedToolIds: ['local.vision-sense'],
+      selectedToolIds: ['web_search', 'local.vision-sense'],
       artifacts: [],
       references: [],
       uiState: {
-        selectedToolIds: ['local.vision-sense'],
+        selectedToolIds: ['web_search', 'local.vision-sense'],
       },
     });
 
@@ -254,15 +258,19 @@ test('gateway pipeline audit records stage sequence and replayable registry orde
         STAGE_CONVERSATION_POLICY,
         STAGE_REQUEST_ENRICHMENT,
         STAGE_CAPABILITY_PROVIDER_PREFLIGHT,
+        STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME,
         STAGE_DIRECT_CONTEXT_FAST_PATH,
+        STAGE_ARTIFACT_MUTATION_FAST_PATH,
         STAGE_RUNTIME_EXECUTION_CONSTRAINTS,
         STAGE_VISION_SENSE_RUNTIME,
+        STAGE_LOCAL_DATA_SENSITIVITY_RUNTIME,
+        STAGE_LOCAL_REPRODUCIBLE_METHOD_RUNTIME,
         STAGE_AGENTSERVER_DISPATCH_CONSTRAINTS,
       ],
     );
     assert.deepEqual(
       stageAudits.map((event) => event.raw.shortCircuit),
-      [false, false, false, false, false, false, true],
+      [false, false, false, false, false, false, false, false, false, false, true],
     );
     const dispatchAudit = stageAudits.at(-1);
     assert.equal(dispatchAudit.raw.stage, STAGE_AGENTSERVER_DISPATCH_CONSTRAINTS);
@@ -398,11 +406,14 @@ test('repair-continuation bounded stop returns terminal repair payload instead o
       prompt: 'Continue the failed run from the compact refs and do not restart broad generation.',
       workspacePath: workspace,
       agentServerBaseUrl: `http://127.0.0.1:${address.port}`,
-      maxContextWindowTokens: 200_000,
+      maxContextWindowTokens: 120_000,
       artifacts: [],
       uiState: {
         forceAgentServerGeneration: true,
-        contextReusePolicy: { mode: 'repair' },
+        contextReusePolicy: {
+          mode: 'repair',
+          priorWorkSignals: { repairTargetAvailable: true },
+        },
         currentReferenceDigests: [{ ref: 'artifact:prior-digest', digestRef: '.sciforge/digests/prior.json', title: 'Prior digest' }],
         recentExecutionRefs: [{
           id: 'EU-prior-failed',

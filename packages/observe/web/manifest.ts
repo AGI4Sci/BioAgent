@@ -28,7 +28,10 @@ export {
   type PlaywrightEdgeMcpServersConfig,
 } from './mcp/playwright-edge';
 export {
+  createPlaywrightEdgeBrowserAutomationProvider,
   invokePlaywrightEdgeBrowser,
+  type PlaywrightEdgeBrowserAutomationProvider,
+  type PlaywrightEdgeBrowserAutomationProviderOptions,
   type PlaywrightEdgeBrowserInvocationInput,
   type PlaywrightEdgeBrowserInvocationOutput,
 } from './mcp/playwright-edge-provider';

@@ -90,6 +90,173 @@ test('artifact mutation fast path applies generic constraint rewrites to arbitra
   assert.doesNotMatch(updated, /90,000|18 months|0\.5 FTE/);
 });
 
+test('artifact mutation fast path respects explicit selected artifact target and parses new constraints before old-constraint bans', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-explicit-selected-mutation-'));
+  await mkdir(join(workspace, 'generic-eval'), { recursive: true });
+  await mkdir(join(workspace, 'other-package'), { recursive: true });
+  await writeFile(join(workspace, 'generic-eval', 'design-note.md'), 'Budget $60,000 for 6 months. analyst 0.2 FTE.\n', 'utf8');
+  await writeFile(join(workspace, 'other-package', 'risk-register.md'), 'Do not touch this file.\n', 'utf8');
+
+  const payload = await tryRunArtifactMutationFastPath({
+    skillDomain: 'knowledge',
+    workspacePath: workspace,
+    artifacts: [],
+    references: [{ kind: 'file', ref: 'file:other-package/risk-register.md', title: 'risk-register.md' }],
+    uiState: {
+      currentReferences: [{ kind: 'file', ref: 'file:other-package/risk-register.md', title: 'risk-register.md' }],
+    },
+    prompt: [
+      'Selected artifact: generic-eval/design-note.md. Rewrite only this artifact and write back.',
+      'Replace constraints with v2: budget 72,000 USD; duration 8 months; analyst 0.25 FTE.',
+      'Budget categories: personnel, software, validation, contingency.',
+      'Do not show old constraints 60,000 USD, 6 months, 0.2 FTE.',
+    ].join(' '),
+  });
+
+  assert.ok(payload);
+  assert.deepEqual(payload?.artifacts.map((artifact) => artifact.path), ['generic-eval/design-note.md']);
+  const updated = await readFile(join(workspace, 'generic-eval', 'design-note.md'), 'utf8');
+  assert.match(updated, /Budget: \$72,000/);
+  assert.match(updated, /Duration: 8 months/);
+  assert.match(updated, /analyst 0\.25 FTE/i);
+  assert.match(updated, /\| Software \| \$18,000 \|/);
+  assert.match(updated, /\| Contingency \| \$18,000 \|/);
+  assert.doesNotMatch(updated, /60,000|6 months|0\.2 FTE/);
+  assert.equal(await readFile(join(workspace, 'other-package', 'risk-register.md'), 'utf8'), 'Do not touch this file.\n');
+});
+
+test('artifact mutation fast path replaces stale current constraints section instead of appending duplicates', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-stale-current-constraints-'));
+  await mkdir(join(workspace, 'generic-eval'), { recursive: true });
+  await writeFile(join(workspace, 'generic-eval', 'design-note.md'), [
+    '# Design Note',
+    '',
+    '## Budget',
+    '| Category | Cost | Notes |',
+    '|----------|------|-------|',
+    '| Personnel | $20,000 | analyst 0.2 FTE |',
+    '| Compute | $20,000 | stale category |',
+    '| Validation | $20,000 | stale amount |',
+    '| **Total** | **$60,000** | |',
+    '',
+    '## Current Constraints',
+    '- Budget: $60,000',
+    '- Duration: 6 months',
+    '- Team/FTE: analyst 0.2 FTE',
+    '- Budget categories: personnel / compute',
+  ].join('\n'), 'utf8');
+
+  const payload = await tryRunArtifactMutationFastPath({
+    skillDomain: 'knowledge',
+    workspacePath: workspace,
+    artifacts: [],
+    prompt: [
+      'Repair the previous generic artifact edit.',
+      'Selected artifact: generic-eval/design-note.md. Rewrite only generic-eval/design-note.md and write back.',
+      'Effective constraints: budget 72,000 USD; duration 8 months; analyst 0.25 FTE; engineer 0.35 FTE.',
+      'Budget categories: personnel, software, validation, contingency.',
+      'Remove old constraints 60,000 USD, 6 months, 0.2 FTE, 0.3 FTE.',
+    ].join(' '),
+  });
+
+  assert.ok(payload);
+  assert.deepEqual(payload?.artifacts.map((artifact) => artifact.path), ['generic-eval/design-note.md']);
+  const updated = await readFile(join(workspace, 'generic-eval', 'design-note.md'), 'utf8');
+  assert.equal((updated.match(/^## Current Constraints$/gm) ?? []).length, 1);
+  assert.equal((updated.match(/^- Duration:/gm) ?? []).length, 1);
+  assert.equal((updated.match(/^- Budget categories:/gm) ?? []).length, 1);
+  assert.match(updated, /Budget: \$72,000/);
+  assert.match(updated, /Duration: 8 months/);
+  assert.match(updated, /analyst 0\.25 FTE; engineer 0\.35 FTE/i);
+  assert.match(updated, /Budget categories: personnel \/ software \/ validation \/ contingency/);
+  assert.doesNotMatch(updated, /60,000|6 months|0\.2 FTE|0\.3 FTE|personnel \/ compute/);
+});
+
+test('artifact mutation fast path preserves arbitrary non-budget constraints generically', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-arbitrary-constraints-'));
+  await mkdir(join(workspace, 'repro-audit'), { recursive: true });
+  await writeFile(join(workspace, 'repro-audit', 'audit.md'), [
+    '# Reproducibility Audit',
+    '',
+    '## Current Constraints',
+    '- Runtime: Python 3.10',
+    '- Sample size: 24',
+    '- Metrics: accuracy only',
+    '- Owner: TBD',
+  ].join('\n'), 'utf8');
+
+  const payload = await tryRunArtifactMutationFastPath({
+    skillDomain: 'knowledge',
+    workspacePath: workspace,
+    artifacts: [],
+    prompt: [
+      'Selected artifact: repro-audit/audit.md. Rewrite only repro-audit/audit.md and write back.',
+      'Hard requirements v2: runtime Python 3.11; sample size 48; privacy synthetic data only; metrics AUROC and calibration; owner QA lead.',
+      'Include sections: Scope, Acceptance Criteria, Risks.',
+      'Remove old constraints: Python 3.10, sample size 24, accuracy only, owner TBD.',
+      'Main answer must list the active constraints and changed file.',
+    ].join(' '),
+  });
+
+  assert.ok(payload);
+  assert.deepEqual(payload?.artifacts.map((artifact) => artifact.path), ['repro-audit/audit.md']);
+  assert.match(payload?.message ?? '', /Runtime=Python 3\.11/i);
+  assert.match(payload?.message ?? '', /Sample Size=48/i);
+  assert.match(payload?.message ?? '', /Privacy=synthetic data only/i);
+  const updated = await readFile(join(workspace, 'repro-audit', 'audit.md'), 'utf8');
+  assert.equal((updated.match(/^## Current Constraints$/gm) ?? []).length, 1);
+  assert.match(updated, /Runtime: Python 3\.11/);
+  assert.match(updated, /Sample Size: 48/);
+  assert.match(updated, /Privacy: synthetic data only/);
+  assert.match(updated, /Metrics: AUROC and calibration/);
+  assert.match(updated, /Owner: QA lead/);
+  assert.match(updated, /^## Scope$/m);
+  assert.match(updated, /^## Acceptance Criteria$/m);
+  assert.match(updated, /^## Risks$/m);
+  assert.doesNotMatch(updated, /Include Sections|Acceptance: Criteria/);
+  assert.doesNotMatch(updated, /Python 3\.10|sample size 24|accuracy only|owner TBD/i);
+});
+
+test('artifact mutation fast path refreshes requested section bodies when constraints change', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-refresh-sections-'));
+  await mkdir(join(workspace, 'repro-audit'), { recursive: true });
+  await writeFile(join(workspace, 'repro-audit', 'audit.md'), [
+    '# Reproducibility Audit',
+    '',
+    '## Scope',
+    '- Scope is bounded by the active constraints: Runtime: Python 3.10; Sample Size: 24; Metrics: accuracy only.',
+    '',
+    '## Acceptance Criteria',
+    '- Active constraints are reflected in the artifact: Runtime: Python 3.10; Sample Size: 24; Metrics: accuracy only.',
+    '',
+    '## Risks',
+    '- Remaining risk: old risk text.',
+    '',
+    '## Current Constraints',
+    '- Runtime: Python 3.10',
+    '- Sample Size: 24',
+    '- Metrics: accuracy only',
+  ].join('\n'), 'utf8');
+
+  const payload = await tryRunArtifactMutationFastPath({
+    skillDomain: 'knowledge',
+    workspacePath: workspace,
+    artifacts: [],
+    prompt: [
+      'Selected artifact: repro-audit/audit.md. Rewrite only repro-audit/audit.md and write back.',
+      'Hard requirements v2: runtime Python 3.11; sample size 48; metrics AUROC and calibration; owner QA lead.',
+      'Include sections: Scope, Acceptance Criteria, Risks.',
+      'Remove old constraints: Python 3.10, sample size 24, accuracy only.',
+    ].join(' '),
+  });
+
+  assert.ok(payload);
+  const updated = await readFile(join(workspace, 'repro-audit', 'audit.md'), 'utf8');
+  assert.match(updated, /Scope is bounded by the active constraints: Runtime: Python 3\.11; Sample Size: 48; Metrics: AUROC and calibration; Owner: QA lead/);
+  assert.match(updated, /Active constraints are reflected in the artifact: Runtime: Python 3\.11; Sample Size: 48; Metrics: AUROC and calibration; Owner: QA lead/);
+  assert.doesNotMatch(updated, /Python 3\.10|Sample Size: 24|accuracy only|Include Sections|Acceptance: Criteria/);
+});
+
 test('artifact mutation fast path rewrites mini-grant package constraints across files', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-artifact-package-'));
   const grantDir = join(workspace, 'p6-mini-grant');

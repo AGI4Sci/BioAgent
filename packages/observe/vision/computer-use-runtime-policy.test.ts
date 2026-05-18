@@ -94,6 +94,10 @@ test('vision-sense package owns computer-use intent prompt policy', () => {
     looksLikeVisionSenseComputerUseRequest('Open the desktop presentation app and create a GUI Agent slide through computer use.'),
     true,
   );
+  assert.equal(
+    looksLikeVisionSenseComputerUseRequest('Research today arxiv papers about agent computer use. Read full text or PDF as much as possible. Write a Chinese summary report artifact.'),
+    false,
+  );
 });
 
 test('vision-sense package owns app alias prompt line extraction policy', () => {

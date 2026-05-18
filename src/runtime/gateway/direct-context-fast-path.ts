@@ -42,15 +42,19 @@ export function directContextFastPathPayload(request: GatewayRequest): ToolPaylo
     ? decision.transformMode
     : answerOnlyTransformRequestedLegacyFallback(request.prompt);
   const selectedLiteratureReportBulletsMessage = selectedLiteratureReportBulletSummaryMessage(request, payloadContext);
-  const selectedQcMissingnessMessage = selectedLiteratureReportBulletsMessage
+  const selectedReportEvidenceStatusMessage = selectedLiteratureReportBulletsMessage
+    ? undefined
+    : selectedReportEvidenceStatusAnswerMessage(request, payloadContext);
+  const selectedQcMissingnessMessage = selectedLiteratureReportBulletsMessage || selectedReportEvidenceStatusMessage
     ? undefined
     : selectedQcMissingnessImpactAnswerMessage(request, payloadContext);
-  const selectedChartSufficiencyMessage = selectedLiteratureReportBulletsMessage || selectedQcMissingnessMessage
+  const selectedChartSufficiencyMessage = selectedLiteratureReportBulletsMessage || selectedReportEvidenceStatusMessage || selectedQcMissingnessMessage
     ? undefined
     : selectedChartSufficiencyAnswerMessage(request, payloadContext);
   const suppressExpectedArtifactGate = Boolean(
     transformMode
     || selectedLiteratureReportBulletsMessage
+    || selectedReportEvidenceStatusMessage
     || selectedQcMissingnessMessage
     || selectedChartSufficiencyMessage
     || boundedArtifactFollowupRequested(request),
@@ -58,6 +62,7 @@ export function directContextFastPathPayload(request: GatewayRequest): ToolPaylo
   const missingExpectedArtifacts = suppressExpectedArtifactGate ? [] : missingExpectedArtifactTypes(request);
   if (missingExpectedArtifacts.length) return missingExpectedArtifactsPayload(request, payloadContext, missingExpectedArtifacts, gate);
   const message = selectedLiteratureReportBulletsMessage
+    ?? selectedReportEvidenceStatusMessage
     ?? selectedQcMissingnessMessage
     ?? selectedChartSufficiencyMessage
     ?? directContextAnswerMessage(request, payloadContext, decision);
@@ -151,11 +156,20 @@ function scopedDirectContextPayloadContext(
   context: ReturnType<typeof buildDirectContextFastPathItems>,
 ) {
   const promptNamedContext = promptNamedDirectContextItems(request, context);
-  if (promptNamedContext.length) return promptNamedContext;
+  const promptFileTitle = promptMentionedFileTitle(request.prompt);
+  if (promptFileTitle && promptNamedContext.length) return promptNamedContext;
   const selectedRefs = selectedReferenceTokens(request);
-  if (!selectedRefs.length || !explicitSelectedOnlyPrompt(request.prompt)) return context;
-  const selectedContext = context.filter((item) => directContextItemMatchesSelectedRef(item, selectedRefs));
-  return selectedContext.length ? selectedContext : context;
+  const durableSelectedRefs = selectedDurableReferenceTokens(request);
+  const durableSelectedContext = durableSelectedRefs.length
+    ? context.filter((item) => directContextItemMatchesSelectedRef(item, durableSelectedRefs))
+    : [];
+  if (durableSelectedContext.length && boundedArtifactFollowupPrompt(request.prompt)) return durableSelectedContext;
+  if (selectedRefs.length && explicitSelectedOnlyPrompt(request.prompt)) {
+    const selectedContext = context.filter((item) => directContextItemMatchesSelectedRef(item, selectedRefs));
+    return selectedContext.length ? selectedContext : context;
+  }
+  if (promptNamedContext.length) return promptNamedContext;
+  return context;
 }
 
 function promptNamedDirectContextItems(
@@ -296,17 +310,23 @@ export async function requestWithDirectContextReadableArtifactData(request: Gate
 
   const workspace = resolve(request.workspacePath || process.cwd());
   let artifacts = (await Promise.all(request.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)))).filter(isRecord);
+  const references = (await Promise.all(recordRows(request.references).map((reference) => hydrateDirectContextReadableReference(reference, workspace)))).filter(isRecord);
   const hydratedUiArtifacts = Array.isArray(uiState.artifacts)
     ? await Promise.all(uiState.artifacts.map((artifact) => hydrateDirectContextReadableArtifact(artifact, workspace)))
     : uiState.artifacts;
+  const hydratedCurrentReferences = Array.isArray(uiState.currentReferences)
+    ? await Promise.all(uiState.currentReferences.map((reference) => hydrateDirectContextReadableReference(reference, workspace)))
+    : uiState.currentReferences;
   const promptNamedArtifact = await promptNamedReadableArtifactFromCurrentRefs(request, workspace, artifacts);
   if (promptNamedArtifact) artifacts = mergeArtifactRecords([...artifacts, promptNamedArtifact]);
   return {
     ...request,
     artifacts,
+    references,
     uiState: {
       ...uiState,
       artifacts: hydratedUiArtifacts,
+      currentReferences: hydratedCurrentReferences,
     },
   };
 }
@@ -325,6 +345,46 @@ async function hydrateDirectContextReadableArtifact(artifact: unknown, workspace
     ? { ...existingData, markdown: text, content: text, text }
     : { ...existingData, content: text, text };
   return { ...artifact, data };
+}
+
+async function hydrateDirectContextReadableReference(reference: unknown, workspace: string) {
+  if (!isRecord(reference)) return reference;
+  if (recordHasInlineReadableArtifactData(reference)) return reference;
+  const ref = readableReferenceFileRef(reference);
+  const path = safeDirectContextReadPath(workspace, ref);
+  if (!path) return reference;
+  const text = await readBoundedUtf8(path, DIRECT_CONTEXT_FAST_PATH_POLICY.contextLimits.summaryChars * 12);
+  if (!text) return reference;
+  return {
+    ...reference,
+    content: text,
+    text,
+    markdown: /\.(?:md|markdown)$/i.test(path) ? text : stringField(reference.markdown),
+  };
+}
+
+function readableReferenceFileRef(reference: Record<string, unknown>) {
+  const payload = isRecord(reference.payload) ? reference.payload : {};
+  const provenance = isRecord(payload.provenance) ? payload.provenance : {};
+  const currentReference = isRecord(payload.currentReference) ? payload.currentReference : {};
+  const currentProvenance = isRecord(currentReference.provenance) ? currentReference.provenance : {};
+  const objectReference = isRecord(payload.objectReference) ? payload.objectReference : {};
+  const objectProvenance = isRecord(objectReference.provenance) ? objectReference.provenance : {};
+  return stringField(reference.dataRef)
+    ?? stringField(reference.path)
+    ?? stringField(provenance.dataRef)
+    ?? stringField(provenance.path)
+    ?? stringField(payload.dataRef)
+    ?? stringField(payload.path)
+    ?? stringField(currentReference.dataRef)
+    ?? stringField(currentReference.path)
+    ?? stringField(currentProvenance.dataRef)
+    ?? stringField(currentProvenance.path)
+    ?? stringField(objectReference.dataRef)
+    ?? stringField(objectReference.path)
+    ?? stringField(objectProvenance.dataRef)
+    ?? stringField(objectProvenance.path)
+    ?? stringField(reference.ref);
 }
 
 async function promptNamedReadableArtifactFromCurrentRefs(
@@ -727,6 +787,7 @@ function directContextDecisionForRequest(request: GatewayRequest): DirectContext
   const fallback = legacyDirectContextPolicyWithoutCanonicalHarness(request)
     ? undefined
     : fallbackDirectContextDecisionForBoundedArtifactFollowup(request);
+  if (fallback && boundedArtifactFollowupForbidsFreshWork(request.prompt)) return fallback;
   if (fallback && (!structured || !directContextDecisionAllowsAnswer(structured))) return fallback;
   return structured ?? fallback;
 }
@@ -887,14 +948,14 @@ function directContextAnswerMessage(
   const prompt = request.prompt;
   const selectedLiteratureReportBullets = selectedLiteratureReportBulletSummaryMessage(request, context);
   if (selectedLiteratureReportBullets) return selectedLiteratureReportBullets;
+  const selectedReportEvidenceStatus = selectedReportEvidenceStatusAnswerMessage(request, context);
+  if (selectedReportEvidenceStatus) return selectedReportEvidenceStatus;
   const selectedQcMissingness = selectedQcMissingnessImpactAnswerMessage(request, context);
   if (selectedQcMissingness) return selectedQcMissingness;
   const selectedChartSufficiency = selectedChartSufficiencyAnswerMessage(request, context);
   if (selectedChartSufficiency) return selectedChartSufficiency;
   const hypotheses = testableHypothesesFromEvidenceMatrixMessage(prompt, context);
   if (hypotheses) return hypotheses;
-  const selectedReportEvidenceStatus = selectedReportEvidenceStatusAnswerMessage(request, context);
-  if (selectedReportEvidenceStatus) return selectedReportEvidenceStatus;
   const selectedReportCounterfactual = selectedReportCounterfactualThresholdAnswerMessage(request, context);
   if (selectedReportCounterfactual) return selectedReportCounterfactual;
   const selectedReportPassFailAudit = selectedReportPassFailAuditAnswerMessage(request, context);
@@ -1165,8 +1226,17 @@ function selectedReportEvidenceStatusAnswerMessage(
   const asksFullTextStatus = promptAsksFullTextEvidenceStatus(prompt);
   if (!asksFullTextStatus) return undefined;
   const promptNamedContext = promptNamedDirectContextItems(request, context);
+  const promptFileTitle = promptMentionedFileTitle(request.prompt);
   const selectedRefs = selectedReferenceTokens(request);
-  const selectedContext = promptNamedContext.length
+  const durableSelectedRefs = selectedDurableReferenceTokens(request);
+  const durableSelectedContext = durableSelectedRefs.length
+    ? context.filter((item) => directContextItemMatchesSelectedRef(item, durableSelectedRefs))
+    : [];
+  const selectedContext = promptFileTitle && promptNamedContext.length
+    ? promptNamedContext
+    : durableSelectedContext.length
+    ? durableSelectedContext
+    : promptNamedContext.length
     ? promptNamedContext
     : selectedRefs.length
     ? context.filter((item) => directContextItemMatchesSelectedRef(item, selectedRefs))
@@ -1183,7 +1253,37 @@ function selectedReportEvidenceStatusAnswerMessage(
     && !/(until full[-\s]?text verification|requires full[-\s]?text verification|未验证|待验证|metadata until)/i.test(sourceText);
   const sourceLines = evidenceStatusSourceLines(sourceText);
   const selectedTitle = selectedReportTitle(request) ?? 'selected report';
-  if (/[一-龥]/.test(prompt)) {
+  const noConfirmedPapers = selectedLiteratureReportNoConfirmedPapers(sourceText);
+  if (noConfirmedPapers) {
+    const reason = selectedLiteratureReportUnavailableReason(sourceText);
+    const scope = selectedLiteratureNoResultScope(sourceText, prompt);
+    const basisLines = sourceLines.length
+      ? sourceLines
+      : selectedLiteratureReportBasisLines(sourceText);
+    if (promptWantsChinese(prompt)) {
+      return [
+        `只基于当前选中的 ${selectedTitle} 回答，不启动新的 workspace task，也不使用未选中的历史消息或外部新检索。`,
+        '',
+        `- 是否确认${scope.conditionLabel}的相关论文：没有。选中报告明确是无可确认结果/最新论文列表为空，不能把本轮结果解读成已经确认到满足请求条件的论文。`,
+        `- PDF/全文状态：没有可对应到论文的 PDF/全文可读记录；${reason ?? '报告没有给出可引用论文的 PDF 或全文读取证据。'}`,
+        `- 证据位置边界：证据只停留在 provider/运行诊断或失败原因层面；没有可引用的${scope.sourceEvidenceLabel}链接、页码、段落或论文内证据位置。`,
+        '- 关键结论：本轮可以诚实支持“未确认到满足请求条件的论文”，不能支持“已完成阅读全文调研”。',
+        `- 局限性：可能受 provider 限流、日期窗口、查询词和 bounded run 影响；需要稍后重试${scope.sourceRetryLabel}、放宽日期窗口或逐篇拉取 PDF 后才能形成 citation-grade 结论。`,
+        ...basisLines.map((line) => `- 选中报告依据：${line}`),
+      ].join('\n');
+    }
+    return [
+      `Answered only from the selected ${selectedTitle}; no new workspace task or external lookup was started.`,
+      '',
+      `- Confirmed papers for the requested scope: none. The selected report records an empty/no-confirmed-result literature list for ${scope.englishScope}.`,
+      `- PDF/full-text status: no paper-level PDF or full-text evidence was read or verified; ${reason ?? 'the report does not provide citable paper/PDF evidence.'}`,
+      `- Evidence-location boundary: only provider/runtime diagnostics are available; no ${scope.englishEvidenceLabel}, page, section, or snippet can be cited from the selected report.`,
+      '- Key conclusion: this supports an honest no-confirmed-result answer, not a completed full-text literature review.',
+      `- Limitations: provider rate limits, date-window strictness, query wording, and bounded execution may have caused false negatives; retry ${scope.englishRetryLabel} and paper-level PDF extraction are still required for citation-grade conclusions.`,
+      ...basisLines.map((line) => `- Selected-report basis: ${line}`),
+    ].join('\n');
+  }
+  if (promptWantsChinese(prompt)) {
     if (saysMetadataOnly || !hasCompletedFullTextEvidence) {
       return [
         `只基于当前选中的 ${selectedTitle} 回答，不启动新的 workspace task，也不使用未选中的历史消息或外部新检索。`,
@@ -1219,14 +1319,60 @@ function selectedReportEvidenceStatusAnswerMessage(
   ].join('\n');
 }
 
+function selectedLiteratureNoResultScope(sourceText: string, prompt: string) {
+  const text = `${sourceText}\n${prompt}`;
+  const source = /\barxiv\b/i.test(text)
+    ? 'arXiv'
+    : /\bpubmed\b/i.test(text)
+      ? 'PubMed'
+      : /\bbiorxiv\b/i.test(text)
+        ? 'bioRxiv'
+        : 'provider';
+  const conditionLabel = /\btoday\b|今天|submitted on|提交于/i.test(text) ? '当前日期窗口下' : '请求条件下';
+  return {
+    conditionLabel,
+    sourceEvidenceLabel: source === 'arXiv' ? ' arXiv abs/PDF ' : ` ${source} 论文/PDF `,
+    sourceRetryLabel: source === 'provider' ? '相关 provider' : ` ${source}`,
+    englishScope: source === 'provider' ? 'the requested provider/query scope' : `the requested ${source} query/date scope`,
+    englishEvidenceLabel: source === 'arXiv' ? 'arXiv abs/PDF link' : `${source} paper/PDF link`,
+    englishRetryLabel: source === 'provider' ? 'the relevant provider query' : `${source}`,
+  };
+}
+
 function promptAsksFullTextEvidenceStatus(prompt: string) {
   return /(PDF|full[-\s]?text|fulltext|arXiv|全文|全文证据|PDF证据|全文调研|论文全文|原文|读取|阅读|已读|读完|downloaded?|retrieved?|citation verification|引用验证|引文验证|文献验证|证据位置|页码|段落)/i.test(prompt);
+}
+
+function promptWantsChinese(prompt: string) {
+  return /[一-龥]/.test(prompt) || /\b(?:answer|write|respond|summari[sz]e|report)\s+in\s+Chinese\b|\bChinese\s+(?:answer|response|summary|report)\b|中文|汉语|普通话/i.test(prompt);
+}
+
+function selectedLiteratureReportNoConfirmedPapers(sourceText: string) {
+  return /(无可确认结果|未能确认|没有确认|未确认到|没有可规范化论文|最新论文列表[^。.!?\n]{0,40}(?:为空|空|无)|latest paper list[^。.!?\n]{0,40}(?:empty|none)|no confirmed (?:paper|result)|no citable (?:paper|result))/i.test(sourceText);
+}
+
+function selectedLiteratureReportUnavailableReason(sourceText: string) {
+  const line = sourceText
+    .split(/[\n\r]+|(?<=[。.!?；;])\s+/)
+    .map((part) => part.trim().replace(/\s+/g, ' '))
+    .find((part) => /(HTTP\s*429|rate limit|限流|unavailable|不可得|could not satisfy|failed|failure|错误|失败)/i.test(part));
+  return line && line.length <= 260 ? line : undefined;
+}
+
+function selectedLiteratureReportBasisLines(sourceText: string) {
+  return uniqueStrings(sourceText
+    .split(/[\n\r]+|(?<=[。.!?；;])\s+/)
+    .map((line) => line.trim().replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').replace(/\s+/g, ' '))
+    .filter((line) => /(无可确认|未能确认|最新论文列表|PDF|全文|证据位置|HTTP\s*429|arXiv|provider|diagnostic|局限|limitations?)/i.test(line))
+    .filter((line) => line.length > 0 && line.length <= 260))
+    .slice(0, 4);
 }
 
 interface LiteratureReportRow {
   title: string;
   year?: string;
   url?: string;
+  evidenceLocation?: string;
   fullTextStatus?: string;
   summary?: string;
   limitations?: string;
@@ -1255,7 +1401,7 @@ function selectedLiteratureReportBulletSummaryMessage(
     ...picks.map((pick, index) => [
       `- ${wantsPriority ? `优先阅读 ${index + 1}` : pick.theme}：${literatureRowConclusion(pick.row)}`,
       `  理由：${literatureReadFirstReason(pick.row, pick.theme)}`,
-      `  证据位置：选中 report 的候选论文表；title="${pick.row.title}"${pick.row.url ? `；URL=${pick.row.url}` : ''}`,
+      `  证据位置：选中 report 的候选论文表；title="${pick.row.title}"${pick.row.url ? `；URL=${pick.row.url}` : ''}${pick.row.evidenceLocation ? `；evidence=${pick.row.evidenceLocation}` : ''}`,
       `  PDF/full-text 状态：${literatureFullTextStatus(pick.row)}`,
       `  局限性：${literatureLimitation(pick.row)}`,
     ].join('\n')),
@@ -1284,6 +1430,7 @@ function literatureReportRows(sourceText: string): LiteratureReportRow[] {
       title,
       year: record.get('year'),
       url: record.get('url'),
+      evidenceLocation: record.get('evidencelocation'),
       fullTextStatus: record.get('fulltextstatus'),
       summary: record.get('summary'),
       limitations: record.get('limitations'),
@@ -1295,7 +1442,7 @@ function literatureReportRows(sourceText: string): LiteratureReportRow[] {
     ...rows,
     ...literatureReportRowsFromPipeCells(sourceText),
     ...literatureRowsFromEvidenceMatrixSummary(sourceText),
-  ]).slice(0, 12);
+  ]).filter(isLiteraturePaperRow).slice(0, 12);
 }
 
 function literatureReportRowsFromJsonLike(sourceText: string): LiteratureReportRow[] {
@@ -1309,9 +1456,10 @@ function literatureReportRowsFromJsonLike(sourceText: string): LiteratureReportR
     rows.push({
       title,
       year: firstJsonLikeString(block, ['year', 'published', 'date']) ?? firstJsonLikeDate(block),
-      url: firstJsonLikeString(block, ['url', 'evidenceLocation', 'sourceUrl']) ?? firstUrl(block),
+      url: firstJsonLikeString(block, ['url', 'sourceUrl']) ?? firstUrl(block),
+      evidenceLocation: firstJsonLikeString(block, ['evidenceLocation', 'evidence_location']),
       fullTextStatus: firstJsonLikeString(block, ['fullTextStatus', 'full_text_status', 'pdfStatus']),
-      summary: firstJsonLikeString(block, ['summary', 'evidenceSnippet', 'abstract', 'claim']),
+      summary: firstJsonLikeString(block, ['evidenceSnippet', 'abstract', 'summary', 'claim']),
       limitations: firstJsonLikeString(block, ['limitations', 'limitation', 'notes']),
     });
   }
@@ -1337,8 +1485,22 @@ function firstUrl(block: string) {
 
 function literatureReportRowsByRegex(sourceText: string): LiteratureReportRow[] {
   const rows: LiteratureReportRow[] = [];
-  const rowPattern = /\|\s*([^|\n]+?)\s*\|\s*(\d{4}[^|\n]*?)\s*\|\s*([^|\n]*?)\s*\|\s*(https?:\/\/[^|\s]+)\s*\|\s*([^|\n]*PDF\/full-text[^|\n]*)\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?=\|\s*(?:\||[A-Z0-9#]|$))/gi;
-  for (const match of sourceText.matchAll(rowPattern)) {
+  const withEvidencePattern = /\|\s*([^|\n]+?)\s*\|\s*(\d{4}[^|\n]*?)\s*\|\s*([^|\n]*?)\s*\|\s*(https?:\/\/[^|\s]+)\s*\|\s*([^|\n]*(?:PDF\s+extracted|PDF\/full-text|pdf_extract)[^|\n]*)\s*\|\s*([^|\n]*(?:https?:\/\/|#page=|artifact:|file:)[^|\n]*)\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?=\|\s*(?:\||[A-Z0-9#]|$))/gi;
+  for (const match of sourceText.matchAll(withEvidencePattern)) {
+    const title = match[1]?.trim();
+    if (!title || /^title$/i.test(title) || /^[-:]+$/.test(title)) continue;
+    rows.push({
+      title,
+      year: match[2]?.trim(),
+      url: match[4]?.trim(),
+      fullTextStatus: match[5]?.trim(),
+      evidenceLocation: match[6]?.trim(),
+      summary: match[7]?.trim(),
+      limitations: match[8]?.trim(),
+    });
+  }
+  const withoutEvidencePattern = /\|\s*([^|\n]+?)\s*\|\s*(\d{4}[^|\n]*?)\s*\|\s*([^|\n]*?)\s*\|\s*(https?:\/\/[^|\s]+)\s*\|\s*([^|\n]*(?:PDF\s+extracted|PDF\/full-text|pdf_extract|full[-\s]?text)[^|\n]*)\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?=\|\s*(?:\||[A-Z0-9#]|$))/gi;
+  for (const match of sourceText.matchAll(withoutEvidencePattern)) {
     const title = match[1]?.trim();
     if (!title || /^title$/i.test(title) || /^[-:]+$/.test(title)) continue;
     rows.push({
@@ -1369,7 +1531,8 @@ function literatureReportRowsFromPipeCells(sourceText: string): LiteratureReport
     && /^url$/i.test(cells[index + 3] ?? '')
     && /^fullTextStatus$/i.test(cells[index + 4] ?? ''));
   if (headerIndex < 0) return [];
-  const headers = cells.slice(headerIndex, headerIndex + 7).map((cell) => cell.toLowerCase());
+  const headerLength = /^evidenceLocation$/i.test(cells[headerIndex + 5] ?? '') ? 8 : 7;
+  const headers = cells.slice(headerIndex, headerIndex + headerLength).map((cell) => cell.toLowerCase());
   const rows: LiteratureReportRow[] = [];
   for (let index = headerIndex + headers.length; index + headers.length <= cells.length; index += headers.length) {
     const rowCells = cells.slice(index, index + headers.length);
@@ -1382,6 +1545,7 @@ function literatureReportRowsFromPipeCells(sourceText: string): LiteratureReport
       title,
       year: record.get('year'),
       url: record.get('url'),
+      evidenceLocation: record.get('evidencelocation'),
       fullTextStatus: record.get('fulltextstatus'),
       summary: record.get('summary'),
       limitations: record.get('limitations'),
@@ -1405,6 +1569,7 @@ function literatureRowsFromEvidenceMatrixSummary(sourceText: string): Literature
       title,
       year,
       url,
+      evidenceLocation: url,
       fullTextStatus: pdf ? `PDF/full-text candidate URL inferred from evidence matrix: ${pdf}` : undefined,
       summary,
       limitations: 'Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims.',
@@ -1426,9 +1591,10 @@ function uniqueLiteratureRows(rows: LiteratureReportRow[]) {
 }
 
 function pickLiteratureReportSummaryRows(rows: LiteratureReportRow[]) {
+  const paperRows = rows.filter(isLiteraturePaperRow);
   const used = new Set<LiteratureReportRow>();
   const pick = (theme: string, pattern: RegExp) => {
-    const row = rows.find((candidate) => !used.has(candidate) && pattern.test(`${candidate.title}\n${candidate.summary ?? ''}`));
+    const row = paperRows.find((candidate) => !used.has(candidate) && pattern.test(`${candidate.title}\n${candidate.summary ?? ''}`));
     if (!row) return undefined;
     used.add(row);
     return { theme, row };
@@ -1438,16 +1604,37 @@ function pickLiteratureReportSummaryRows(rows: LiteratureReportRow[]) {
     pick('perturbation prediction / 虚拟扰动预测', /PRiMeFlow|SCALE|SAVE|perturbation|virtual cell|multi-condition/i),
     pick('single-cell count / gene-regulation 方法基础', /Count Data|probability flow matching|gene regulation|single-cell RNA|scRNAseq/i),
   ].filter((item): item is { theme: string; row: LiteratureReportRow } => Boolean(item))
-    .concat(rows
+    .concat([...paperRows]
       .filter((row) => !used.has(row))
+      .sort((left, right) => literatureRowPriorityScore(right) - literatureRowPriorityScore(left))
       .slice(0, 3)
       .map((row) => ({ theme: '候选论文', row })))
     .slice(0, 3);
 }
 
+function literatureRowPriorityScore(row: LiteratureReportRow) {
+  const text = `${row.title}\n${row.fullTextStatus ?? ''}\n${row.summary ?? ''}\n${row.evidenceLocation ?? ''}`;
+  let score = 0;
+  if (/PDF\s+extracted|pdf_extract|pdftotext/i.test(text)) score += 5;
+  if (/https?:\/\/\S+#page=\d+/i.test(text)) score += 3;
+  if (/GUI|browser|web agents?|computer-use|computer\/OS|OS exploration|SaaS/i.test(text)) score += 2;
+  if ((row.summary ?? '').length >= 80) score += 1;
+  return score;
+}
+
+function isLiteraturePaperRow(row: LiteratureReportRow) {
+  if (/(provider search|web_search|browser_fetch|source fetch|fetch status|called provider|normalized \d+ candidate|检索通道)/i.test(row.title)) {
+    return false;
+  }
+  if (row.url && !/^https?:\/\//i.test(row.url)) return false;
+  if (row.fullTextStatus && !/(PDF|PDF\/full-text|full[-\s]?text|download|reach|extract|unavailable|not confirmed|failed|provider|candidate)/i.test(row.fullTextStatus)) return false;
+  const text = `${row.title}\n${row.year ?? ''}\n${row.url ?? ''}\n${row.evidenceLocation ?? ''}\n${row.fullTextStatus ?? ''}\n${row.summary ?? ''}`;
+  return /(arxiv|pubmed|doi\b|pmid\b|pdf|full[-\s]?text|published|20\d{2}|论文|文献)/i.test(text);
+}
+
 function literatureRowConclusion(row: LiteratureReportRow) {
   const summary = firstUsefulSentence(row.summary)
-    ?? '该条目是当前报告中与 flow matching / perturbation prediction 相关的候选论文。';
+    ?? '该条目是当前报告中保留的候选论文，适合按用户问题继续做全文核验。';
   return `${row.title}${row.year ? `（${row.year}` : ''}${row.year ? '）' : ''}；${summary}`;
 }
 
@@ -1460,11 +1647,20 @@ function firstUsefulSentence(value: string | undefined) {
     .replace(/\bpdf:https?:\/\/\S+\s*\/\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned
+  const sentence = cleaned
     .split(/(?<=[。.!?；;])\s+/)
     .map((part) => part.trim())
-    .find((part) => part.length >= 40 && part.length <= 360)
-    ?? cleaned.slice(0, 300);
+    .find((part) => part.length >= 40 && part.length <= 360 && isUsefulLiteratureSentence(part));
+  if (sentence) return sentence;
+  return cleaned.length <= 300 && isUsefulLiteratureSentence(cleaned) ? cleaned : undefined;
+}
+
+function isUsefulLiteratureSentence(value: string) {
+  const cleaned = value.trim();
+  if (!cleaned || /^https?:\/\//i.test(cleaned)) return false;
+  if (/^(?:arXiv:)?\d{4}\.\d{4,5}(?:v\d+)?$/i.test(cleaned)) return false;
+  if (/^\d{4}\.\d{4,5}(?:v\d+)?$/i.test(cleaned)) return false;
+  return /[A-Za-z]{12,}|[一-龥]{8,}/.test(cleaned);
 }
 
 function literatureFullTextStatus(row: LiteratureReportRow) {
@@ -1481,6 +1677,12 @@ function literatureFullTextStatus(row: LiteratureReportRow) {
 function literatureReadFirstReason(row: LiteratureReportRow, theme: string) {
   const sentence = firstUsefulSentence(row.summary);
   if (sentence) return sentence;
+  if (/PDF\s+extracted|pdf_extract|pdftotext/i.test(`${row.fullTextStatus ?? ''}\n${row.evidenceLocation ?? ''}`)) {
+    return '该条目已在选中 report 中完成 bounded PDF 抽取并保留证据位置，适合优先做更完整的逐段阅读全文和引用核验。';
+  }
+  if (/candidate link|candidate URL|https?:\/\/\S+/i.test(row.fullTextStatus ?? '')) {
+    return '该条目已在选中 report 中保留候选 PDF/全文入口，适合作为下一轮可验证全文读取的优先候选。';
+  }
   return `${theme} 与当前问题的关键词匹配，且在选中 report 的候选论文表中保留了可追溯条目。`;
 }
 
@@ -1531,23 +1733,27 @@ function selectedQcMissingnessImpactAnswerMessage(
 ) {
   const prompt = request.prompt;
   if (!/(selected|reference|artifact|file|table|csv|QC|missingness|选中|引用|产物|文件|表|缺失|质控)/i.test(prompt)) return undefined;
-  if (!/(missing|missingness|outlier|protocol[-_\s]?deviations?|deviations?|treatment|effect|conclusion|prove|overturn|bias|sensitivity|robust|缺失|离群|异常|违背|偏倚|敏感|稳健|治疗|效应|结论|证明|推翻|影响)/i.test(prompt)) return undefined;
+  const promptMentionsQcArtifact = /(missing|missingness|outlier|protocol[-_\s]?deviations?|QC|quality[-_\s]?control|table|csv|缺失|质控|离群|异常|违背|表格)/i.test(prompt);
+  const promptAsksQcImpact = /(treatment[-_\s]?effect|treatment|effect|prove|overturn|bias|sensitivity|robust|治疗|效应|证明|推翻|偏倚|敏感|稳健|影响)/i.test(prompt);
+  if (!promptMentionsQcArtifact && !promptAsksQcImpact) return undefined;
   const selectedRefs = selectedReferenceTokens(request);
   const selectedContext = selectedRefs.length
     ? context.filter((item) => directContextItemMatchesSelectedRef(item, selectedRefs))
-    : context.filter((item) => qcMissingnessContextText(item).match(/missing|qc|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i));
-  const qcContext = selectedContext.filter((item) => qcMissingnessContextText(item).match(/missing|qc|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i));
+    : promptMentionsQcArtifact
+    ? context.filter((item) => qcMissingnessContextText(item).match(/missing|qc|quality[-_\s]?control|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i))
+    : [];
+  const qcContext = selectedContext.filter((item) => qcMissingnessContextText(item).match(/missing|qc|quality[-_\s]?control|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i));
   const answerContext = qcContext.length ? qcContext : selectedContext;
   if (!answerContext.length) return undefined;
   const sourceText = answerContext.map((item) => item.summary).join('\n');
   const metrics = qcMissingnessMetricsFromText(sourceText);
   const hasMetricEvidence = metrics.some((metric) => metric.count !== undefined || metric.percent !== undefined);
   const looksLikeQcArtifact = answerContext.some((item) => /missing|qc|outlier|protocol[-_\s]?deviations?|deviations?|csv|table|缺失|质控|离群|异常|违背/i.test(qcMissingnessContextText(item)));
+  if (!promptMentionsQcArtifact && !looksLikeQcArtifact) return undefined;
   if (!hasMetricEvidence && !looksLikeQcArtifact) return undefined;
   const refLine = directContextFastPathSupportingRefs(answerContext).slice(0, 3).join(', ') || answerContext[0]?.label || 'selected QC/missingness artifact';
   const metricLine = qcMissingnessMetricLine(metrics);
-  const hasEnglishPrompt = !/[一-龥]/.test(prompt);
-  if (!hasEnglishPrompt) {
+  if (promptWantsChinese(prompt)) {
     return [
       `只基于当前选中的 QC/missingness 引用回答：${refLine}。没有启动新的 workspace task，也不使用未选中的报告、CSV、图表或历史消息。`,
       '',
@@ -1746,9 +1952,20 @@ function selectedReportSourceText(
     : context;
   return uniqueStrings((selectedContext.length ? selectedContext : context)
     .filter((item) => /report|artifact|file|summary|reference/i.test(`${item.kind} ${item.label}`))
-    .map((item) => item.summary)
+    .map(directContextReportSourceText)
     .filter((value): value is string => Boolean(value)))
     .join('\n');
+}
+
+function directContextReportSourceText(item: ReturnType<typeof buildDirectContextFastPathItems>[number]) {
+  const data = isRecord(item) && isRecord(item.data) ? item.data : {};
+  return [
+    item.summary,
+    stringField(data.markdown),
+    stringField(data.content),
+    stringField(data.text),
+    stringField(data.report),
+  ].filter((value): value is string => Boolean(value)).join('\n');
 }
 
 function selectedReportCounterfactualThresholdAnswerMessage(
@@ -2647,20 +2864,73 @@ function selectedReferenceTokens(request: GatewayRequest) {
     const sourceId = stringField(reference.sourceId);
     const title = stringField(reference.title);
     const payload = isRecord(reference.payload) ? reference.payload : {};
+    const provenance = isRecord(payload.provenance) ? payload.provenance : {};
     const currentReference = isRecord(payload.currentReference) ? payload.currentReference : {};
+    const currentProvenance = isRecord(currentReference.provenance) ? currentReference.provenance : {};
     const objectReference = isRecord(payload.objectReference) ? payload.objectReference : {};
+    const objectProvenance = isRecord(objectReference.provenance) ? objectReference.provenance : {};
     return [
       ref,
       sourceId,
       title,
+      stringField(reference.dataRef),
+      stringField(reference.path),
+      stringField(payload.dataRef),
+      stringField(payload.path),
+      stringField(provenance.dataRef),
+      stringField(provenance.path),
       stringField(currentReference.ref),
       stringField(currentReference.id),
       stringField(currentReference.title),
+      stringField(currentReference.dataRef),
+      stringField(currentReference.path),
+      stringField(currentProvenance.dataRef),
+      stringField(currentProvenance.path),
       stringField(objectReference.ref),
       stringField(objectReference.id),
       stringField(objectReference.title),
+      stringField(objectReference.dataRef),
+      stringField(objectReference.path),
+      stringField(objectProvenance.dataRef),
+      stringField(objectProvenance.path),
     ].flatMap((value) => value ? selectedReferenceTokenVariants(value) : []);
   }));
+}
+
+function selectedDurableReferenceTokens(request: GatewayRequest) {
+  const uiState = isRecord(request.uiState) ? request.uiState : {};
+  return uniqueStrings([...recordRows(request.references), ...recordRows(uiState.currentReferences)].flatMap((reference) => {
+    const payload = isRecord(reference.payload) ? reference.payload : {};
+    const provenance = isRecord(payload.provenance) ? payload.provenance : {};
+    const currentReference = isRecord(payload.currentReference) ? payload.currentReference : {};
+    const currentProvenance = isRecord(currentReference.provenance) ? currentReference.provenance : {};
+    const objectReference = isRecord(payload.objectReference) ? payload.objectReference : {};
+    const objectProvenance = isRecord(objectReference.provenance) ? objectReference.provenance : {};
+    return [
+      stringField(reference.dataRef),
+      stringField(reference.path),
+      stringField(payload.dataRef),
+      stringField(payload.path),
+      stringField(provenance.dataRef),
+      stringField(provenance.path),
+      stringField(currentReference.dataRef),
+      stringField(currentReference.path),
+      stringField(currentProvenance.dataRef),
+      stringField(currentProvenance.path),
+      stringField(objectReference.dataRef),
+      stringField(objectReference.path),
+      stringField(objectProvenance.dataRef),
+      stringField(objectProvenance.path),
+    ]
+      .filter(isDirectContextReadableTextRef)
+      .flatMap((value) => uniqueStrings([value, value.replace(/^(?:file|artifact)::?/i, '')]));
+  }));
+}
+
+function isDirectContextReadableTextRef(value: string | undefined): value is string {
+  return typeof value === 'string'
+    && /\.(?:md|markdown|txt|csv|tsv|json|py|ipynb)(?:$|[?#])/i.test(value)
+    && !/^(?:artifact|run|execution-unit|claim|runtime):/i.test(value);
 }
 
 function selectedReferenceTokenVariants(value: string) {
@@ -2904,14 +3174,18 @@ function boundedArtifactFollowupRequested(request: GatewayRequest) {
 
 function boundedArtifactFollowupPrompt(text: string) {
   if (/(search|retrieve|检索|搜索|重新检索|new search|web|external provider|fresh)/i.test(text)
-    && !/(do not|don't|no|不要|不得|without)/i.test(text)) return false;
+    && !/(do not|don't|no|不要|不得|不(?:启动|运行|重新|做|进行)|without)/i.test(text)) return false;
   if (artifactMutationFollowupRequiresBackend(text)) return false;
-  const refersToSelectedOrCurrent = /(current|visible|selected|above|artifact|matrix|report|this report|this artifact|reproduction|当前|选中|证据矩阵|报告|产物|这份|这个|该报告|本报告|原报告)/i.test(text);
+  const refersToSelectedOrCurrent = /(current|visible|selected|above|artifact|matrix|report|this report|this artifact|reproduction|当前|选中|刚才|刚刚|证据矩阵|报告|产物|这份|这个|该报告|本报告|原报告)/i.test(text);
   const refersToBroadHistory = /(previous|prior|last|existing|上一轮|之前|已有)/i.test(text);
   const forbidsFreshWork = /(based only|only based|use only|only use|using only|do not perform a new search|do not rerun|no new search|without starting|不要重新|不重新|只基于|仅基于|只用|仅用)/i.test(text);
   const asksReadOnlyQuestion = /(what|which|whether|can|does|how|should|would|recommend|tell me|list|audit|check|pass|fail|threshold|support|prove|rerun|command|script|counterfactual|summari[sz]e|conclusions?|bullet|points?|是否|哪些|什么|有没有|能否|如何|怎么|怎样|应该|建议|请列出|回答|审计|核对|检查|验收|门槛|阈值|支持|证明|复跑|命令|脚本|反事实|总结|结论|要点|指出|列出)/i.test(text);
   return (refersToSelectedOrCurrent && (forbidsFreshWork || asksReadOnlyQuestion))
     || (refersToBroadHistory && forbidsFreshWork);
+}
+
+function boundedArtifactFollowupForbidsFreshWork(text: string) {
+  return /(based only|only based|use only|only use|using only|do not perform a new search|do not start a new search|do not run a new search|do not rerun|no new search|without starting|without running|不要重新|不重新|不要启动|不启动|不要运行|不运行|只基于|仅基于|只用|仅用)/i.test(text);
 }
 
 function explicitSelectedOnlyPrompt(text: string) {
@@ -2927,23 +3201,63 @@ function boundedFollowupRecords(request: GatewayRequest) {
     ...recordRows(request.references),
     ...recordRows(uiState.currentReferences),
     ...recordRows(uiState.currentReferenceDigests),
+    ...contextProjectionReferenceRecords(uiState.contextProjection),
   ].filter(isRecord);
+}
+
+function contextProjectionReferenceRecords(value: unknown) {
+  if (!isRecord(value)) return [];
+  const selected = toStringList(value.selectedContextRefs)
+    .map((ref) => ({ ref, id: ref, title: ref, artifactType: artifactTypeFromRef(ref) }));
+  const contextRefs = recordRows(value.contextRefs).map((entry) => {
+    const ref = stringField(entry.ref);
+    return {
+      ...entry,
+      id: stringField(entry.id) ?? ref,
+      title: stringField(entry.title) ?? ref,
+      artifactType: stringField(entry.artifactType) ?? artifactTypeFromRef(ref),
+      type: stringField(entry.type) ?? artifactTypeFromRef(ref),
+    };
+  });
+  return [...selected, ...contextRefs];
+}
+
+function artifactTypeFromRef(ref: string | undefined) {
+  if (!ref) return undefined;
+  if (/evidence[-_\s]?matrix/i.test(ref)) return 'evidence-matrix';
+  if (/paper[-_\s]?list/i.test(ref)) return 'paper-list';
+  if (/notebook[-_\s]?timeline/i.test(ref)) return 'notebook-timeline';
+  if (/research[-_\s]?report|report\.(?:md|markdown|txt)$/i.test(ref)) return 'research-report';
+  if (/\.(?:md|markdown|txt)$/i.test(ref)) return 'document';
+  if (/\.(?:json|csv|tsv)$/i.test(ref)) return 'dataset';
+  return undefined;
 }
 
 function directContextRefTokensFromRecord(record: Record<string, unknown>) {
   const payload = isRecord(record.payload) ? record.payload : {};
+  const provenance = isRecord(payload.provenance) ? payload.provenance : {};
   const currentReference = isRecord(payload.currentReference) ? payload.currentReference : {};
+  const currentProvenance = isRecord(currentReference.provenance) ? currentReference.provenance : {};
   const objectReference = isRecord(payload.objectReference) ? payload.objectReference : {};
+  const objectProvenance = isRecord(objectReference.provenance) ? objectReference.provenance : {};
   const id = stringField(record.id) ?? stringField(currentReference.id) ?? stringField(objectReference.id);
   const dataRef = stringField(record.dataRef)
     ?? stringField(record.path)
     ?? stringField(record.sourceRef)
     ?? stringField(record.ref)
+    ?? stringField(payload.dataRef)
+    ?? stringField(payload.path)
+    ?? stringField(provenance.dataRef)
+    ?? stringField(provenance.path)
     ?? stringField(currentReference.dataRef)
     ?? stringField(currentReference.path)
+    ?? stringField(currentProvenance.dataRef)
+    ?? stringField(currentProvenance.path)
     ?? stringField(currentReference.ref)
     ?? stringField(objectReference.dataRef)
     ?? stringField(objectReference.path)
+    ?? stringField(objectProvenance.dataRef)
+    ?? stringField(objectProvenance.path)
     ?? stringField(objectReference.ref);
   const type = stringField(record.type)
     ?? stringField(record.artifactType)

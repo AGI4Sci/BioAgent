@@ -83,6 +83,56 @@ test('generated task preflight blocks unavailable provider SDK imports when read
   )), true);
 });
 
+test('generated task preflight blocks provider helper calls without sciforge_task import', () => {
+  const report = evaluateGeneratedTaskPayloadPreflight({
+    request: readyWebProviderRequest,
+    entrypoint: { path: 'task.py' },
+    taskFiles: [{
+      path: 'task.py',
+      language: 'python',
+      content: [
+        'import json, sys',
+        '_, input_path, output_path = sys.argv',
+        'task_input = json.load(open(input_path, encoding="utf-8"))',
+        'try:',
+        '    result = invoke_capability(task_input, "web_search", {"query": "agent computer use"})',
+        'except NameError:',
+        '    payload = {"message": "Runtime error: invoke_capability not available.", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []}',
+        '    open(output_path, "w", encoding="utf-8").write(json.dumps(payload))',
+      ].join('\n'),
+    }],
+  });
+
+  assert.equal(report.status, 'blocked');
+  assert.ok(report.issues.some((issue) => (
+    issue.kind === 'capability-first-direct-network'
+    && issue.path === 'capabilityFirstPolicy'
+    && issue.reason.includes('without importing')
+    && issue.recoverActions.some((action) => action.includes('from sciforge_task import'))
+  )));
+});
+
+test('generated task preflight allows provider helper calls imported from sciforge_task', () => {
+  const report = evaluateGeneratedTaskPayloadPreflight({
+    request: readyWebProviderRequest,
+    entrypoint: { path: 'task.py' },
+    taskFiles: [{
+      path: 'task.py',
+      language: 'python',
+      content: [
+        'import json, sys',
+        'from sciforge_task import load_input, write_payload, invoke_capability',
+        'task_input = load_input(sys.argv[1])',
+        'result = invoke_capability(task_input, "web_search", {"query": "agent computer use"})',
+        'payload = {"message": "ok", "claims": [], "uiManifest": [], "executionUnits": [], "artifacts": []}',
+        'write_payload(sys.argv[2], payload)',
+      ].join('\n'),
+    }],
+  });
+
+  assert.equal(report.issues.some((issue) => issue.id.includes('provider-helper-missing-import')), false);
+});
+
 test('generated task preflight task input preserves stable issue identity and clipped evidence', () => {
   const report = evaluateGeneratedTaskPayloadPreflight({
     request: readyWebProviderRequest,

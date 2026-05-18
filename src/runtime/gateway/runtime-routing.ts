@@ -54,6 +54,7 @@ function routePolicyForRequest(request?: GatewayRequest, skill?: SkillAvailabili
 
 export function payloadHasFailureStatus(payload: ToolPayload) {
   if (String(payload.claimType || '').toLowerCase().includes('error')) return true;
+  if (payloadFailureText(payload)) return true;
   return (Array.isArray(payload.executionUnits) ? payload.executionUnits : [])
     .some((unit) => isRecord(unit) && /failed|error/i.test(String(unit.status || '')));
 }
@@ -63,7 +64,32 @@ export function firstPayloadFailureReason(payload: ToolPayload, run?: WorkspaceT
   const unit = units.find((entry) => isRecord(entry) && /failed|error/i.test(String(entry.status || '')));
   const unitReason = isRecord(unit) ? stringField(unit.failureReason) ?? stringField(unit.error) ?? stringField(unit.message) : undefined;
   return unitReason
+    ?? payloadFailureText(payload)
     ?? (typeof run?.exitCode === 'number' && run.exitCode !== 0 ? stringField(run?.stderr) ?? `Task exited ${run.exitCode}.` : undefined);
+}
+
+function payloadFailureText(payload: ToolPayload) {
+  if (payloadDeclaresSatisfied(payload)) return undefined;
+  const text = [
+    stringField(payload.message),
+    stringField(payload.reasoningTrace),
+  ].filter(Boolean).join('\n');
+  const match = text.match(/\b(?:Runtime error|Unhandled exception|Traceback|NameError|TypeError|ProviderInvocationError|invoke_capability not available|No suitable capability available)\b[^\n]*/i);
+  return match?.[0];
+}
+
+function payloadDeclaresSatisfied(payload: ToolPayload) {
+  const displayIntent = isRecord(payload.displayIntent) ? payload.displayIntent : {};
+  const resultPresentation = isRecord(displayIntent.resultPresentation) ? displayIntent.resultPresentation : {};
+  const outcome = [
+    stringField(displayIntent.taskOutcome),
+    stringField(resultPresentation.taskOutcome),
+  ].join(' ');
+  const status = [
+    stringField(displayIntent.status),
+    stringField(resultPresentation.status),
+  ].join(' ');
+  return /\bsatisfied\b/i.test(outcome) || /\bcomplete(?:d)?\b/i.test(status);
 }
 
 export function activeGuidanceQueueForTaskInput(request: GatewayRequest) {

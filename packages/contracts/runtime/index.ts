@@ -478,6 +478,51 @@ export type {
   CreateCapabilityBudgetDebitRecordInput,
 } from './capability-budget';
 export {
+  CAPABILITY_PROVIDER_DISCOVERY_ENDPOINTS,
+  capabilityProviderAvailabilityFromRouteStatus,
+  capabilityProviderDiscoveryUrl,
+  capabilityIdsForGeneratedTaskProviderRoutes,
+  capabilityIdsFromProviderPromptPolicy,
+  capabilityProviderStatusFromManifest,
+  capabilityProviderStatusReason,
+  capabilityProviderTransportFromAvailability,
+  normalizeCapabilityProviderRouteStatus,
+  normalizeCapabilityRouteId,
+} from './capability-provider-policy';
+export type {
+  CapabilityProviderRouteHealthStatus,
+  CapabilityProviderRouteStatus,
+} from './capability-provider-policy';
+export {
+  explicitMarkdownPathsFromPrompt,
+  markdownArtifactMutationPolicy,
+  markdownBudgetTargetPolicy,
+  markdownDirectoryCandidatesFromPrompt,
+  markdownDirectoryTargetRequested,
+  markdownReadonlyBulletPreference,
+  markdownReadonlyQuestionPolicy,
+  normalizeMarkdownRelPath,
+  prohibitedTermsFromMarkdownPrompt,
+  requestedMarkdownSectionsFromPrompt,
+  rewriteConstraintsFromMarkdownPrompt,
+  selectedMarkdownTargetRequested,
+} from './markdown-artifact-policy';
+export type {
+  MarkdownArtifactRewriteConstraints,
+} from './markdown-artifact-policy';
+export {
+  freshCodeDebugExecutionPromptPolicy,
+  workspaceCodeTaskPromptPolicy,
+} from './generated-work-policy';
+export {
+  normalizeRuntimeScenarioPackageRef,
+  normalizeRuntimeScenarioPackageSource,
+} from './scenario-package-ref';
+export type {
+  RuntimeScenarioPackageRef,
+  RuntimeScenarioPackageSource,
+} from './scenario-package-ref';
+export {
   AUDIT_RECORD_OUTCOMES,
   REPAIR_DECISION_ACTIONS,
   VALIDATION_DECISION_STATUSES,

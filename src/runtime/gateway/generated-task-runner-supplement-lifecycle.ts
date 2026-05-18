@@ -5,6 +5,7 @@ import type { RuntimeRefBundle } from './artifact-materializer.js';
 import { recordCapabilityEvolutionRuntimeEvent } from './capability-evolution-events.js';
 import { expectedArtifactTypesForRequest } from './gateway-request.js';
 import type { GeneratedTaskRunnerDeps } from './generated-task-runner.js';
+import { workspaceCodeTaskPromptPolicy } from '@sciforge-ui/runtime-contract/generated-work-policy';
 import { AGENTSERVER_SUPPLEMENTAL_GENERATION_EVENT_TYPE } from '../../../packages/skills/runtime-policy';
 
 type RunAgentServerGeneratedTask = (
@@ -118,17 +119,8 @@ export function supplementScopeForGeneratedRun(request: GatewayRequest, generate
 function generatedArtifactTypesForRequest(request: GatewayRequest, generated: string[]) {
   if (!generated.length) return [];
   if (expectedArtifactTypesForRequest(request).length) return generated;
-  if (!workspaceCodeTaskPrompt(request.prompt)) return generated;
+  if (!workspaceCodeTaskPromptPolicy(request.prompt)) return generated;
   return generated.filter((artifactType) => !scenarioDefaultResearchArtifactType(artifactType));
-}
-
-function workspaceCodeTaskPrompt(prompt: string) {
-  const text = prompt.toLowerCase();
-  const hasCodeIntent = /\b(code|coding|repository|repo|module|source file|typescript|javascript|python|test helper|unit test|typecheck|patch|refactor|bug|runtime|gateway|manifest|validation|preflight|self-improvement)\b/.test(text)
-    || /(?:代码|仓库|模块|源码|测试|补丁|修复|重构|类型检查|运行时|网关|清单|校验)/.test(prompt);
-  const hasResearchRetrievalIntent = /\b(literature|papers?|pmid|doi|citation|bibliography|clinical trial|pubmed|openalex|evidence matrix|systematic review)\b/.test(text)
-    || /(?:文献|论文|引用|证据矩阵|综述|临床试验)/.test(prompt);
-  return hasCodeIntent && !hasResearchRetrievalIntent;
 }
 
 function scenarioDefaultResearchArtifactType(artifactType: string) {

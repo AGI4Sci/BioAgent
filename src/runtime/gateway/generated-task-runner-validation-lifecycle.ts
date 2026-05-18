@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import type { ValidationFindingProjectionInput } from '@sciforge-ui/runtime-contract/validation-repair-audit';
+import { capabilityIdsForGeneratedTaskProviderRoutes } from '@sciforge-ui/runtime-contract/capability-provider-policy';
 import type { GatewayRequest, SkillAvailability, TaskAttemptRecord, ToolPayload, WorkspaceRuntimeCallbacks, WorkspaceTaskRunResult, WorkspaceTaskSpec } from '../runtime-types.js';
 import { errorMessage, isRecord, toRecordList, toStringList } from '../gateway-utils.js';
 import { sessionBundleRelForRequest } from '../session-bundle.js';
@@ -579,35 +580,16 @@ export async function buildGeneratedTaskRunInputLifecycle(
 
 function providerRouteRequestForGeneratedTask(request: GatewayRequest, expectedArtifacts: string[]): GatewayRequest {
   const selectedToolIds = new Set(toStringList(request.selectedToolIds));
-  const expectsLiteratureRetrievalArtifact = expectedArtifacts.some((artifactType) => (
-    artifactType === 'paper-list' || artifactType === 'evidence-matrix'
-  ));
-  if (request.externalIoRequired || expectsLiteratureRetrievalArtifact) {
-    selectedToolIds.add('web_search');
-    selectedToolIds.add('web_fetch');
-  }
-  if (browserProviderRoutesRequested(request, expectedArtifacts)) {
-    selectedToolIds.add('browser_search');
-    selectedToolIds.add('browser_fetch');
-  }
-  if (pdfProviderRouteRequested(request, expectedArtifacts)) {
-    selectedToolIds.add('pdf_extract');
-  }
+  for (const capabilityId of capabilityIdsForGeneratedTaskProviderRoutes({
+    prompt: request.prompt,
+    expectedArtifacts,
+    externalIoRequired: request.externalIoRequired,
+  })) selectedToolIds.add(capabilityId);
   if (!selectedToolIds.size) return request;
   return {
     ...request,
     selectedToolIds: [...selectedToolIds],
   };
-}
-
-function browserProviderRoutesRequested(request: GatewayRequest, expectedArtifacts: string[]): boolean {
-  const prompt = `${request.prompt ?? ''} ${expectedArtifacts.join(' ')}`;
-  return /(?:browser|chromium|rendered|javascript|\bjs\b|dynamic page|single-page|spa|网页|浏览器|渲染|动态页面|打开网页|下载|pdf|full[-\s]?text|全文|阅读全文)/i.test(prompt);
-}
-
-function pdfProviderRouteRequested(request: GatewayRequest, expectedArtifacts: string[]): boolean {
-  const prompt = `${request.prompt ?? ''} ${expectedArtifacts.join(' ')}`;
-  return /(?:pdf|full[-\s]?text|全文|阅读全文|全文阅读|extract(?:ed|ion)?|下载.*论文|论文.*下载)/i.test(prompt);
 }
 
 function providerInvocationForGeneratedTask(providerRoutes: ReturnType<typeof capabilityProviderRoutesForGatewayInvocation>) {

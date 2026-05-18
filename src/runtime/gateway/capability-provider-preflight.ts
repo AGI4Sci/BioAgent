@@ -1,7 +1,5 @@
-import {
-  type CapabilityManifest,
-  type CapabilityProviderManifest,
-} from '../../../packages/contracts/runtime/capability-manifest.js';
+import { type CapabilityManifest, type CapabilityProviderManifest } from '../../../packages/contracts/runtime/capability-manifest.js';
+import { CAPABILITY_PROVIDER_DISCOVERY_ENDPOINTS, capabilityProviderAvailabilityFromRouteStatus, capabilityProviderDiscoveryUrl, capabilityIdsFromProviderPromptPolicy, capabilityProviderStatusFromManifest, capabilityProviderStatusReason, capabilityProviderTransportFromAvailability, normalizeCapabilityProviderRouteStatus, normalizeCapabilityRouteId } from '../../../packages/contracts/runtime/capability-provider-policy.js';
 import { loadCoreCapabilityManifestRegistry } from '../capability-manifest-registry.js';
 import type { GatewayRequest } from '../runtime-types.js';
 import { isRecord } from '../gateway-utils.js';
@@ -161,18 +159,12 @@ export async function requestWithDiscoveredCapabilityProviders(request: GatewayR
 }
 
 async function discoverAgentServerProviderAvailability(baseUrl: string): Promise<DiscoveredProviderManifestProjection[]> {
-  const endpoints = [
-    '/api/agent-server/tools/manifest',
-    '/api/agent-server/workers',
-    '/tools/manifest',
-    '/workers',
-  ];
   const rows: DiscoveredProviderManifestProjection[] = [];
-  await Promise.all(endpoints.map(async (endpoint) => {
+  await Promise.all(CAPABILITY_PROVIDER_DISCOVERY_ENDPOINTS.map(async (endpoint) => {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 750);
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}${endpoint}`, { signal: controller.signal });
+      const response = await fetch(capabilityProviderDiscoveryUrl(baseUrl, endpoint), { signal: controller.signal });
       clearTimeout(timeout);
       if (!response.ok) return;
       const payload = unwrapDiscoveryPayload(await response.json());
@@ -211,7 +203,7 @@ function providerAvailabilityRowsFromDiscoveryPayload(payload: unknown): Discove
       source: normalizeProviderSource(record.source),
       transport: normalizeProviderTransport(record.transport),
       available,
-      status: normalizeRouteStatus(stringField(record.status) ?? stringField(record.health)),
+      status: normalizeCapabilityProviderRouteStatus(stringField(record.status) ?? stringField(record.health)),
       reason: stringField(record.reason) ?? stringField(record.detail),
     });
     return rows;
@@ -233,38 +225,12 @@ function inferRequiredCapabilityIds(request: GatewayRequest): string[] {
     for (const capabilityId of requiredCapabilityIdsForSelectedTool(toolId)) ids.add(capabilityId);
   }
   for (const capabilityId of structuredRequiredCapabilityIds(request)) ids.add(capabilityId);
-  if (request.externalIoRequired === true) ids.add('web_search');
-  if (scholarlySearchProviderIntent(request)) ids.add('web_search');
-  if (browserProviderIntent(request)) {
-    ids.add('browser_search');
-    ids.add('browser_fetch');
-  }
-  if (pdfFullTextProviderIntent(request)) ids.add('pdf_extract');
-  if (interactiveBrowserAutomationIntent(request)) ids.add('playwright_edge_browser');
+  for (const capabilityId of capabilityIdsFromProviderPromptPolicy({
+    prompt: stringField(request.prompt),
+    selectedToolIds: [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)],
+    externalIoRequired: request.externalIoRequired,
+  })) ids.add(capabilityId);
   return [...ids].sort();
-}
-
-function scholarlySearchProviderIntent(request: GatewayRequest): boolean {
-  const prompt = stringField(request.prompt) ?? '';
-  return /\b(?:arxiv|pubmed|biorxiv|medrxiv|doi|pmid)\b|论文|文献|预印本/i.test(prompt);
-}
-
-function browserProviderIntent(request: GatewayRequest): boolean {
-  const prompt = stringField(request.prompt) ?? '';
-  const selected = [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)].join(' ');
-  return /(?:browser|chromium|rendered|javascript|\bjs\b|dynamic page|single[-\s]?page(?:\s+app(?:lication)?)?|\bspa\b|网页|浏览器|渲染|动态页面|打开网页|下载|pdf|full[-\s]?text|全文|阅读全文)/i.test(`${prompt} ${selected}`);
-}
-
-function pdfFullTextProviderIntent(request: GatewayRequest): boolean {
-  const prompt = stringField(request.prompt) ?? '';
-  const selected = [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)].join(' ');
-  return /(?:pdf|full[-\s]?text|全文|阅读全文|全文阅读|extract(?:ed|ion)?|下载.*论文|论文.*下载)/i.test(`${prompt} ${selected}`);
-}
-
-function interactiveBrowserAutomationIntent(request: GatewayRequest): boolean {
-  const prompt = stringField(request.prompt) ?? '';
-  const selected = [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)].join(' ');
-  return /(?:playwright[_\s-]*edge|playwright[_\s-]*mcp|microsoft\s*edge|msedge|headed|visible browser|manual takeover|login|captcha|2fa|otp|form|fill|click|scroll|upload|download|browser automation|正常网页浏览器|可见浏览器|手动接管|登录|验证码|二次验证|双因素|表单|填写|点击|滚动|上传|下载|浏览器自动化)/i.test(`${prompt} ${selected}`);
 }
 
 function requiredCapabilityIdsForSelectedTool(toolId: string) {
@@ -373,26 +339,13 @@ function providerCandidates(request: GatewayRequest, manifest: CapabilityManifes
       invokePath: override?.invokePath,
       timeoutMs: override?.timeoutMs,
       status,
-      reason: override?.reason ?? providerStatusReason(provider, status),
+      reason: override?.reason ?? capabilityProviderStatusReason(provider, status),
     };
   });
 }
 
 function providerStatus(provider: CapabilityProviderManifest, override: ProviderAvailability | undefined): CapabilityProviderRoute['status'] | 'unknown' {
-  if (override) return override.available ? 'ready' : override.status ?? 'provider-unavailable';
-  if (provider.status === 'available') return 'ready';
-  if (provider.status === 'unauthorized') return 'unauthorized';
-  if (provider.status === 'rate-limited') return 'rate-limited';
-  if (provider.requiredConfig.length > 0) return 'provider-unavailable';
-  return 'unknown';
-}
-
-function providerStatusReason(provider: CapabilityProviderManifest, status: CapabilityProviderRoute['status'] | 'unknown') {
-  if (status === 'ready') return `${provider.id} is ready.`;
-  if (status === 'unauthorized') return `${provider.id} is not authorized.`;
-  if (status === 'rate-limited') return `${provider.id} is rate limited.`;
-  if (provider.requiredConfig.length > 0) return `${provider.id} requires config: ${provider.requiredConfig.join(', ')}`;
-  return `${provider.id} has unknown health.`;
+  return capabilityProviderStatusFromManifest(provider, override);
 }
 
 function providerAvailabilityById(request: GatewayRequest) {
@@ -410,7 +363,7 @@ function providerAvailabilityById(request: GatewayRequest) {
     map.set(id, {
       id,
       available,
-      status: normalizeRouteStatus(stringField(row.status) ?? stringField(row.health)),
+      status: normalizeCapabilityProviderRouteStatus(stringField(row.status) ?? stringField(row.health)),
       reason: stringField(row.reason) ?? stringField(row.detail),
       endpoint: stringField(row.endpoint),
       baseUrl: stringField(row.baseUrl),
@@ -459,7 +412,7 @@ function providerManifestFromAvailability(
     priority: 100,
     capabilityId,
     source: 'workspace',
-    transport: availability?.endpoint || availability?.baseUrl || availability?.invokeUrl ? 'http' : 'backend-native',
+    transport: capabilityProviderTransportFromAvailability(availability),
     permissions: [],
     fallbackEligible: true,
     status: availability?.status === 'ready' || availability?.available === true ? 'available' : 'unknown',
@@ -473,7 +426,7 @@ function providerAvailabilityRowsFromToolProviderRoutes(value: unknown): Array<R
     const primaryProviderId = stringField(route.primaryProviderId) ?? stringField(route.providerId) ?? routeKey;
     const fallbackProviderIds = toStringList(route.fallbackProviderIds);
     const status = stringField(route.health) ?? stringField(route.status) ?? 'available';
-    const available = !/unknown|unavailable|unauthori[sz]ed|rate-limited|missing|offline/i.test(status);
+    const available = capabilityProviderAvailabilityFromRouteStatus(status);
     return [
       {
         id: primaryProviderId,
@@ -543,16 +496,7 @@ function normalizeRequiredCapabilityId(value: string) {
 }
 
 function normalizeCapabilityId(value: string) {
-  return value.trim().toLowerCase().replace(/[-.\s]+/g, '_');
-}
-
-function normalizeRouteStatus(value: string | undefined): CapabilityProviderRoute['status'] | undefined {
-  if (!value) return undefined;
-  if (/unauthori[sz]ed|auth|credential|未授权/.test(value)) return 'unauthorized';
-  if (/rate|quota|429|限流|配额/.test(value)) return 'rate-limited';
-  if (/missing|offline|unavailable|failed|不可用|离线/.test(value)) return 'provider-unavailable';
-  if (/ready|available|online|ok|健康/.test(value)) return 'ready';
-  return undefined;
+  return normalizeCapabilityRouteId(value);
 }
 
 function normalizeProviderSource(value: unknown): CapabilityProviderManifest['source'] | undefined {

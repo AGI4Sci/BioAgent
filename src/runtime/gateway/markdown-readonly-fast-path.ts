@@ -3,11 +3,18 @@ import { basename, isAbsolute, resolve } from 'node:path';
 
 import type { GatewayRequest, ToolPayload } from '../runtime-types.js';
 import { sha1 } from '../workspace-task-runner.js';
+import {
+  explicitMarkdownPathsFromPrompt,
+  markdownReadonlyBulletPreference,
+  markdownReadonlyQuestionPolicy,
+  prohibitedTermsFromMarkdownPrompt,
+  requestedMarkdownSectionsFromPrompt,
+} from '../../../packages/contracts/runtime/markdown-artifact-policy.js';
 
 const EXECUTION_TOOL_ID = 'sciforge.markdown-readonly-fast-path';
 
 export async function tryRunMarkdownReadonlyFastPath(request: GatewayRequest): Promise<ToolPayload | undefined> {
-  if (!explicitMarkdownReadonlyQuestion(request.prompt)) return undefined;
+  if (!markdownReadonlyQuestionPolicy(request.prompt)) return undefined;
   const workspace = resolve(request.workspacePath || process.cwd());
   const targets = explicitMarkdownPathsFromPrompt(request.prompt)
     .filter((rel) => safeWorkspaceMarkdownPath(workspace, rel))
@@ -101,29 +108,6 @@ export async function tryRunMarkdownReadonlyFastPath(request: GatewayRequest): P
   };
 }
 
-function explicitMarkdownReadonlyQuestion(prompt: string) {
-  if (!/\.md\b|markdown|artifact|file|report|document|产物|文件|报告|文档/i.test(prompt)) return false;
-  if (!explicitMarkdownPathsFromPrompt(prompt).length) return false;
-  const explicitReadonly = /read[-\s]?only|only read|do not (?:write|save|rewrite|update|modify|edit)|without (?:writing|saving|modifying)|no writeback|只读|不要(?:写入|写回|保存|重写|更新|修改|编辑)/i.test(prompt);
-  const asksQuestion = /\b(?:what|which|whether|does|how|why|summari[sz]e|list|audit|check|explain|state|name)\b|总结|列出|说明|解释|检查|审计|指出|回答/i.test(prompt);
-  const asksMutation = /\b(?:write\s*back|overwrite|persist|save|update|revise|rewrite|edit|modify|replace|regenerate)\b|写回|写入|覆盖|保存|更新|修订|重写|改写|修改|替换|重新生成/i.test(prompt);
-  return explicitReadonly || (asksQuestion && !asksMutation);
-}
-
-function explicitMarkdownPathsFromPrompt(prompt: string) {
-  const rawExplicit = [...prompt.matchAll(/(?:file:)?(?:[\w.-]+\/)+[\w.-]+\.md\b|(?:file:)?[\w.-]+\.md\b/g)]
-    .map((match) => normalizeRelPath(match[0]))
-    .filter((value): value is string => Boolean(value));
-  const baseDir = rawExplicit.map((item) => item.split('/').slice(0, -1).join('/')).find(Boolean);
-  return uniqueStrings(rawExplicit.map((item) => !item.includes('/') && baseDir ? `${baseDir}/${item}` : item));
-}
-
-function normalizeRelPath(value: string) {
-  const clean = value.replace(/^file:/i, '').replace(/^\/+/, '').replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!clean || clean.includes('..') || clean.startsWith('.sciforge/')) return undefined;
-  return clean;
-}
-
 function safeWorkspaceMarkdownPath(workspace: string, rel: string) {
   if (!/\.md$/i.test(rel)) return undefined;
   const path = isAbsolute(rel) ? resolve(rel) : resolve(workspace, rel);
@@ -139,14 +123,14 @@ async function readExistingMarkdown(path: string) {
 }
 
 function markdownReadonlyAnswer(prompt: string, artifacts: Array<{ rel: string; markdown: string }>) {
-  const wantsBullets = /\b(?:bullets?|points?)\b|要点|条目/i.test(prompt);
+  const wantsBullets = markdownReadonlyBulletPreference(prompt);
   const sections = artifacts.map((artifact) => answerForMarkdownArtifact(prompt, artifact));
   if (artifacts.length === 1 && wantsBullets) return sections[0]!;
   return sections.join('\n\n');
 }
 
 function answerForMarkdownArtifact(prompt: string, artifact: { rel: string; markdown: string }) {
-  const requestedSections = requestedMarkdownSections(prompt, artifact.markdown);
+  const requestedSections = requestedMarkdownSectionsFromPrompt(prompt, artifact.markdown);
   if (requestedSections.length) {
     return [
       `Read-only answer from file:${artifact.rel}; no workspace writeback was performed.`,
@@ -165,50 +149,6 @@ function answerForMarkdownArtifact(prompt: string, artifact: { rel: string; mark
     `- Change from the prior version: ${changeSummary(constraints, staleTermsAbsent, prohibited)}`,
     `- Remaining risk: ${risk}`,
   ].join('\n');
-}
-
-function requestedMarkdownSections(prompt: string, markdown: string) {
-  return markdownHeadings(markdown)
-    .filter((heading) => heading.level <= 3 && heading.body && promptMentionsHeading(prompt, heading.heading))
-    .map((heading) => ({ heading: heading.heading, body: summarizeSectionBody(heading.body) }))
-    .slice(0, 6);
-}
-
-function markdownHeadings(markdown: string) {
-  const matches = [...markdown.matchAll(/^(#{1,6})\s+(.+?)\s*$/gm)];
-  return matches.map((match, index) => {
-    const start = (match.index ?? 0) + match[0].length;
-    const end = index + 1 < matches.length ? matches[index + 1]!.index ?? markdown.length : markdown.length;
-    return {
-      level: match[1]?.length ?? 1,
-      heading: match[2]?.trim().replace(/#+$/, '').trim() ?? '',
-      body: markdown.slice(start, end).trim(),
-    };
-  }).filter((heading) => heading.heading);
-}
-
-function promptMentionsHeading(prompt: string, heading: string) {
-  const normalizedHeading = normalizeHeadingText(heading);
-  if (!normalizedHeading) return false;
-  const normalizedPrompt = normalizeHeadingText(prompt);
-  if (normalizedPrompt.includes(normalizedHeading)) return true;
-  const compactHeading = normalizedHeading.replace(/\s+/g, '');
-  return compactHeading.length >= 4 && normalizedPrompt.replace(/\s+/g, '').includes(compactHeading);
-}
-
-function normalizeHeadingText(value: string) {
-  return value.toLowerCase().replace(/[`*_#:[\]()]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function summarizeSectionBody(body: string) {
-  const lines = body
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*[-*]\s*/, '').replace(/^\s*\d+[.)]\s*/, '').trim())
-    .map((line) => line.replace(/[.。；;]+$/g, ''))
-    .filter(Boolean)
-    .filter((line) => !/^[-:| ]+$/.test(line));
-  if (!lines.length) return 'section is present but empty.';
-  return lines.slice(0, 6).join('; ');
 }
 
 function currentConstraints(markdown: string) {
@@ -247,36 +187,11 @@ function markdownSectionBody(markdown: string, heading: string) {
 }
 
 function prohibitedTermsFromPrompt(prompt: string) {
-  const lines = prompt.split(/\n|。|；|;/).filter((line) => /do not|remove old|old constraints|不要|移除旧|删除旧/i.test(line));
-  return uniqueStrings(lines.flatMap((line) => [
-    ...[...line.matchAll(/\$?\s*\d{1,3}(?:,\d{3})+\s*(?:USD)?/gi)].map((match) => normalizeTerm(match[0])),
-    ...[...line.matchAll(/\b\d{1,2}\s*months?\b/gi)].map((match) => normalizeTerm(match[0])),
-    ...[...line.matchAll(/\b\d+(?:\.\d+)?\s*FTE\b/gi)].map((match) => normalizeTerm(match[0])),
-    ...arbitraryProhibitedTermsFromLine(line),
-  ])).slice(0, 20);
-}
-
-function arbitraryProhibitedTermsFromLine(line: string) {
-  const afterMarker = line.replace(/^.*?(?:old constraints?|old terms?|remove old|do not show|must not appear|不要出现|移除旧|删除旧)[:：]?\s*/i, '');
-  return afterMarker
-    .split(/(?<!\d),(?!\d)|，|、|(?:\s+and\s+)|(?:\s+or\s+)|或|和/)
-    .map((item) => normalizeArbitraryTerm(item))
-    .filter((item): item is string => Boolean(item));
+  return prohibitedTermsFromMarkdownPrompt(prompt);
 }
 
 function normalizeTerm(value: string) {
   return value.replace(/^\$\s*/, '').replace(/\s*USD$/i, '').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeArbitraryTerm(value: string) {
-  const term = value
-    .replace(/\b(?:old|stale|constraints?|terms?|requested|remove|removed|show|appear|were)\b/gi, ' ')
-    .replace(/[.。]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (term.length < 3 || term.length > 80) return undefined;
-  if (/^(?:and|or|或|和|与|old|stale)$/i.test(term)) return undefined;
-  return term;
 }
 
 function termInMarkdown(markdown: string, term: string) {

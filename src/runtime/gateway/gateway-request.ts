@@ -3,6 +3,8 @@ import { cleanUrl, isRecord, toStringList, uniqueStrings } from '../gateway-util
 import { buildSharedAgentHandoffContract, normalizeAgentHandoffSource, normalizeSharedSkillDomain, type SciForgeAgentHandoffSource } from '@sciforge-ui/runtime-contract/handoff';
 import { normalizeRuntimeLlmEndpoint } from '@sciforge-ui/runtime-contract/agent-backend-policy';
 import { normalizeTurnExecutionConstraints } from '@sciforge-ui/runtime-contract/turn-constraints';
+import { freshCodeDebugExecutionPromptPolicy } from '@sciforge-ui/runtime-contract/generated-work-policy';
+import { normalizeRuntimeScenarioPackageRef } from '@sciforge-ui/runtime-contract/scenario-package-ref';
 
 export function normalizeGatewayRequest(body: Record<string, unknown>): GatewayRequest {
   const skillDomain = normalizeSharedSkillDomain(body.skillDomain) as SciForgeSkillDomain | undefined;
@@ -112,11 +114,7 @@ function normalizeSharedAgentContract(value: unknown, source: SciForgeAgentHando
 }
 
 export function normalizeScenarioPackageRef(value: unknown): GatewayRequest['scenarioPackageRef'] {
-  if (!isRecord(value)) return undefined;
-  const id = typeof value.id === 'string' ? value.id.trim() : '';
-  const version = typeof value.version === 'string' ? value.version.trim() : '';
-  const source = value.source === 'built-in' || value.source === 'workspace' || value.source === 'generated' ? value.source : undefined;
-  return id && version && source ? { id, version, source } : undefined;
+  return normalizeRuntimeScenarioPackageRef(value);
 }
 
 export function normalizeLlmEndpoint(value: unknown): LlmEndpointConfig | undefined {
@@ -126,7 +124,7 @@ export function normalizeLlmEndpoint(value: unknown): LlmEndpointConfig | undefi
 export function expectedArtifactTypesForRequest(request: GatewayRequest) {
   const constraints = normalizeTurnExecutionConstraints(request.uiState?.turnExecutionConstraints);
   if (constraints?.contextOnly && constraints.preferredCapabilityIds.includes('runtime.direct-context-answer')) return [];
-  if (isFreshCodeDebugExecutionPrompt(request.prompt)) return [];
+  if (freshCodeDebugExecutionPromptPolicy(request.prompt)) return [];
   return uniqueStrings([
     ...(request.expectedArtifactTypes ?? []),
     ...toStringList(request.uiState?.expectedArtifactTypes),
@@ -134,32 +132,11 @@ export function expectedArtifactTypesForRequest(request: GatewayRequest) {
 }
 
 export function selectedComponentIdsForRequest(request: Pick<GatewayRequest, 'selectedComponentIds' | 'uiState'> & { prompt?: string }) {
-  if ('prompt' in request && typeof request.prompt === 'string' && isFreshCodeDebugExecutionPrompt(request.prompt)) return [];
+  if ('prompt' in request && typeof request.prompt === 'string' && freshCodeDebugExecutionPromptPolicy(request.prompt)) return [];
   return uniqueStrings([
     ...(request.selectedComponentIds ?? []),
     ...toStringList(request.uiState?.selectedComponentIds),
   ]);
-}
-
-function isFreshCodeDebugExecutionPrompt(prompt: string) {
-  const text = prompt.toLowerCase();
-  const codeSignals = [
-    /\bdebug\b/,
-    /\bbug\b/,
-    /\bpatch\b/,
-    /\bmodify\b/,
-    /\bedit\b/,
-    /\brepair\b/,
-    /\brerun\b/,
-    /\bpytest\b/,
-    /\bunit tests?\b/,
-    /\bfailing tests?\b/,
-    /\btest_[\w.-]+\.py\b/,
-    /\b[\w.-]+\.py\b/,
-    /读代码|调试|修复|修改代码|单测|运行测试|复跑/,
-  ];
-  const asksForScenarioArtifacts = /\b(evidence matrix|paper-list|paper list|notebook timeline|research report artifact)\b|证据矩阵|论文列表|全文|arxiv|pdf/.test(text);
-  return codeSignals.some((pattern) => pattern.test(text)) && !asksForScenarioArtifacts;
 }
 
 function finiteNumber(value: unknown) {

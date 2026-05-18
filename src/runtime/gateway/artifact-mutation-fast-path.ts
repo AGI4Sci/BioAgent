@@ -4,19 +4,21 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 import type { GatewayRequest, ToolPayload } from '../runtime-types.js';
 import { isRecord } from '../gateway-utils.js';
 import { sha1 } from '../workspace-task-runner.js';
+import {
+  explicitMarkdownPathsFromPrompt,
+  markdownArtifactMutationPolicy,
+  markdownBudgetTargetPolicy,
+  markdownDirectoryCandidatesFromPrompt,
+  markdownDirectoryTargetRequested,
+  normalizeMarkdownRelPath,
+  rewriteConstraintsFromMarkdownPrompt,
+  selectedMarkdownTargetRequested,
+  type MarkdownArtifactRewriteConstraints,
+} from '../../../packages/contracts/runtime/markdown-artifact-policy.js';
 
 const EXECUTION_TOOL_ID = 'sciforge.artifact-mutation-fast-path';
 
-type RewriteConstraints = {
-  budgetUsd?: string;
-  months?: string;
-  roleFtes: Array<{ role: string; fte: string }>;
-  noRealPatientData: boolean;
-  budgetCategories: string[];
-  genericConstraints: Array<{ label: string; value: string }>;
-  requestedSections: string[];
-  prohibitedTerms: string[];
-};
+type RewriteConstraints = MarkdownArtifactRewriteConstraints;
 
 type RewriteResult = {
   rel: string;
@@ -26,9 +28,9 @@ type RewriteResult = {
 };
 
 export async function tryRunArtifactMutationFastPath(request: GatewayRequest): Promise<ToolPayload | undefined> {
-  if (!artifactMutationRewriteRequest(request.prompt)) return undefined;
+  if (!markdownArtifactMutationPolicy(request.prompt)) return undefined;
   const workspace = resolve(request.workspacePath || process.cwd());
-  const constraints = rewriteConstraintsFromPrompt(request.prompt);
+  const constraints = rewriteConstraintsFromMarkdownPrompt(request.prompt);
   const targets = await artifactRewriteTargets(request, workspace);
   if (!targets.length) return undefined;
 
@@ -116,13 +118,6 @@ export async function tryRunArtifactMutationFastPath(request: GatewayRequest): P
   };
 }
 
-function artifactMutationRewriteRequest(prompt: string) {
-  if (/(?:read[-\s]?only|only read|do not (?:rewrite|write|modify|edit|save)|no changes)|只读|不要(?:重写|写入|写回|覆盖|保存|修改|更新)/i.test(prompt)) return false;
-  const namesMarkdownTarget = /\.md\b|markdown|artifact|artifacts|deliverable|deliverables|file|files|产物|交付物|文件|路径/i.test(prompt);
-  const asksMutation = /\b(?:write\s*back|overwrite|persist|save|update|revise|rewrite|edit|modify|replace|regenerate)\b|写回|写入|覆盖|保存|更新|修订|重写|改写|修改|替换|重新生成/i.test(prompt);
-  return namesMarkdownTarget && asksMutation;
-}
-
 async function artifactRewriteTargets(request: GatewayRequest, workspace: string) {
   const explicit = explicitMarkdownPathsFromPrompt(request.prompt);
   if (explicit.length) {
@@ -137,17 +132,9 @@ async function artifactRewriteTargets(request: GatewayRequest, workspace: string
     .slice(0, 12);
 }
 
-function explicitMarkdownPathsFromPrompt(prompt: string) {
-  const rawExplicit = [...prompt.matchAll(/(?:file:)?(?:[\w.-]+\/)+[\w.-]+\.md\b|(?:file:)?[\w.-]+\.md\b/g)]
-    .map((match) => normalizeRelPath(match[0]))
-    .filter((value): value is string => Boolean(value));
-  const baseDir = rawExplicit.map((item) => item.split('/').slice(0, -1).join('/')).find(Boolean);
-  return uniqueStrings(rawExplicit.map((item) => !item.includes('/') && baseDir ? `${baseDir}/${item}` : item));
-}
-
 function selectedMarkdownRefs(request: GatewayRequest) {
   const uiState = isRecord(request.uiState) ? request.uiState : {};
-  if (!/(selected|current|this artifact|this file|选中|当前|这个|这份|刚才)/i.test(request.prompt)) return [];
+  if (!selectedMarkdownTargetRequested(request.prompt)) return [];
   return recordCandidates([
     ...(request.references ?? []),
     ...(request.artifacts ?? []),
@@ -171,16 +158,14 @@ function recordCandidates(records: unknown[]) {
       stringField(metadata.path),
       stringField(delivery.readableRef),
       stringField(delivery.rawRef),
-    ].map((value) => value ? normalizeRelPath(value) : undefined)
+    ].map((value) => value ? normalizeMarkdownRelPath(value) : undefined)
       .filter((value): value is string => typeof value === 'string' && /\.md$/i.test(value));
   }));
 }
 
 async function markdownTargetsFromPromptDirectory(prompt: string, workspace: string) {
-  if (!/(all|every|package|folder|directory|全部|所有|整套|目录|文件夹|交付包|交付物)/i.test(prompt)) return [];
-  const candidates = [...prompt.matchAll(/(?:^|\s)([\w.-]+(?:\/[\w.-]+)+)\/?(?:\s|$|目录|folder|directory)/gi)]
-    .map((match) => normalizeRelPath(match[1] ?? ''))
-    .filter((value): value is string => Boolean(value));
+  if (!markdownDirectoryTargetRequested(prompt)) return [];
+  const candidates = markdownDirectoryCandidatesFromPrompt(prompt);
   const targets: string[] = [];
   for (const dir of candidates.slice(0, 4)) {
     const root = safeWorkspaceDirectoryPath(workspace, dir);
@@ -195,12 +180,6 @@ async function markdownTargetsFromPromptDirectory(prompt: string, workspace: str
     }
   }
   return uniqueStrings(targets);
-}
-
-function normalizeRelPath(value: string) {
-  const clean = value.replace(/^file:/i, '').replace(/^\/+/, '').replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!clean || clean.includes('..') || clean.startsWith('.sciforge/')) return undefined;
-  return clean;
 }
 
 function safeWorkspaceDirectoryPath(workspace: string, rel: string) {
@@ -220,188 +199,6 @@ async function readExistingMarkdown(path: string) {
   } catch {
     return '';
   }
-}
-
-function rewriteConstraintsFromPrompt(prompt: string): RewriteConstraints {
-  const text = positiveConstraintText(prompt);
-  return {
-    budgetUsd: preferredConstraintMatch(text, /改为\s*(\d{1,3}(?:,\d{3})*)\s*USD/gi, /(?:总预算|budget)[^。\n;；]*?(\d{1,3}(?:,\d{3})*)\s*USD/gi, /(\d{1,3}(?:,\d{3})*)\s*USD|\$\s*(\d{1,3}(?:,\d{3})*)/gi),
-    months: preferredConstraintMatch(text, /改为\s*(\d{1,2})\s*months?\b/gi, /(?:周期|duration|project cycle|timeline)[^。\n;；]*?(\d{1,2})\s*months?\b/gi, /(\d{1,2})\s*months?\b|(\d{1,2})\s*个月/g),
-    roleFtes: roleFtesFromPrompt(text),
-    noRealPatientData: /(?:no|without|不允许|不要|禁止|无).{0,24}(?:real\s+|真实\s*)?patient data|不能.{0,24}patient data|只能.{0,24}(?:synthetic|公开匿名|anonymous)/i.test(prompt),
-    budgetCategories: budgetCategoriesFromPrompt(text),
-    genericConstraints: genericConstraintsFromPrompt(text),
-    requestedSections: requestedSectionsFromPrompt(prompt),
-    prohibitedTerms: prohibitedTermsFromPrompt(prompt),
-  };
-}
-
-function positiveConstraintText(prompt: string) {
-  return prompt
-    .replace(/(?:do not show|do not restore|must not appear|remove old|old constraints?|不要出现|不要恢复|淘汰旧|替换旧)[^\n。]*?(?:(?<!\d)[.。]|\n|$)/gi, ' ')
-    .split(/[\n。]/)
-    .flatMap((line) => line.split(/[；;]/))
-    .join('\n');
-}
-
-function preferredConstraintMatch(text: string, ...patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const values = [...text.matchAll(pattern)].map((match) => match[1] ?? match[2]).filter(Boolean);
-    if (values.length) return values[values.length - 1];
-  }
-  return undefined;
-}
-
-function roleFtesFromPrompt(text: string) {
-  const roles: Array<{ role: string; fte: string }> = [];
-  const pattern = /(?:\b\d+\s+)?([A-Za-z][A-Za-z -]{1,40}|[\p{Script=Han}A-Za-z -]{1,40}?)\s*([0-9]+(?:\.[0-9]+)?)\s*FTE/giu;
-  for (const match of text.matchAll(pattern)) {
-    const role = normalizeRoleLabel(match[1] ?? '');
-    const fte = match[2];
-    if (role && fte) roles.push({ role, fte });
-  }
-  return dedupeRoles(roles).slice(0, 12);
-}
-
-function normalizeRoleLabel(value: string) {
-  const role = value
-    .replace(/\b(?:team|团队|改为|为|and|with|one|part[-\s]?time|full[-\s]?time)\b/gi, ' ')
-    .replace(/[,，、:：;；()[\]\d.+-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!/[A-Za-z\p{Script=Han}]/u.test(role)) return '';
-  if (/^(?:or|and|或|和|与)$/i.test(role)) return '';
-  return role;
-}
-
-function dedupeRoles(roles: Array<{ role: string; fte: string }>) {
-  const map = new Map<string, { role: string; fte: string }>();
-  for (const role of roles) map.set(role.role.toLowerCase(), role);
-  return [...map.values()];
-}
-
-function budgetCategoriesFromPrompt(text: string) {
-  const match = text.match(/(?:categories?|类别|类|科目|预算表)[：: ]+([A-Za-z0-9_\-/，、,\s]+?)(?:[.。]|\n|$)/i);
-  if (match) {
-    return uniqueStrings((match[1] ?? '')
-      .split(/[、,，/]+|\s{2,}/)
-      .map((item) => item.trim().toLowerCase().replace(/\s+/g, '-'))
-      .filter((item) => item.length >= 3))
-      .slice(0, 8);
-  }
-  const canonical = ['personnel', 'compute', 'data-validation', 'contingency'];
-  const foundCanonical = canonical.filter((category) => new RegExp(category.replace('-', '[-\\s]?'), 'i').test(text));
-  return foundCanonical.length >= 2 ? foundCanonical : [];
-}
-
-function prohibitedTermsFromPrompt(prompt: string) {
-  const lines = prompt.split(/\n|。|；|;/).filter((line) => /不要出现|不要恢复|do not restore|must not appear|remove old|淘汰旧|替换旧/i.test(line));
-  const values = lines.flatMap((line) => [
-    ...[...line.matchAll(/\$?\s*\d{1,3}(?:,\d{3})+\s*(?:USD)?/gi)].map((match) => normalizeMoneyTerm(match[0])),
-    ...[...line.matchAll(/\b\d{1,2}\s*months?\b/gi)].map((match) => match[0].replace(/\s+/g, ' ').trim()),
-    ...[...line.matchAll(/\b\d+(?:\.\d+)?\s*FTE\b/gi)].map((match) => match[0].replace(/\s+/g, ' ').trim()),
-    ...arbitraryProhibitedTermsFromLine(line),
-  ]);
-  return uniqueStrings(values.filter(Boolean)).slice(0, 20);
-}
-
-function arbitraryProhibitedTermsFromLine(line: string) {
-  const afterMarker = line.replace(/^.*?(?:old constraints?|stale constraints?|remove old|do not show|must not appear|不要出现|不要恢复|淘汰旧|替换旧)[:：]?\s*/i, '');
-  return afterMarker
-    .split(/(?<!\d),(?!\d)|，|、|(?:\s+and\s+)|(?:\s+or\s+)|或|和/)
-    .map((item) => normalizeArbitraryTerm(item))
-    .filter((item): item is string => Boolean(item));
-}
-
-function normalizeMoneyTerm(value: string) {
-  return value.replace(/\s+/g, ' ').replace(/^\$\s*/, '').replace(/\s*USD$/i, '').trim();
-}
-
-function normalizeArbitraryTerm(value: string) {
-  const term = value
-    .replace(/\b(?:old|stale|constraints?|terms?|requested|remove|removed|show|appear)\b/gi, ' ')
-    .replace(/[.。]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (term.length < 3 || term.length > 80) return undefined;
-  if (/^(?:and|or|或|和|与|old|stale)$/i.test(term)) return undefined;
-  return term;
-}
-
-function genericConstraintsFromPrompt(text: string) {
-  const clauses = text
-    .split(/\n|；|;/)
-    .flatMap((line) => splitConstraintClauseLine(line))
-    .map(parseGenericConstraintClause)
-    .filter((item): item is { label: string; value: string } => Boolean(item));
-  return dedupeGenericConstraints(clauses).slice(0, 16);
-}
-
-function splitConstraintClauseLine(line: string) {
-  return line
-    .split(/(?<!\d)[.。]\s+(?=[\p{Script=Han}A-Z])/u)
-    .flatMap((part) => {
-      const normalized = part
-        .replace(/^.*?(?:hard requirements?|requirements?|constraints?|effective constraints?|new constraints?|v\d+|新约束|硬性要求|有效约束|要求)[:：]?\s*/i, '')
-        .replace(/^v\d+\s*[:：]\s*/i, '')
-        .trim();
-      if (!normalized || normalized === part.trim() && !/[:：=]|改为|should be|must be|\b[A-Za-z][\w -]{1,32}\s+\S+/i.test(part)) return [];
-      return normalized.split(/(?<!\d),(?!\d)|，|、/);
-    })
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parseGenericConstraintClause(clause: string) {
-  const cleaned = clause
-    .replace(/^[\-*]\s*/, '')
-    .replace(/\b(?:must retain|retain|keep|set|replace|change|保留|设置|替换)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!cleaned || /\.md\b/i.test(cleaned) || /\b(?:write|rewrite|save|update|modify|artifact|file|workspace)\b/i.test(cleaned)) return undefined;
-  if (/^(?:include\s+)?(?:sections?|headings?)\b/i.test(cleaned) || /^(?:包含|包括)?(?:章节|小节)\b/i.test(cleaned)) return undefined;
-  if (/^(?:scope|acceptance criteria|risks?|methods?|limitations?|background|summary|timeline|budget|范围|验收标准|风险|方法|局限|摘要)$/i.test(cleaned)) return undefined;
-  if (/\bFTE\b/i.test(cleaned)) return undefined;
-  const transition = cleaned.match(/^([\p{Script=Han}A-Za-z][\p{Script=Han}A-Za-z0-9 _/-]{1,44}?)\s*从\s*.+?\s*改为\s*(.+)$/u);
-  if (transition) return normalizeGenericConstraintItem(transition[1] ?? '', transition[2] ?? '');
-  const keyValue = cleaned.match(/^([\p{Script=Han}A-Za-z][\p{Script=Han}A-Za-z0-9 _/-]{1,44}?)(?:[:：=]| should be | must be | is | 为 )\s*(.+)$/iu);
-  if (keyValue) return normalizeGenericConstraintItem(keyValue[1] ?? '', keyValue[2] ?? '');
-  const wordTokens = cleaned.split(/\s+/);
-  if (wordTokens.length >= 2 && /^(?:runtime|platform|owner|metrics?|privacy|language|dataset|cohort|license|status)$/i.test(wordTokens[0] ?? '')) {
-    return normalizeGenericConstraintItem(wordTokens[0] ?? '', wordTokens.slice(1).join(' '));
-  }
-  if (wordTokens.length >= 3 && !/^\d/.test(wordTokens[1] ?? '') && /^[-+]?[\d$]|^[A-Z0-9]{2,}\b|^(?:synthetic|public|private|none|no|yes|qa|owner|lead)/i.test(wordTokens[2] ?? '')) {
-    const label = wordTokens.slice(0, 2).join(' ');
-    const value = wordTokens.slice(2).join(' ');
-    return normalizeGenericConstraintItem(label, value);
-  }
-  const compact = cleaned.match(/^([\p{Script=Han}A-Za-z][\p{Script=Han}A-Za-z0-9 _/-]{1,32}?)\s+(.{2,80})$/u);
-  if (!compact) return undefined;
-  return normalizeGenericConstraintItem(compact[1] ?? '', compact[2] ?? '');
-}
-
-function normalizeGenericConstraintItem(label: string, value: string) {
-  const normalizedLabel = titleCase(label.trim().replace(/\s+/g, ' '));
-  const normalizedValue = value.trim().replace(/[.。]+$/g, '').replace(/\s+/g, ' ');
-  if (normalizedLabel.length < 2 || normalizedValue.length < 2 || normalizedValue.length > 140) return undefined;
-  if (/^(?:selected artifact|artifact|file|workspace|main answer|old constraints?)$/i.test(normalizedLabel)) return undefined;
-  return { label: normalizedLabel, value: normalizedValue };
-}
-
-function dedupeGenericConstraints(items: Array<{ label: string; value: string }>) {
-  const map = new Map<string, { label: string; value: string }>();
-  for (const item of items) map.set(item.label.toLowerCase(), item);
-  return [...map.values()];
-}
-
-function requestedSectionsFromPrompt(prompt: string) {
-  const match = prompt.match(/(?:include|with|sections?|headings?|包含|包括|章节|小节)[^。\n:：]*[:：]?\s*([A-Za-z0-9 _/\-，、,]+?)(?:[.。]|\n|$)/i);
-  if (!match) return [];
-  return uniqueStrings((match[1] ?? '')
-    .split(/(?<!\d),(?!\d)|，|、|\/|\band\b/i)
-    .map((item) => titleCase(item.trim().replace(/\s+/g, ' ')))
-    .filter((item) => item.length >= 3 && item.length <= 48 && !/artifact|file|workspace|constraint/i.test(item)))
-    .slice(0, 8);
 }
 
 function rewriteMarkdownArtifact(
@@ -496,7 +293,7 @@ function prohibitedTermPattern(term: string) {
 }
 
 function budgetTargetRequested(rel: string, prompt: string) {
-  return /budget|预算|cost|spend|finance|funding/i.test(`${rel} ${prompt}`);
+  return markdownBudgetTargetPolicy(rel, prompt);
 }
 
 function upsertBudgetTable(markdown: string, constraints: RewriteConstraints) {

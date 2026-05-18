@@ -171,6 +171,7 @@ import {
   requestWithDiscoveredCapabilityProviders,
 } from './gateway/capability-provider-preflight.js';
 import { directContextFastPathPayload, requestWithDirectContextReadableArtifactData } from './gateway/direct-context-fast-path.js';
+import { tryRunArtifactMutationFastPath } from './gateway/artifact-mutation-fast-path.js';
 import { requestAgentServerGeneration } from './gateway/agentserver-generation-dispatch.js';
 import { requestContextRefs } from './gateway/request-context-refs.js';
 
@@ -181,6 +182,7 @@ export const STAGE_CONVERSATION_POLICY = 'conversation-policy';
 export const STAGE_REQUEST_ENRICHMENT = 'request-enrichment';
 export const STAGE_CAPABILITY_PROVIDER_PREFLIGHT = 'capability-provider-preflight';
 export const STAGE_DIRECT_CONTEXT_FAST_PATH = 'direct-context-fast-path';
+export const STAGE_ARTIFACT_MUTATION_FAST_PATH = 'artifact-mutation-fast-path';
 export const STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME = 'playwright-edge-browser-runtime';
 export const STAGE_RUNTIME_EXECUTION_CONSTRAINTS = 'runtime-execution-constraints';
 export const STAGE_VISION_SENSE_RUNTIME = 'vision-sense-runtime';
@@ -194,6 +196,7 @@ export type GatewayPipelineStageName =
   | typeof STAGE_REQUEST_ENRICHMENT
   | typeof STAGE_CAPABILITY_PROVIDER_PREFLIGHT
   | typeof STAGE_DIRECT_CONTEXT_FAST_PATH
+  | typeof STAGE_ARTIFACT_MUTATION_FAST_PATH
   | typeof STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME
   | typeof STAGE_RUNTIME_EXECUTION_CONSTRAINTS
   | typeof STAGE_VISION_SENSE_RUNTIME
@@ -225,6 +228,7 @@ export const GATEWAY_PIPELINE_STAGE_ORDER: GatewayPipelineStageName[] = [
   STAGE_CAPABILITY_PROVIDER_PREFLIGHT,
   STAGE_PLAYWRIGHT_EDGE_BROWSER_RUNTIME,
   STAGE_DIRECT_CONTEXT_FAST_PATH,
+  STAGE_ARTIFACT_MUTATION_FAST_PATH,
   STAGE_RUNTIME_EXECUTION_CONSTRAINTS,
   STAGE_VISION_SENSE_RUNTIME,
   STAGE_LOCAL_DATA_SENSITIVITY_RUNTIME,
@@ -288,6 +292,13 @@ export const GATEWAY_PIPELINE_STAGES: GatewayPipelineStage[] = [
         artifactCount: payload.artifacts.length,
       }));
       return { kind: 'short-circuit', payload, request };
+    },
+  },
+  {
+    name: STAGE_ARTIFACT_MUTATION_FAST_PATH,
+    async execute(context) {
+      const payload = await tryRunArtifactMutationFastPath(context.request);
+      return payload ? { kind: 'short-circuit', payload } : { kind: 'continue' };
     },
   },
   {

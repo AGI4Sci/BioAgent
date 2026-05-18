@@ -283,6 +283,20 @@ function gatewayRequest(
           allowDirectContext: decision.allowDirectContext,
           blockReason: decision.blockReason,
         },
+        harnessContract: {
+          directContextDecision: {
+            schemaVersion: decision.schemaVersion,
+            decisionRef: decision.decisionRef,
+            decisionOwner: decision.decisionOwner,
+            intent: decision.intent === 'run-status' ? 'run-diagnostic' : decision.intent === 'tool-status' ? 'unknown' : 'fresh-execution',
+            requiredContext: decision.requiredTypedContext,
+            requiredTypedContext: decision.requiredTypedContext,
+            usedRefs: decision.usedRefs,
+            sufficiency: decision.sufficiency,
+            allowDirectContext: decision.allowDirectContext,
+            blockReason: decision.blockReason,
+          },
+        },
         executionModePlan: { executionMode: decision.route === 'direct-context-answer' ? 'direct-context-answer' : 'agentserver' },
         responsePlan: { initialResponseMode: decision.route === 'direct-context-answer' ? 'direct-context-answer' : 'streaming' },
       },
@@ -472,8 +486,8 @@ async function fetchRun(baseUrl: string, body: JsonRecord): Promise<MockRunFetch
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`AgentServer mock run failed: ${response.status}`);
   const text = await response.text();
+  if (!response.ok) throw new Error(`AgentServer mock run failed: ${response.status}: ${text}`);
   const envelopes = text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as JsonRecord);
   return {
     envelopes,

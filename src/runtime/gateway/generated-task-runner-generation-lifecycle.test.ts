@@ -7,6 +7,7 @@ import test from 'node:test';
 import type { AgentServerGenerationResponse, GatewayRequest, SkillAvailability, ToolPayload, WorkspaceRuntimeEvent } from '../runtime-types.js';
 import {
   completeAgentServerGenerationFailureLifecycle,
+  literatureDirectPayloadRecoveryReason,
   resolveGeneratedTaskGenerationRetryLifecycle,
   type GeneratedTaskGenerationLifecycleDeps,
 } from './generated-task-runner-generation-lifecycle.js';
@@ -222,7 +223,7 @@ test('generation lifecycle retries generic payload preflight violations before e
   assert.equal(events.some((event) => /complete ToolPayload envelope/.test(event.detail ?? '')), true);
 });
 
-test('generation lifecycle converts repeated task-interface failures into deterministic contract payload adapter', async () => {
+test('generation lifecycle converts repeated literature task-interface failures into provider-backed metadata adapter', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'sciforge-interface-contract-adapter-'));
   const events: WorkspaceRuntimeEvent[] = [];
   const strictRetryReasons: string[] = [];
@@ -266,15 +267,90 @@ test('generation lifecycle converts repeated task-interface failures into determ
 
   assert.equal(result.kind, 'task-files');
   assert.equal(result.generation.runId, 'retry-still-static-report');
-  assert.match(result.generation.response.patchSummary ?? '', /deterministic failed-with-reason ToolPayload adapter/i);
+  assert.match(result.generation.response.patchSummary ?? '', /provider-backed metadata report adapter/i);
   const source = result.generation.response.taskFiles[0]?.content ?? '';
   assert.match(source, /input_path/);
   assert.match(source, /output_path/);
-  assert.match(source, /failed-with-reason/);
-  assert.match(source, /generated-task-interface-contract/);
+  assert.match(source, /invoke_capability/);
+  assert.match(source, /paper-list/);
+  assert.match(source, /evidence-matrix/);
+  assert.match(source, /research-report/);
+  assert.match(source, /notebook-timeline/);
+  assert.match(source, /fullTextStatus/);
+  assert.match(source, /browser_fetch/);
+  assert.match(source, /_ready_capability_ids/);
+  assert.match(source, /topic_match/);
+  assert.match(source, /evidenceLocation/);
+  assert.match(source, /fetched_count/);
+  assert.match(source, /provider-grounded-metadata/);
   assert.doesNotMatch(source, /static paper/);
   assert.match(strictRetryReasons[0] ?? '', /write the SciForge outputPath argument/);
-  assert.equal(events.some((event) => /deterministic contract-failure adapter/i.test(event.message ?? '')), true);
+  assert.equal(events.some((event) => /deterministic literature metadata provider adapter/i.test(event.message ?? '')), true);
+});
+
+test('generation lifecycle keeps deterministic failed-with-reason adapter for non-literature interface failures', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'sciforge-interface-contract-generic-adapter-'));
+
+  const result = await resolveGeneratedTaskGenerationRetryLifecycle({
+    baseUrl: 'http://127.0.0.1:18080',
+    request: {
+      skillDomain: 'knowledge',
+      prompt: 'write a compact data normalization script',
+      artifacts: [],
+      expectedArtifactTypes: ['json'],
+      uiState: { sessionId: 'interface-contract-generic-adapter' },
+    },
+    skill,
+    skills: [skill],
+    workspace,
+    generation: {
+      ok: true,
+      runId: 'initial-static-json',
+      response: generation('normalization_task.py', [
+        'print({"message": "static"})',
+      ].join('\n')),
+    },
+    deps: depsWithRetry(async () => ({
+      ok: true,
+      runId: 'retry-still-static-json',
+      response: generation('normalization_task.py', [
+        'print({"message": "still static"})',
+      ].join('\n')),
+    })),
+  });
+
+  assert.equal(result.kind, 'task-files');
+  const source = result.generation.response.taskFiles[0]?.content ?? '';
+  assert.match(result.generation.response.patchSummary ?? '', /deterministic failed-with-reason ToolPayload adapter/i);
+  assert.match(source, /failed-with-reason/);
+  assert.match(source, /generated-task-interface-contract/);
+  assert.doesNotMatch(source, /paper-list/);
+});
+
+test('literature direct payload recovery detects partial placeholder survey outputs', () => {
+  const reason = literatureDirectPayloadRecoveryReason({
+    skillDomain: 'literature',
+    prompt: 'latest papers with paper-list, evidence-matrix, Chinese research-report, PDF availability',
+    artifacts: [],
+    expectedArtifactTypes: ['paper-list', 'evidence-matrix', 'research-report'],
+  }, {
+    message: 'Due to harness budget I can search for papers but cannot fetch full texts or generate a full report.',
+    confidence: 0.7,
+    claimType: 'survey',
+    evidenceLevel: 'partial',
+    reasoningTrace: 'Budget exhausted after one network call.',
+    claims: [],
+    uiManifest: [{ componentId: 'paper-card-list', artifactRef: 'artifact-paper-search-results' }],
+    executionUnits: [{ id: 'search-papers', status: 'done', tool: 'browser-search' }],
+    artifacts: [{
+      id: 'artifact-paper-search-results',
+      type: 'paper-list',
+      data: { papers: [{ title: '(placeholder) Diffusion Models', url: 'https://example.com/paper1' }] },
+    }],
+    displayIntent: { status: 'partial', taskOutcome: 'needs-work' },
+  });
+
+  assert.match(reason ?? '', /bounded provider recovery/i);
 });
 
 test('generation lifecycle retries Python syntax preflight violations before execution', async () => {

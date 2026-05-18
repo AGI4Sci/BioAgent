@@ -303,7 +303,11 @@ export function RunKeyInfo({
   const run = session.runs.find((item) => item.id === runId);
   const projection = conversationProjectionForSession(session, run);
   if (!projection && run?.status === 'failed') return null;
-  const objectRefs = run?.objectReferences ?? [];
+  const objectRefs = mergeObjectReferences(
+    run?.objectReferences ?? [],
+    projection ? objectReferencesForProjection(projection, session, runId) : [],
+    40,
+  ).filter(isUserFacingObjectReference);
   const artifactRefIds = new Set(objectRefs.filter((ref) => ref.kind === 'artifact').map((ref) => ref.ref.replace(/^artifact:/, '')));
   for (const ref of projection ? conversationProjectionArtifactRefs(projection) : []) {
     artifactRefIds.add(ref.replace(/^artifact::?/i, ''));
@@ -313,12 +317,17 @@ export function RunKeyInfo({
     .map((artifact) => objectReferenceForArtifactSummary(artifact, runId))
     .filter(isUserFacingObjectReference)
     .slice(0, 4);
-  const artifacts = session.artifacts.filter((artifact) => artifactReferences.some((reference) => reference.ref === `artifact:${artifact.id}`));
+  const deliverableReferences = mergeObjectReferences(
+    artifactReferences,
+    objectRefs.filter((reference) => reference.kind === 'artifact' || reference.kind === 'file' || reference.kind === 'folder'),
+    8,
+  ).slice(0, 4);
+  const artifacts = session.artifacts.filter((artifact) => deliverableReferences.some((reference) => reference.ref === `artifact:${artifact.id}`));
   const claims = claimsForRun(session, runId, artifacts.map((artifact) => artifact.id)).slice(0, 3);
-  if (!artifactReferences.length && !claims.length) return null;
-  const artifactLinks = artifactReferences.map((reference) => reference.ref).join('、');
+  if (!deliverableReferences.length && !claims.length) return null;
+  const artifactLinks = deliverableReferences.map((reference) => reference.ref).join('、');
   const keyProse = [
-    artifactReferences.length ? `关键结果：${artifactLinks}。` : '本轮没有生成新的可预览对象。',
+    deliverableReferences.length ? `关键结果：${artifactLinks}。` : '本轮没有生成新的可预览对象。',
     claims.length ? `已提取 ${claims.length} 条判断。` : '',
     '过程记录已折叠在下方。',
   ].filter(Boolean).join(' ');
@@ -326,10 +335,10 @@ export function RunKeyInfo({
     <div className="message-key-info" aria-label="本轮关键信息">
       <div className="message-key-info-head">
         <strong>本轮结果</strong>
-        <span>{artifactReferences.length} objects · {claims.length} claims</span>
+        <span>{deliverableReferences.length} objects · {claims.length} claims</span>
       </div>
       <div className="message-key-prose">
-        <MessageContent content={keyProse} references={artifactReferences} onObjectFocus={onObjectFocus ?? (() => undefined)} />
+        <MessageContent content={keyProse} references={deliverableReferences} onObjectFocus={onObjectFocus ?? (() => undefined)} />
       </div>
       {claims.length ? (
         <div className="message-key-list">

@@ -41,19 +41,24 @@ export function directContextFastPathPayload(request: GatewayRequest): ToolPaylo
   const transformMode = decision.transformMode && decision.transformMode !== 'none'
     ? decision.transformMode
     : answerOnlyTransformRequestedLegacyFallback(request.prompt);
-  const selectedQcMissingnessMessage = selectedQcMissingnessImpactAnswerMessage(request, payloadContext);
-  const selectedChartSufficiencyMessage = selectedQcMissingnessMessage
+  const selectedLiteratureReportBulletsMessage = selectedLiteratureReportBulletSummaryMessage(request, payloadContext);
+  const selectedQcMissingnessMessage = selectedLiteratureReportBulletsMessage
+    ? undefined
+    : selectedQcMissingnessImpactAnswerMessage(request, payloadContext);
+  const selectedChartSufficiencyMessage = selectedLiteratureReportBulletsMessage || selectedQcMissingnessMessage
     ? undefined
     : selectedChartSufficiencyAnswerMessage(request, payloadContext);
   const suppressExpectedArtifactGate = Boolean(
     transformMode
+    || selectedLiteratureReportBulletsMessage
     || selectedQcMissingnessMessage
     || selectedChartSufficiencyMessage
     || boundedArtifactFollowupRequested(request),
   );
   const missingExpectedArtifacts = suppressExpectedArtifactGate ? [] : missingExpectedArtifactTypes(request);
   if (missingExpectedArtifacts.length) return missingExpectedArtifactsPayload(request, payloadContext, missingExpectedArtifacts, gate);
-  const message = selectedQcMissingnessMessage
+  const message = selectedLiteratureReportBulletsMessage
+    ?? selectedQcMissingnessMessage
     ?? selectedChartSufficiencyMessage
     ?? directContextAnswerMessage(request, payloadContext, decision);
   const instance = directContextInstance(request, payloadContext);
@@ -115,19 +120,30 @@ export function directContextFastPathPayload(request: GatewayRequest): ToolPaylo
         context: payloadContext,
       },
     }],
-    objectReferences: payloadContext
-      .filter((item) => item.ref)
-      .map((item, index) => ({
-        id: `obj-direct-context-${index + 1}`,
-        kind: item.kind,
-        title: item.label,
-        ref: item.ref,
-        runId: instance.runId,
-        producerRunId: instance.runId,
-        status: 'available',
-        summary: item.summary,
-      })),
+    objectReferences: directContextObjectReferences(payloadContext, instance.runId),
   };
+}
+
+function directContextObjectReferences(
+  context: ReturnType<typeof buildDirectContextFastPathItems>,
+  runId: string,
+) {
+  return uniqueStrings(context
+    .map((item) => item.ref)
+    .filter((ref): ref is string => Boolean(ref)))
+    .map((ref, index) => {
+      const item = context.find((candidate) => candidate.ref === ref);
+      return {
+        id: `obj-direct-context-${index + 1}`,
+        kind: item?.kind ?? 'artifact',
+        title: item?.label ?? ref,
+        ref,
+        runId,
+        producerRunId: runId,
+        status: 'available',
+        summary: item?.summary,
+      };
+    });
 }
 
 function scopedDirectContextPayloadContext(
@@ -369,15 +385,28 @@ async function requestWithSessionArtifactsForBoundedFollowup(request: GatewayReq
     || request.artifacts.some((artifact) => isRecord(artifact) && /evidence[-\s_]?matrix/i.test(`${stringField(artifact.type) ?? ''} ${stringField(artifact.id) ?? ''}`))
   ) && (!promptFileTitle || hasPromptNamedArtifact)) return request;
   if (!boundedArtifactFollowupPrompt(request.prompt)) return request;
-  const workspace = request.workspacePath
-    ? resolve(request.workspacePath)
-    : process.env.SCIFORGE_WORKSPACE_PATH
-      ? resolve(process.env.SCIFORGE_WORKSPACE_PATH)
-      : undefined;
-  if (!workspace) return request;
   const sessionId = sessionIdFromUiState(request.uiState);
-  const artifacts = await readSessionArtifactsForDirectContext(workspace, sessionId);
-  return artifacts.length ? { ...request, artifacts: mergeArtifactRecords([...request.artifacts, ...artifacts]) } : request;
+  for (const workspace of directContextWorkspaceCandidates(request.workspacePath)) {
+    const artifacts = await readSessionArtifactsForDirectContext(workspace, sessionId);
+    if (artifacts.length) {
+      return { ...request, artifacts: mergeArtifactRecords([...request.artifacts, ...artifacts]) };
+    }
+  }
+  return request;
+}
+
+function directContextWorkspaceCandidates(requestWorkspacePath: string | undefined) {
+  const candidates: string[] = [];
+  const add = (value: string | undefined, base?: string) => {
+    if (!value) return;
+    candidates.push(resolve(base ?? process.cwd(), value));
+  };
+  add(requestWorkspacePath);
+  add(process.env.SCIFORGE_WORKSPACE_PATH);
+  if (requestWorkspacePath && process.env.SCIFORGE_WORKSPACE_PATH && !isAbsolute(process.env.SCIFORGE_WORKSPACE_PATH)) {
+    add(process.env.SCIFORGE_WORKSPACE_PATH, resolve(requestWorkspacePath));
+  }
+  return uniqueStrings(candidates);
 }
 
 function recordMatchesPromptMentionedFile(record: Record<string, unknown>, fileTitle: string) {
@@ -695,9 +724,26 @@ function directContextDecisionForRequest(request: GatewayRequest): DirectContext
   const conversationPolicy = isRecord(uiState.conversationPolicy) ? uiState.conversationPolicy : {};
   const harnessContract = isRecord(conversationPolicy.harnessContract) ? conversationPolicy.harnessContract : {};
   const structured = normalizeDirectContextDecision(harnessContract.directContextDecision);
-  const fallback = fallbackDirectContextDecisionForBoundedArtifactFollowup(request);
+  const fallback = legacyDirectContextPolicyWithoutCanonicalHarness(request)
+    ? undefined
+    : fallbackDirectContextDecisionForBoundedArtifactFollowup(request);
   if (fallback && (!structured || !directContextDecisionAllowsAnswer(structured))) return fallback;
   return structured ?? fallback;
+}
+
+function legacyDirectContextPolicyWithoutCanonicalHarness(request: GatewayRequest) {
+  const uiState = isRecord(request.uiState) ? request.uiState : {};
+  const conversationPolicy = isRecord(uiState.conversationPolicy) ? uiState.conversationPolicy : {};
+  const harnessContract = isRecord(conversationPolicy.harnessContract) ? conversationPolicy.harnessContract : {};
+  if (isRecord(harnessContract.directContextDecision)) return false;
+  if (
+    stringField(conversationPolicy.applicationStatus) !== 'applied'
+    || stringField(conversationPolicy.policySource) !== DIRECT_CONTEXT_FAST_PATH_POLICY.policyOwner
+  ) return false;
+  const executionModePlan = isRecord(conversationPolicy.executionModePlan) ? conversationPolicy.executionModePlan : {};
+  return isRecord(uiState.directContextDecision)
+    || isRecord(conversationPolicy.directContextDecision)
+    || isRecord(executionModePlan.directContextDecision);
 }
 
 function normalizeDirectContextDecision(value: unknown): DirectContextDecision | undefined {
@@ -839,6 +885,8 @@ function directContextAnswerMessage(
   decision: DirectContextDecision,
 ) {
   const prompt = request.prompt;
+  const selectedLiteratureReportBullets = selectedLiteratureReportBulletSummaryMessage(request, context);
+  if (selectedLiteratureReportBullets) return selectedLiteratureReportBullets;
   const selectedQcMissingness = selectedQcMissingnessImpactAnswerMessage(request, context);
   if (selectedQcMissingness) return selectedQcMissingness;
   const selectedChartSufficiency = selectedChartSufficiencyAnswerMessage(request, context);
@@ -1175,6 +1223,234 @@ function promptAsksFullTextEvidenceStatus(prompt: string) {
   return /(PDF|full[-\s]?text|fulltext|arXiv|全文|全文证据|PDF证据|全文调研|论文全文|原文|读取|阅读|已读|读完|downloaded?|retrieved?|citation verification|引用验证|引文验证|文献验证|证据位置|页码|段落)/i.test(prompt);
 }
 
+interface LiteratureReportRow {
+  title: string;
+  year?: string;
+  url?: string;
+  fullTextStatus?: string;
+  summary?: string;
+  limitations?: string;
+}
+
+function selectedLiteratureReportBulletSummaryMessage(
+  request: GatewayRequest,
+  context: ReturnType<typeof buildDirectContextFastPathItems>,
+) {
+  const prompt = request.prompt;
+  if (!/(selected|reference|report|artifact|引用|选中|报告|产物|刚刚)/i.test(prompt)) return undefined;
+  if (!/(flow\s*matching|perturbation|single[-\s]?cell|pdf|full[-\s]?text|全文|文献|论文)/i.test(prompt)) return undefined;
+  if (!/(bullet|bullets?|points?|summari[sz]e|conclusions?|priorit|read first|highest|reason|evidence|limitation|三条|3\s*条|总结|结论|要点|指出|优先|先读|理由|原因|证据|局限)/i.test(prompt)) return undefined;
+  const sourceText = selectedReportSourceText(request, context);
+  if (!sourceText || !/(候选论文|fullTextStatus|PDF\/full-text|arXiv|perturbation|flow matching|single-cell)/i.test(sourceText)) {
+    return undefined;
+  }
+  const rows = literatureReportRows(sourceText);
+  if (!rows.length) return undefined;
+  const picks = pickLiteratureReportSummaryRows(rows);
+  if (!picks.length) return undefined;
+  const wantsPriority = /(priorit|read first|highest|先读|优先|最值得|推荐)/i.test(prompt);
+  return [
+    '基于当前 report artifact 直接回答，不启动新的 workspace task，也不重新检索。',
+    '',
+    ...picks.map((pick, index) => [
+      `- ${wantsPriority ? `优先阅读 ${index + 1}` : pick.theme}：${literatureRowConclusion(pick.row)}`,
+      `  理由：${literatureReadFirstReason(pick.row, pick.theme)}`,
+      `  证据位置：选中 report 的候选论文表；title="${pick.row.title}"${pick.row.url ? `；URL=${pick.row.url}` : ''}`,
+      `  PDF/full-text 状态：${literatureFullTextStatus(pick.row)}`,
+      `  局限性：${literatureLimitation(pick.row)}`,
+    ].join('\n')),
+  ].join('\n');
+}
+
+function literatureReportRows(sourceText: string): LiteratureReportRow[] {
+  const regexRows = literatureReportRowsByRegex(sourceText);
+  const lines = sourceText.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('|'));
+  let headers: string[] = [];
+  const rows: LiteratureReportRow[] = [];
+  for (const line of lines) {
+    const cells = markdownTableCells(line);
+    if (cells.length < 4) continue;
+    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+    if (cells.some((cell) => /^title$/i.test(cell)) && cells.some((cell) => /fullTextStatus/i.test(cell))) {
+      headers = cells.map((cell) => cell.trim());
+      continue;
+    }
+    if (!headers.length) continue;
+    const record = new Map<string, string>();
+    headers.forEach((header, index) => record.set(header.toLowerCase(), cells[index] ?? ''));
+    const title = record.get('title')?.trim();
+    if (!title || /^title$/i.test(title)) continue;
+    rows.push({
+      title,
+      year: record.get('year'),
+      url: record.get('url'),
+      fullTextStatus: record.get('fulltextstatus'),
+      summary: record.get('summary'),
+      limitations: record.get('limitations'),
+    });
+  }
+  return uniqueLiteratureRows([
+    ...regexRows,
+    ...rows,
+    ...literatureReportRowsFromPipeCells(sourceText),
+    ...literatureRowsFromEvidenceMatrixSummary(sourceText),
+  ]).slice(0, 12);
+}
+
+function literatureReportRowsByRegex(sourceText: string): LiteratureReportRow[] {
+  const rows: LiteratureReportRow[] = [];
+  const rowPattern = /\|\s*([^|\n]+?)\s*\|\s*(\d{4}[^|\n]*?)\s*\|\s*([^|\n]*?)\s*\|\s*(https?:\/\/[^|\s]+)\s*\|\s*([^|\n]*PDF\/full-text[^|\n]*)\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?=\|\s*(?:\||[A-Z0-9#]|$))/gi;
+  for (const match of sourceText.matchAll(rowPattern)) {
+    const title = match[1]?.trim();
+    if (!title || /^title$/i.test(title) || /^[-:]+$/.test(title)) continue;
+    rows.push({
+      title,
+      year: match[2]?.trim(),
+      url: match[4]?.trim(),
+      fullTextStatus: match[5]?.trim(),
+      summary: match[6]?.trim(),
+      limitations: match[7]?.trim(),
+    });
+  }
+  return rows;
+}
+
+function markdownTableCells(line: string) {
+  return line
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function literatureReportRowsFromPipeCells(sourceText: string): LiteratureReportRow[] {
+  const cells = sourceText.split('|').map((cell) => cell.trim());
+  const headerIndex = cells.findIndex((cell, index) => /^title$/i.test(cell)
+    && /^year$/i.test(cells[index + 1] ?? '')
+    && /^venue$/i.test(cells[index + 2] ?? '')
+    && /^url$/i.test(cells[index + 3] ?? '')
+    && /^fullTextStatus$/i.test(cells[index + 4] ?? ''));
+  if (headerIndex < 0) return [];
+  const headers = cells.slice(headerIndex, headerIndex + 7).map((cell) => cell.toLowerCase());
+  const rows: LiteratureReportRow[] = [];
+  for (let index = headerIndex + headers.length; index + headers.length <= cells.length; index += headers.length) {
+    const rowCells = cells.slice(index, index + headers.length);
+    if (rowCells.every((cell) => /^:?-{3,}:?$/.test(cell) || cell === '')) continue;
+    const record = new Map<string, string>();
+    headers.forEach((header, cellIndex) => record.set(header, rowCells[cellIndex] ?? ''));
+    const title = record.get('title')?.trim();
+    if (!title || /^title$/i.test(title) || /^:?-{3,}:?$/.test(title)) continue;
+    rows.push({
+      title,
+      year: record.get('year'),
+      url: record.get('url'),
+      fullTextStatus: record.get('fulltextstatus'),
+      summary: record.get('summary'),
+      limitations: record.get('limitations'),
+    });
+  }
+  return rows;
+}
+
+function literatureRowsFromEvidenceMatrixSummary(sourceText: string): LiteratureReportRow[] {
+  const rows: LiteratureReportRow[] = [];
+  const rowPattern = /Row\s+\d+:\s*([^;\n]+);\s*result:\s*([\s\S]*?)(?=\s+Row\s+\d+:|\n\s*\[|$)/gi;
+  for (const match of sourceText.matchAll(rowPattern)) {
+    const title = match[1]?.trim();
+    const body = match[2]?.replace(/\s+/g, ' ').trim() ?? '';
+    if (!title || !body) continue;
+    const url = body.match(/https:\/\/arxiv\.org\/abs\/[^\s|]+/i)?.[0];
+    const pdf = body.match(/https:\/\/arxiv\.org\/pdf\/[^\s|]+/i)?.[0];
+    const year = body.match(/published:([^|]+)/i)?.[1]?.trim();
+    const summary = body.split(/\|\s*/).find((part) => /single-cell|perturb|flow matching|gene regulation|virtual cell|count data/i.test(part)) ?? body;
+    rows.push({
+      title,
+      year,
+      url,
+      fullTextStatus: pdf ? `PDF/full-text candidate URL inferred from evidence matrix: ${pdf}` : undefined,
+      summary,
+      limitations: 'Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims.',
+    });
+  }
+  return rows;
+}
+
+function uniqueLiteratureRows(rows: LiteratureReportRow[]) {
+  const out: LiteratureReportRow[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = row.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+function pickLiteratureReportSummaryRows(rows: LiteratureReportRow[]) {
+  const used = new Set<LiteratureReportRow>();
+  const pick = (theme: string, pattern: RegExp) => {
+    const row = rows.find((candidate) => !used.has(candidate) && pattern.test(`${candidate.title}\n${candidate.summary ?? ''}`));
+    if (!row) return undefined;
+    used.add(row);
+    return { theme, row };
+  };
+  return [
+    pick('flow matching / 纵向动态建模', /FLUX|MIOFlow|Flow Matching for Count Data|probability flow matching|flow matching/i),
+    pick('perturbation prediction / 虚拟扰动预测', /PRiMeFlow|SCALE|SAVE|perturbation|virtual cell|multi-condition/i),
+    pick('single-cell count / gene-regulation 方法基础', /Count Data|probability flow matching|gene regulation|single-cell RNA|scRNAseq/i),
+  ].filter((item): item is { theme: string; row: LiteratureReportRow } => Boolean(item))
+    .concat(rows
+      .filter((row) => !used.has(row))
+      .slice(0, 3)
+      .map((row) => ({ theme: '候选论文', row })))
+    .slice(0, 3);
+}
+
+function literatureRowConclusion(row: LiteratureReportRow) {
+  const summary = firstUsefulSentence(row.summary)
+    ?? '该条目是当前报告中与 flow matching / perturbation prediction 相关的候选论文。';
+  return `${row.title}${row.year ? `（${row.year}` : ''}${row.year ? '）' : ''}；${summary}`;
+}
+
+function firstUsefulSentence(value: string | undefined) {
+  if (!value) return undefined;
+  const cleaned = value
+    .replace(/\barXiv:[^/]+\/\s*/i, '')
+    .replace(/\bpublished:[^/]+\/\s*/i, '')
+    .replace(/\bauthors:[^/]+\/\s*/i, '')
+    .replace(/\bpdf:https?:\/\/\S+\s*\/\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned
+    .split(/(?<=[。.!?；;])\s+/)
+    .map((part) => part.trim())
+    .find((part) => part.length >= 40 && part.length <= 360)
+    ?? cleaned.slice(0, 300);
+}
+
+function literatureFullTextStatus(row: LiteratureReportRow) {
+  const status = row.fullTextStatus ?? '';
+  const pdfUrl = status.match(/https?:\/\/\S+/i)?.[0]?.replace(/[).,;，。]+$/, '');
+  if (/candidate link found|candidate URL inferred/i.test(status)) {
+    return pdfUrl ? `已发现候选 PDF/全文链接（${pdfUrl}），仍建议做逐篇全文核验。` : '已发现候选 PDF/全文链接，仍建议做逐篇全文核验。';
+  }
+  if (/likely reachable/i.test(status)) return 'provider URL 显示 PDF/全文大概率可达，但本轮 bounded run 未下载或逐段核验。';
+  if (/not confirmed|unavailable|failed|no PDF/i.test(status)) return '本轮未确认 PDF/全文可用性；需后续 PDF 提取或网页抓取验证。';
+  return status || '当前 report 未写明 PDF/full-text 状态。';
+}
+
+function literatureReadFirstReason(row: LiteratureReportRow, theme: string) {
+  const sentence = firstUsefulSentence(row.summary);
+  if (sentence) return sentence;
+  return `${theme} 与当前问题的关键词匹配，且在选中 report 的候选论文表中保留了可追溯条目。`;
+}
+
+function literatureLimitation(row: LiteratureReportRow) {
+  return firstUsefulSentence(row.limitations)
+    ?? '选中 report 未给出该论文的逐段全文核验结果，强结论仍需 citation/full-text verification。';
+}
+
 function selectedReportTitle(request: GatewayRequest) {
   const promptTitle = promptMentionedFileTitle(request.prompt);
   if (promptTitle) return promptTitle;
@@ -1355,11 +1631,11 @@ function selectedChartSufficiencyAnswerMessage(
   const selectedRefs = selectedReferenceTokens(request);
   const selectedContext = selectedRefs.length
     ? context.filter((item) => directContextItemMatchesSelectedRef(item, selectedRefs))
-    : context.filter((item) => /(chart|plot|figure|image|png|jpeg|svg|图)/i.test(`${item.kind} ${item.label} ${item.ref ?? ''}`));
+    : context.filter(directContextItemLooksLikeChartByIdentity);
   const promptMentionsChart = /(chart|plot|figure|image|png|jpe?g|webp|svg|boxplot|violin|heatmap|图表|图片|图像)/i.test(prompt);
-  const selectedLooksLikeChart = selectedContext.some((item) => /(chart|plot|figure|image|png|jpe?g|webp|svg|boxplot|violin|heatmap|图表|图片|图像)/i.test(`${item.kind} ${item.label} ${item.ref ?? ''} ${item.summary}`));
+  const selectedLooksLikeChart = selectedContext.some(directContextItemLooksLikeChartByIdentity);
   if (!promptMentionsChart && !selectedLooksLikeChart) return undefined;
-  const chartContext = selectedContext.filter((item) => /(chart|plot|figure|image|png|jpeg|jpg|webp|svg|boxplot|violin|heatmap|图)/i.test(`${item.kind} ${item.label} ${item.ref ?? ''} ${item.summary}`));
+  const chartContext = selectedContext.filter(directContextItemLooksLikeChartByIdentity);
   const answerContext = chartContext.length ? chartContext : selectedContext;
   if (!answerContext.length) return undefined;
   const refLine = directContextFastPathSupportingRefs(answerContext).slice(0, 3).join(', ') || answerContext[0]?.label || 'selected chart';
@@ -1391,6 +1667,13 @@ function selectedChartSufficiencyAnswerMessage(
     ] : []),
     'What the selected chart can support at most: a visual hypothesis that distributions may differ; it is not a reproducible statistical or confounding-control result on its own.',
   ].join('\n');
+}
+
+function directContextItemLooksLikeChartByIdentity(
+  item: ReturnType<typeof buildDirectContextFastPathItems>[number],
+) {
+  return /(chart|plot|figure|image|png|jpe?g|webp|svg|boxplot|violin|heatmap|图表|图片|图像)/i
+    .test(`${item.kind} ${item.label} ${item.ref ?? ''}`);
 }
 
 interface SelectedReportPassFailRow {
@@ -2588,7 +2871,7 @@ function boundedArtifactFollowupPrompt(text: string) {
   const refersToSelectedOrCurrent = /(current|visible|selected|above|artifact|matrix|report|this report|this artifact|reproduction|当前|选中|证据矩阵|报告|产物|这份|这个|该报告|本报告|原报告)/i.test(text);
   const refersToBroadHistory = /(previous|prior|last|existing|上一轮|之前|已有)/i.test(text);
   const forbidsFreshWork = /(based only|only based|use only|only use|using only|do not perform a new search|do not rerun|no new search|without starting|不要重新|不重新|只基于|仅基于|只用|仅用)/i.test(text);
-  const asksReadOnlyQuestion = /(what|which|whether|can|does|how|should|would|recommend|tell me|list|audit|check|pass|fail|threshold|support|prove|rerun|command|script|counterfactual|是否|哪些|什么|有没有|能否|如何|怎么|怎样|应该|建议|请列出|回答|审计|核对|检查|验收|门槛|阈值|支持|证明|复跑|命令|脚本|反事实)/i.test(text);
+  const asksReadOnlyQuestion = /(what|which|whether|can|does|how|should|would|recommend|tell me|list|audit|check|pass|fail|threshold|support|prove|rerun|command|script|counterfactual|summari[sz]e|conclusions?|bullet|points?|是否|哪些|什么|有没有|能否|如何|怎么|怎样|应该|建议|请列出|回答|审计|核对|检查|验收|门槛|阈值|支持|证明|复跑|命令|脚本|反事实|总结|结论|要点|指出|列出)/i.test(text);
   return (refersToSelectedOrCurrent && (forbidsFreshWork || asksReadOnlyQuestion))
     || (refersToBroadHistory && forbidsFreshWork);
 }

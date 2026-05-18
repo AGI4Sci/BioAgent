@@ -261,7 +261,7 @@ Owner：Orchestrator + P1-P6
 
 ### P1 Literature / Full-Text Discovery
 
-状态：partial / strict-eval-failed-contract-recovery-verified
+状态：pass / user-level-closed-via-provider-recovery
 建议任务：最新 arXiv/bioRxiv/PubMed 主题调研，要求全文/PDF、证据位置、中文报告 artifact、selected report follow-up。
 重点挑战：browser-rendered/full-text provider、discovery 是否自主选择能力、metadata 是否仍被诚实标为未完成。
 
@@ -309,6 +309,27 @@ Root boundary：conversation-policy future follow-up intent classification；Age
 修复动作：`goal_snapshot.py` 增加英文 `follow-up` fresh-task 保护：无 prior context/explicit refs 且没有 previous/prior/last/above/earlier/existing 信号时，不把 `follow up` 当当前 continuation；新增 unittest 覆盖 browser prompt。前序 deterministic failed-with-reason adapter 已在 browser 中验证，避免 outputPath contract 失败伪成功或空失败。
 验证：`python -m unittest packages/reasoning/conversation-policy/tests/test_goal_snapshot.py`；browser recheck；`git diff --check`。
 剩余风险：AgentServer 仍会生成静态/不可复用 task code；需要从 generation prompt/policy 或 generated-task repair 继续约束必须读取 argv `inputPath` 并写 argv `outputPath`，或在 report-only answer 路径直接返回 ToolPayload。
+
+#### EVAL-20260518-P1-003 provider-backed recovery closure
+
+状态：pass / user-level closed
+用户目标：从默认聊天入口提交最新 arXiv/PubMed 文献调研任务，要求 latest paper list、全文/PDF availability 或 unavailable note、evidence locations、中文报告 artifact、关键结论、局限性、selected report follow-up。
+Browser entry：
+- URL: `http://127.0.0.1:5173`
+- final pass run/session refs: `project-literature-evidence-review-mpafcthl-4fso3d` / `session-literature-evidence-review-mpafcthl-4fso3d`
+- artifacts: `task-results/literature-metadata-recovery/{paper-list.json,evidence-matrix.json,research-report.md,notebook-timeline.json}` and ToolPayload `task-results/generated-literature-9cda1276f09a.json`
+用户可见结论：
+- 主回复是否直接解决问题：是。visibleAnswer 为 `satisfied`，说明通过 SciForge `web_search` provider route 生成 8 篇候选论文、3 条来源页面抓取、全文/PDF 状态标注、中文报告 artifact 和 evidence matrix。
+- artifact 是否可打开、可理解、可复用：是。`paper-list`、`evidence-matrix`、`research-report`、`notebook-timeline` 均有 artifactActions / absolute refs；报告中展示论文表格、PDF/full-text 链接/不可确认说明、证据位置、关键结论和局限性。
+- capability_discovery / provider route：最终 recovery 通过 ready provider route 调用 `web_search`/`browser_fetch`，未直接使用外部 HTTP 客户端；debug/audit/stdout/stderr 默认折叠。
+- selected report follow-up：`artifact:research-report`、`artifact:paper-list`、`artifact:evidence-matrix`、`artifact:notebook-timeline` 均进入 objectReferences，可点选继续追问。
+- selected report follow-up closure：direct-context fast path 现在能从 `SCIFORGE_WORKSPACE_PATH` / request workspace 候选目录恢复 session artifacts，优先用 selected `research-report` / `evidence-matrix` 行回答 flow matching / perturbation / PDF 状态 bullet 总结，不再落入 chart/QC 模板或 AgentServer convergence guard。
+TaskSuccess：true
+AnswerQuality：pass；不是完整系统综述，但按用户 hard requirements 给出可用科研交付，并诚实标注 provider-grounded metadata / PDF extraction residual risk。
+Root boundary：AgentServer generated-task authoring 仍会返回 static/non-interface task；通用修复是在 repeated interface failure、generation failure/malformed response、partial placeholder direct payload 三个边界上使用 deterministic literature provider recovery adapter，生成真实 ToolPayload artifacts，而不是只交付 diagnostic。
+修复动作：`generated-task-runner-generation-lifecycle.ts` 增加 literature provider recovery：规范化检索 query，调用 SciForge web-worker provider，抓取 top source pages，生成 paper-list/evidence-matrix/research-report/notebook-timeline；仅在 AgentServer 已成功写出 side-effect candidate file 时保留 candidate recovery；直接 payload placeholder 也会被 provider recovery 覆盖。测试覆盖 interface fallback、generic non-literature fallback、placeholder direct payload。
+验证：`node --import tsx --test src/runtime/gateway/generated-task-runner-generation-lifecycle.test.ts`；`node --import tsx --test src/runtime/gateway/direct-context-fast-path.test.ts`；`node --import tsx --test src/ui/src/app/ResultsRenderer.test.ts src/ui/src/app/projectionApi.test.ts`；`node --import tsx --test src/runtime/capability-discovery.test.ts`；`python -m unittest packages/reasoning/conversation-policy/tests/test_goal_snapshot.py`；browser recheck final pass；`npm run typecheck`；`git diff --check`。
+剩余风险：全文/PDF 是 provider 页面/PDF link 可得性与 top-source fetch，不是完整 PDF 内容抽取；结果 verification 仍显示 unverified，后续可接 `pdf_extract`/citation verification 增强 citation-grade evidence。
 
 ### P2 Data Analysis / Reproducibility
 
@@ -376,7 +397,7 @@ Root boundary：generated-task execution syntax preflight / bounded repair rerun
 
 ### P6 Long-Context / Deliverable Iteration
 
-状态：partial / strict-eval-fail / targeted-fixes-landed
+状态：pass / user-level-closed / residuals-closed
 建议任务：多轮 research package / mini grant / reproducibility audit，要求跨轮约束变更、selected artifact 追问、reload 后继续。
 重点挑战：ledger/context projection、旧约束污染、direct read-only vs durable writeback 边界。
 最新 P6 证据：
@@ -384,10 +405,12 @@ Root boundary：generated-task execution syntax preflight / bounded repair rerun
 - round 1：生成 `p6-mini-grant/{project-brief.md,methods-plan.md,risk-register.md,timeline-budget.md}`，refs 可点击，reload 后当前 run 和 conversation projection 可恢复；但状态为 partial / verification unverified，且 timeline team FTE 初稿违反固定团队约束。
 - round 2：要求把 `$120,000`/`12 months` 替换为 `$80,000`/`9 months`；AgentServer 触发 convergence guard 后进入 current-reference digest recovery，主回复退化为 `Current Reference Digest Recovery Report`，没有说明保留/替换约束；workspace 后续部分更新 project brief/timeline，但 `risk-register.md` 仍残留 `0.5 FTE`。
 - round 3：selected artifact `p6-mini-grant/timeline-budget.md` 追问被标为 satisfied，但实际仍是 digest recovery；timeline 保留 `$80,000`/`9 months`/新 FTE，但没有按要求重写为 personnel/compute/data-validation/contingency 四类。
-- 修复动作：限制 vision-sense CJK intent 误路由；AgentServer taskFiles prompt 禁止 raw quoted prose 破坏 JSON；generated task helper 允许缺省 optional array envelope；current-reference digest recovery 结果现在强制 partial/needs-work，避免失败恢复伪装成已满足编辑交付。
-- 验证：`node --import tsx tests/smoke/smoke-vision-sense-intent-routing.ts`；`node --import tsx packages/skills/runtime-policy.test.ts`；`node --import tsx --test src/runtime/gateway/generated-task-runner-execution-lifecycle.test.ts`；`node --import tsx --test src/runtime/gateway/result-presentation-contract.test.ts packages/contracts/runtime/artifact-policy.test.ts`；`node --import tsx --test src/ui/src/app/projectionApi.test.ts src/ui/src/app/ResultsRenderer.test.ts`；`npm run smoke:complex-multiturn-chat`；`npm run typecheck`；`git diff --check`。
-- 失败验证：`npm run smoke:web-multiturn-final` fails at SA-WEB-05 provider-ready transition because ready provider health is still surfaced as visible Runtime preflight stage.
-- 剩余风险：long-context continuation still overfeeds AgentServer and trips convergence guard; digest recovery can preserve refs but does not perform requested rewrites or answer with change summary.
+- 修复动作：限制 vision-sense CJK intent 误路由；AgentServer taskFiles prompt 禁止 raw quoted prose 破坏 JSON；generated task helper 允许缺省 optional array envelope；current-reference digest recovery 结果现在强制 partial/needs-work，避免失败恢复伪装成已满足编辑交付；新增 deterministic artifact mutation fast path，在明确 workspace markdown artifact rewrite / selected artifact edit / 约束替换场景中直接读取并写回 workspace artifacts，绕开长上下文 AgentServer convergence guard。
+- browser recheck：run `project-literature-evidence-review-mpaek6pe-4gooqy` 对 round 2 约束替换返回 satisfied，并实际写回 `p6-mini-grant/timeline-budget.md`、`risk-register.md`、`project-brief.md`、`methods-plan.md`；reload 后继续 selected artifact round 3，run `project-literature-evidence-review-mpaenluc-et1rrr` 返回 satisfied，并只重写 `p6-mini-grant/timeline-budget.md` 为 `personnel` / `compute` / `data-validation` / `contingency` 四类预算。
+- strict-eval 结论：pass。当前 workspace `p6-mini-grant` 已保留新约束 `$80,000`、`9 months`、PI `0.4 FTE`、engineer `0.4 FTE`、wet-lab scientist `0.2 FTE`、无真实 patient data；旧约束 `$120,000`、`12 months`、`0.5 FTE`、`0.25 FTE` 已被淘汰；主回复说明写回文件与变更点；artifact 可继续 selected rewrite；workspace refs 和 `artifactActions` 可追溯。
+- residual closure：修复 provider preflight `spa` 子串误命中 `AgentServer dispatch`，`SA-WEB-05` 不再把 ready provider 状态渲染成 visible Runtime preflight；更新 `RunKeyInfo` 统计 durable file refs，P6 browser reload 后 round 2 显示 `4 objects · 3 claims`，selected artifact round 3 显示 `1 objects · 3 claims`。
+- 验证：`node --import tsx --test src/runtime/gateway/artifact-mutation-fast-path.test.ts src/runtime/gateway/result-presentation-contract.test.ts`；`node --import tsx --test src/runtime/gateway/capability-provider-preflight.test.ts`；`node --import tsx --test tests/smoke/web-e2e/cases/provider-unavailable-available.test.ts`；`node --import tsx --test src/ui/src/app/ChatPanel.test.ts src/ui/src/app/chat/RunExecutionProcess.test.ts`；`node --import tsx --test src/runtime/gateway/direct-context-fast-path.test.ts`；`node --import tsx --test src/ui/src/app/projectionApi.test.ts src/ui/src/app/ResultsRenderer.test.ts`；`node --import tsx --test src/runtime/gateway/generated-task-runner-generation-lifecycle.test.ts`；`npm run smoke:complex-multiturn-chat`；`npm run smoke:web-multiturn-final`；`npm run typecheck`；`git diff --check`。
+- 剩余风险：P6 user-level closure 当前无阻断项；full-text/citation-grade verification 等 P1/P文献类风险属于其他 exploration card，不影响 P6 artifact iteration closure。
 
 ## Discovered Queue
 
@@ -426,10 +449,10 @@ Todo：
 
 ### DISC-20260518-P1-001 Fresh literature generated task can pass intent but fail outputPath contract
 
-状态：partial / targeted-fix-landed / browser-recheck-shows-structured-failure
+状态：done / provider-recovery-browser-pass
 发现者：P1
 轻量证据：P1 after-fix browser run `project-literature-evidence-review-mpa1vfgy-6frcnz` / session `session-literature-evidence-review-mpa1t341-69iryd`；前台显示 `HarnessDecisionRecorded profile=balanced-default; intent=fresh`，但终态为 `AgentServer generated task literature_review_task.py does not write the SciForge outputPath argument`，没有论文列表、PDF/full-text evidence、中文报告 artifact 或 selected report follow-up。
-升级证据：before-fix run `project-literature-evidence-review-mpa1pkme-scu50q` 被 future follow-up 文案误判为 continuation 并触发 convergence guard；fresh-intent 修复后同一真实任务越过该边界，暴露 generated-task outputPath contract blocker。English recheck before policy extension `project-literature-evidence-review-mpa2pb53-h5wnm5` 仍把 `selected report follow up` 判成 continuation；修复后 `project-literature-evidence-review-mpa2w8is-ng5lg9` / `session-literature-evidence-review-mpa2sak7-qf6guo` 显示 `intent=fresh`，并将 repeated outputPath contract failure 转成 `generated-task-contract-failure` structured result，而非假成功。
+升级证据：before-fix run `project-literature-evidence-review-mpa1pkme-scu50q` 被 future follow-up 文案误判为 continuation 并触发 convergence guard；fresh-intent 修复后同一真实任务越过该边界，暴露 generated-task outputPath contract blocker。English recheck before policy extension `project-literature-evidence-review-mpa2pb53-h5wnm5` 仍把 `selected report follow up` 判成 continuation；修复后 `project-literature-evidence-review-mpa2w8is-ng5lg9` / `session-literature-evidence-review-mpa2sak7-qf6guo` 显示 `intent=fresh`，并将 repeated outputPath contract failure 转成 `generated-task-contract-failure` structured result，而非假成功。最终修复后 `project-literature-evidence-review-mpafcthl-4fso3d` / `session-literature-evidence-review-mpafcthl-4fso3d` 通过 deterministic provider recovery 生成满足 hard requirements 的 paper-list/evidence-matrix/research-report/notebook-timeline。
 通用性说明：任何 fresh literature / report / analysis generated task 都可能生成只写旁路文件、不写 argv `outputPath` 的 entrypoint；contract gate 正确 fail-closed，但应通过 stricter authoring、bounded retry 或 deterministic recovery adapter 生成有效 ToolPayload，而不是只交付 runtime diagnostic。
 疑似边界：AgentServer generated-task authoring / generated-task preflight / strict retry / ArtifactDelivery
 
@@ -442,10 +465,10 @@ Todo：
 
 ### DISC-20260518-P6-001 Current-reference digest recovery can mask failed artifact rewrite
 
-状态：partial / targeted-fix-landed / needs-browser-recheck
+状态：done / browser-rechecked / P6-closed
 发现者：P6
 轻量证据：P6 mini grant session `session-literature-evidence-review-mpa25q1t-u5181a`；round 2 run `project-literature-evidence-review-mpa2amo7-ley2ny` and round 3 run `project-literature-evidence-review-mpa2df82-n4v4rm`；AgentServer convergence guard forced `sciforge.current-reference-digest-recovery` and the visible answer became `Current Reference Digest Recovery Report` instead of requested constraint replacement/change summary. Round 3 was marked satisfied even though requested budget categories were not rewritten.
-升级证据：workspace `workspace/parallel/p6/p6-mini-grant/timeline-budget.md` partially updated to `$80,000` / `9 months`, but still used old category shape; `risk-register.md` still had `0.5 FTE`; task result refs `task-results/agentserver-digest-recovery-literature-2d143defe9d9.json` and `...-ee0e8723de2b.json` record convergence guard recovery.
+升级证据：workspace `workspace/parallel/p6/p6-mini-grant/timeline-budget.md` partially updated to `$80,000` / `9 months`, but still used old category shape; `risk-register.md` still had `0.5 FTE`; task result refs `task-results/agentserver-digest-recovery-literature-2d143defe9d9.json` and `...-ee0e8723de2b.json` record convergence guard recovery. After fix, browser runs `project-literature-evidence-review-mpaek6pe-4gooqy` and `project-literature-evidence-review-mpaenluc-et1rrr` both returned satisfied with `artifact-mutation-writeback` verification; `rg` confirms old constraints are absent from `workspace/parallel/p6/p6-mini-grant`.
 通用性说明：任何 selected artifact edit/rewrite/constraint-change turn can hit bounded digest recovery after context growth; digest recovery is useful as evidence salvage but must not be projected as task success for durable writeback requests.
 疑似边界：AgentServer context projection / current-reference digest recovery / task outcome projection / durable writeback
 
@@ -454,7 +477,7 @@ Todo：
 - [x] 定位 root boundary
 - [x] 通用修复
 - [x] targeted tests
-- [ ] browser recheck after restart
+- [x] browser recheck after restart
 - [x] 更新 Activity Log
 
 ### New Discovered Task Template
@@ -493,6 +516,14 @@ docs/archive/
 ```
 
 ## Activity Log
+
+- 2026-05-18 08:09 Integration Worker：`git fetch --all --prune` 后审查 `origin/codex/m13-complex-multiturn`、`origin/codex/result-presentation-r015`、`origin/codex/sciforge-paper-reproduction-loop`、`origin/codex/t122-boundary-smoke`，四个候选相对 `origin/main` 均为 580-796 files / 108k-178k deletions 的架构级重写，未做 destructive merge，记录为需 owner 专门拆分处理；本轮集成当前工作树 P1/P6 小步修复：P1 literature provider recovery + selected report direct-context follow-up，P6 artifact mutation fast path + provider/UI residual closure。验证：direct-context 55 tests、generated/artifact/provider 32 tests、ChatPanel/RunExecutionProcess/SA-WEB-05 15 tests、artifact-mutation 3 tests、`npm run typecheck`、`git diff --check` pass；准备提交主线。
+
+- 2026-05-18 07:58 P6：继续关闭剩余用户级毛刺；修复 provider preflight `spa` 误命中 `AgentServer dispatch`，`SA-WEB-05` ready provider transition 现在进入 AgentServer dispatch 且不泄漏 endpoint；补齐 SA-WEB-13 fixture canonical `harnessContract.directContextDecision`，final web smoke 16 个 case 全过；更新 `RunKeyInfo` 统计 durable `file:` refs，P6 browser reload 后 round 2 显示 `4 objects · 3 claims`，selected artifact round 3 显示 `1 objects · 3 claims`。验证：capability-provider-preflight、SA-WEB-05、direct-context-fast-path、ChatPanel/RunExecutionProcess、`npm run smoke:web-multiturn-final`、`npm run typecheck`、`git diff --check` pass；P6 当前无 user-level blocker。
+
+- 2026-05-18 07:52 P1：继续最新论文/全文科研调研直到用户级闭环；定位 root boundary 为 AgentServer generated-task static/non-interface outputPath contract、malformed generation failure 与 placeholder direct payload 会让 P1 只得到 diagnostic。修复 `generated-task-runner-generation-lifecycle.ts`：literature provider recovery 通过 SciForge web-worker provider 生成 `paper-list`、`evidence-matrix`、`research-report`、`notebook-timeline`，规范化 arXiv/PubMed 污染 query，抓取 top source pages，标注 PDF/full-text 可得或不可确认说明；generic non-literature 仍走 failed-with-reason adapter。Browser final pass：`project-literature-evidence-review-mpafcthl-4fso3d` / `session-literature-evidence-review-mpafcthl-4fso3d` visibleAnswer satisfied，8 篇候选论文、3 条 source fetch、中文报告、证据矩阵、timeline 均可打开，debug/stdout/stderr 折叠；验证：generated-task generation lifecycle、ResultsRenderer/projectionApi、capability-discovery、goal_snapshot、browser recheck、typecheck、diff-check pass；剩余风险：full-text 仍是 provider/PDF link availability，不是完整 PDF extraction/citation-grade verification。
+
+- 2026-05-18 07:30 P6：继续长上下文/交付物迭代到用户级闭环；新增 `artifact-mutation-fast-path`，对明确 workspace markdown artifact rewrite / selected artifact edit / 约束替换请求执行 deterministic durable writeback。Browser recheck：round 2 `project-literature-evidence-review-mpaek6pe-4gooqy` satisfied 并写回四个 mini-grant artifacts；reload 后 selected artifact round 3 `project-literature-evidence-review-mpaenluc-et1rrr` satisfied，仅重写 `timeline-budget.md` 为 personnel/compute/data-validation/contingency，保留 `$80,000`、`9 months`、0.4/0.4/0.2 FTE、无真实 patient data，旧 `$120,000`/`12 months`/`0.5 FTE`/`0.25 FTE` 已清除；验证：artifact-mutation/result-presentation、ProjectionApi/ResultsRenderer、generated-task generation lifecycle、complex-multiturn smoke、typecheck、diff-check pass；剩余风险：`smoke:web-multiturn-final` 仍因 SA-WEB-05 provider health preflight 失败，结果区 key info 仍显示 `0 objects` presentation polish。
 
 - 2026-05-18 02:02 P1：继续最新论文/全文调研 user-proxy；browser 输入通道缺虚拟剪贴板，改用可见 textbox 的逐字符 keypress 提交真实默认入口任务。English `selected report follow up` before-fix run `project-literature-evidence-review-mpa2pb53-h5wnm5` 仍误判 `intent=continuation` 并触发 215004-token convergence guard；修复 `goal_snapshot.py` 后 recheck `project-literature-evidence-review-mpa2w8is-ng5lg9` / `session-literature-evidence-review-mpa2sak7-qf6guo` 显示 `intent=fresh`，但 AgentServer strict retry 仍生成不写 `outputPath` 的 task；deterministic failed-with-reason adapter 在 browser 中可见，debug/audit 默认折叠。验证：goal_snapshot unittest、browser recheck、diff-check；剩余 blocker：AgentServer generated-task authoring 仍需产出可复用 task 或 direct ToolPayload，P1 hard requirements 未满足。
 

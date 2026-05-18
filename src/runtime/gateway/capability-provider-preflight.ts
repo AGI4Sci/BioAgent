@@ -245,7 +245,7 @@ function inferRequiredCapabilityIds(request: GatewayRequest): string[] {
 function browserProviderIntent(request: GatewayRequest): boolean {
   const prompt = stringField(request.prompt) ?? '';
   const selected = [...(request.selectedToolIds ?? []), ...toStringList(request.uiState?.selectedToolIds)].join(' ');
-  return /(?:browser|chromium|rendered|javascript|\bjs\b|dynamic page|single-page|spa|网页|浏览器|渲染|动态页面|打开网页|下载|pdf|full[-\s]?text|全文|阅读全文)/i.test(`${prompt} ${selected}`);
+  return /(?:browser|chromium|rendered|javascript|\bjs\b|dynamic page|single[-\s]?page(?:\s+app(?:lication)?)?|\bspa\b|网页|浏览器|渲染|动态页面|打开网页|下载|pdf|full[-\s]?text|全文|阅读全文)/i.test(`${prompt} ${selected}`);
 }
 
 function interactiveBrowserAutomationIntent(request: GatewayRequest): boolean {

@@ -190,6 +190,47 @@ test('chat run process and key info prefer projection over raw failed execution 
   assert.match(keyInfoHtml, /Projection Report/);
 });
 
+test('run key info counts durable file refs as user-visible objects', () => {
+  const html = renderToStaticMarkup(createElement(RunKeyInfo, {
+    runId: 'run-file-writeback',
+    session: {
+      schemaVersion: 2,
+      sessionId: 'session-file-writeback',
+      scenarioId: 'literature-evidence-review',
+      title: 'file writeback',
+      createdAt: '2026-05-13T00:00:00.000Z',
+      updatedAt: '2026-05-13T00:00:00.000Z',
+      messages: [],
+      runs: [{
+        id: 'run-file-writeback',
+        scenarioId: 'literature-evidence-review',
+        status: 'completed',
+        prompt: 'rewrite selected artifact',
+        response: 'wrote files',
+        createdAt: '2026-05-13T00:00:00.000Z',
+        objectReferences: [{
+          id: 'file-timeline-budget',
+          kind: 'file',
+          title: 'timeline-budget.md',
+          ref: 'file:p6-mini-grant/timeline-budget.md',
+          status: 'available',
+        }],
+      }],
+      uiManifest: [],
+      claims: [],
+      executionUnits: [],
+      artifacts: [],
+      notebook: [],
+      versions: [],
+      hiddenResultSlotIds: [],
+    } as SciForgeSession,
+    onObjectFocus: () => undefined,
+  }));
+
+  assert.match(html, /1 objects · 0 claims/);
+  assert.match(html, /file:p6-mini-grant\/timeline-budget\.md/);
+});
+
 test('chat verification badge is projection-only and ignores raw verification fallback', () => {
   const rawOnly = renderToStaticMarkup(createElement(RunVerificationTag, {
     runId: 'run-raw-verification',

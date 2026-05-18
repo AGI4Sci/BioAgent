@@ -2376,6 +2376,119 @@ test('provider status fast path yields for bounded repair prompt that asks for a
   assert.equal(directContextFastPathPayload(request), undefined);
 });
 
+test('referenced literature report follow-up summarizes flow matching conclusions from session artifact without AgentServer', async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'sciforge-direct-context-literature-root-'));
+  const workspaceRel = 'workspace/parallel/integration';
+  const workspace = join(projectRoot, workspaceRel);
+  const bundle = join(workspace, '.sciforge', 'sessions', '2026-05-17_literature_session-literature-report-followup');
+  const artifactDir = join(bundle, 'artifacts');
+  const taskResults = join(bundle, 'task-results', 'literature-metadata-recovery');
+  await mkdir(artifactDir, { recursive: true });
+  await mkdir(taskResults, { recursive: true });
+  const reportRel = join(taskResults, 'research-report.md');
+  const reportMarkdown = [
+    '# 中文文献调研报告（provider recovery）',
+    '',
+    '## 候选论文与全文/PDF状态',
+    '',
+    '| title | year | venue | url | fullTextStatus | summary | limitations |',
+    '|---|---|---|---|---|---|---|',
+    '| FLUX: Geometry-Aware Longitudinal Flow Matching with Mixture of Experts | 2026-05-09T03:36:00Z |  | https://arxiv.org/abs/2605.08648v1 | PDF/full-text candidate link found via browser_fetch: https://arxiv.org/pdf/2605.08648v1 | Many biological systems evolve through continuous local dynamics while switching between latent regimes; unpaired longitudinal snapshots need geometry-aware flow matching. | Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims. |',
+    '| PRiMeFlow: Capturing Complex Expression Heterogeneity in Perturbation Response Modelling | 2026-04-15T15:33:07Z |  | https://arxiv.org/abs/2604.13986v2 | PDF/full-text likely reachable from provider URL; not downloaded in this bounded run. | Predicting the effects of perturbations in-silico on cell state can identify drivers of cell behavior at scale; PRiMeFlow directly models genetic and small molecule perturbations in gene expression space. | Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims. |',
+    '| Flow Matching for Count Data | 2026-05-08T13:53:37Z |  | https://arxiv.org/abs/2605.07746v1 | PDF/full-text candidate link found via browser_fetch: https://arxiv.org/pdf/2605.07746v1 | High-dimensional count data arise in single-cell RNA sequencing and neural spike trains; flow matching for count data extends generative modeling to discrete expression observations. | Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims. |',
+  ].join('\n');
+  await writeFile(reportRel, reportMarkdown);
+  await writeFile(join(artifactDir, 'research-report.json'), JSON.stringify({
+    id: 'research-report',
+    type: 'research-report',
+    path: reportRel,
+    dataRef: reportRel,
+    data: { markdown: reportMarkdown },
+  }, null, 2));
+  const previousEnv = process.env.SCIFORGE_WORKSPACE_PATH;
+  process.env.SCIFORGE_WORKSPACE_PATH = workspaceRel;
+  try {
+    const request: GatewayRequest = {
+      skillDomain: 'literature',
+      workspacePath: projectRoot,
+      prompt: '请基于我刚刚引用的 report artifact，用中文用三条 bullet 总结最相关的 flow matching / perturbation prediction 结论，并指出 PDF/full-text 状态。',
+      artifacts: [],
+      references: [],
+      uiState: { sessionId: 'session-literature-report-followup' },
+    };
+
+    const enriched = await requestWithDirectContextReadableArtifactData(request);
+    const payload = directContextFastPathPayload(enriched);
+
+    assert.equal(enriched.artifacts[0]?.id, 'research-report');
+    assert.ok(payload);
+    assert.equal(payload.executionUnits[0]?.tool, 'sciforge.direct-context-fast-path');
+    assert.match(payload.message, /基于当前 report artifact 直接回答/);
+    assert.match(payload.message, /FLUX/);
+    assert.match(payload.message, /PRiMeFlow/);
+    assert.match(payload.message, /Flow Matching for Count Data/);
+    assert.match(payload.message, /PDF\/full-text 状态/);
+    assert.doesNotMatch(payload.message, /AgentServer|workspace task was started/i);
+  } finally {
+    if (previousEnv === undefined) delete process.env.SCIFORGE_WORKSPACE_PATH;
+    else process.env.SCIFORGE_WORKSPACE_PATH = previousEnv;
+  }
+});
+
+test('selected literature report read-first follow-up is answered from report rows, not chart sufficiency template', () => {
+  const reportMarkdown = [
+    '# 中文文献调研报告（provider recovery）',
+    '',
+    'The report mentions chart review as a future visualization task, but the selected artifact is a markdown research report.',
+    '',
+    '## 候选论文与全文/PDF状态',
+    '',
+    '| title | year | venue | url | fullTextStatus | summary | limitations |',
+    '|---|---|---|---|---|---|---|',
+    '| FLUX: Geometry-Aware Longitudinal Flow Matching with Mixture of Experts | 2026-05-09T03:36:00Z | arXiv | https://arxiv.org/abs/2605.08648v1 | PDF/full-text candidate link found via browser_fetch: https://arxiv.org/pdf/2605.08648v1 | Many biological systems evolve through continuous local dynamics while switching between latent regimes; unpaired longitudinal snapshots need geometry-aware flow matching. | Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims. |',
+    '| PRiMeFlow: Capturing Complex Expression Heterogeneity in Perturbation Response Modelling | 2026-04-15T15:33:07Z | arXiv | https://arxiv.org/abs/2604.13986v2 | PDF/full-text likely reachable from provider URL; not downloaded in this bounded run. | Predicting the effects of perturbations in-silico on cell state can identify drivers of cell behavior at scale; PRiMeFlow directly models genetic and small molecule perturbations in gene expression space. | Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims. |',
+    '| Flow Matching for Count Data | 2026-05-08T13:53:37Z | arXiv | https://arxiv.org/abs/2605.07746v1 | PDF/full-text candidate link found via browser_fetch: https://arxiv.org/pdf/2605.07746v1 | High-dimensional count data arise in single-cell RNA sequencing and neural spike trains; flow matching for count data extends generative modeling to discrete expression observations. | Provider-grounded metadata package; citation/full-text verification should be run before strong scientific claims. |',
+  ].join('\n');
+  const request: GatewayRequest = {
+    skillDomain: 'literature',
+    prompt: 'Use the selected research-report only; do not run a new search. Answer in Chinese: pick the 3 highest-priority papers to read first, with reason, evidence location, PDF/full-text status, and one limitation. Keep refs usable for another follow-up.',
+    agentServerBaseUrl: 'http://agentserver.example.test',
+    expectedArtifactTypes: ['paper-list', 'evidence-matrix', 'research-report'],
+    artifacts: [{
+      id: 'research-report',
+      type: 'research-report',
+      data: { markdown: reportMarkdown },
+    }],
+    references: [{
+      kind: 'artifact',
+      ref: 'artifact:research-report',
+      title: 'research-report',
+    }],
+    uiState: {
+      conversationPolicy: appliedDirectContextPolicy(directDecision('context-summary', { usedRefs: ['artifact:research-report'] })),
+      currentReferences: [{
+        kind: 'artifact',
+        ref: 'artifact:research-report',
+        title: 'research-report',
+      }],
+    },
+  };
+
+  const payload = directContextFastPathPayload(request);
+
+  assert.ok(payload);
+  assert.equal(payload.executionUnits[0]?.tool, 'sciforge.direct-context-fast-path');
+  assert.match(payload.message, /优先阅读 1/);
+  assert.match(payload.message, /FLUX/);
+  assert.match(payload.message, /PRiMeFlow/);
+  assert.match(payload.message, /Flow Matching for Count Data/);
+  assert.match(payload.message, /证据位置：选中 report 的候选论文表/);
+  assert.match(payload.message, /PDF\/full-text 状态/);
+  assert.match(payload.message, /局限性/);
+  assert.doesNotMatch(payload.message, /selected chart|single chart|A single chart|cannot by itself establish statistical significance/i);
+  assert.deepEqual(payload.objectReferences?.map((reference) => reference.ref), ['artifact:research-report']);
+});
+
 test('scoped no-rerun repair prompt still yields to backend when it asks to generate a minimal task', () => {
   const request: GatewayRequest = {
     skillDomain: 'literature',

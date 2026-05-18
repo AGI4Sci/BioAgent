@@ -301,6 +301,36 @@ test('capability provider preflight detects underscored selected tool names', ()
   assert.equal(result.ok, true);
 });
 
+test('capability provider preflight does not infer browser providers from AgentServer dispatch prose', () => {
+  const result = capabilityProviderPreflight({
+    skillDomain: 'literature',
+    prompt: 'provider status is ready; continue into AgentServer dispatch via web_search/web_fetch provider routes.',
+    selectedToolIds: ['web_fetch', 'web_search'],
+    artifacts: [],
+    uiState: {
+      capabilityProviderAvailability: [
+        {
+          id: 'sciforge.web-worker.web_fetch',
+          providerId: 'sciforge.web-worker.web_fetch',
+          capabilityId: 'web_fetch',
+          available: true,
+          status: 'available',
+        },
+        {
+          id: 'sciforge.web-worker.web_search',
+          providerId: 'sciforge.web-worker.web_search',
+          capabilityId: 'web_search',
+          available: true,
+          status: 'available',
+        },
+      ],
+    },
+  } as GatewayRequest);
+
+  assert.deepEqual(result.requiredCapabilityIds, ['web_fetch', 'web_search']);
+  assert.equal(result.ok, true);
+});
+
 test('capability provider preflight ignores capability ids mentioned only as prose', () => {
   const result = capabilityProviderPreflight({
     skillDomain: 'literature',
